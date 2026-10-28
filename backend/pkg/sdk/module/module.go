@@ -99,6 +99,10 @@ type HasCapabilities interface {
 	Capabilities() []capability.Capability
 }
 
+// HasProfileSections and HasUserPreferences (user_preferences.go) let a
+// module contribute sections to the user profile pages and declare
+// per-user preference fields; the registry collects both after Init.
+
 // HasDependencies lets a module declare other modules that must init
 // before it. The registry's topological sort consumes this declaration.
 type HasDependencies interface {
@@ -267,6 +271,8 @@ func (BaseModule) Collections() []CollectionSpec         { return nil }
 func (BaseModule) NavItems() []NavItemSpec               { return nil }
 func (BaseModule) Permissions() []iface.PermissionSpec   { return nil }
 func (BaseModule) Capabilities() []capability.Capability { return nil }
+func (BaseModule) ProfileSections() []ProfileSectionSpec { return nil }
+func (BaseModule) UserPreferenceFields() []ConfigField   { return nil }
 func (BaseModule) Dependencies() []string                { return nil }
 func (BaseModule) ProvidedServices() []ServiceKey        { return nil }
 func (BaseModule) RequiredServices() []ServiceKey        { return nil }

@@ -192,6 +192,8 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	// Capabilities() calls must happen after Init configures the module.
 	capReg := capability.NewRegistry()
 	deps.Services.Register(ServiceCapabilityRegistry, capReg)
+	prefReg := NewUserPreferenceRegistry()
+	deps.Services.Register(ServiceUserPreferenceRegistry, prefReg)
 
 	// Initialize ALL modules in registration order.
 	// Core modules: fatal on error. Non-core: attempt Init and track failures.
@@ -236,8 +238,41 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	// and Cedar policies use this catalog to validate that grants refer to
 	// a known capability and to surface the catalog in the admin UI.
 	r.registerCapabilities(capReg)
+	r.registerUserPreferences(prefReg)
 
 	return nil
+}
+
+// registerUserPreferences collects the optional per-user preference schemas
+// and profile sections modules declare. An invalid declaration is isolated
+// to its owner: logged, skipped, and nothing else is affected.
+func (r *ModuleRegistry) registerUserPreferences(reg *UserPreferenceRegistry) {
+	fields, sections := 0, 0
+	for _, m := range r.initialized {
+		if f := UserPreferenceFieldsOf(m); f != nil {
+			if err := reg.RegisterFields(m.Name(), f); err != nil {
+				r.logger.Warn("user preference schema rejected",
+					slog.String("module", m.Name()),
+					slog.String("error", err.Error()),
+				)
+			} else {
+				fields++
+			}
+		}
+		if s := ProfileSectionsOf(m); s != nil {
+			if err := reg.RegisterSections(m.Name(), s); err != nil {
+				r.logger.Warn("profile sections rejected",
+					slog.String("module", m.Name()),
+					slog.String("error", err.Error()),
+				)
+			} else {
+				sections += len(s)
+			}
+		}
+	}
+	r.logger.Info("Registered user preference catalog",
+		slog.Int("modules_with_preferences", fields),
+		slog.Int("profile_sections", sections))
 }
 
 // registerCapabilities collects Capabilities() from every initialized module
