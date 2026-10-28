@@ -30,6 +30,38 @@ func TestValidateOwnerSubject(t *testing.T) {
 	}
 }
 
+// TestSubjectRule_IndexableIsErasable pins R-F1: every non-user subject an
+// item can carry at ingest is accepted by DeleteBySubject, and nothing
+// DeleteBySubject accepts is refused at ingest. The erasure service sees the
+// same registered owners as ingest (the corpus owner "crm" plus "billing").
+func TestSubjectRule_IndexableIsErasable(t *testing.T) {
+	env := newErasureEnv(t, nil, nil)
+	registered := func(o string) bool { return o == "crm" || ingestOwners(o) }
+	svc := NewErasureService(env.flaky, env.fin, registered, nil, NewAuditRelay(), env.clk.Now,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	candidates := []string{
+		"crm:42", "billing:7", "crm_contact:1", "crm:0f8c-11", "crm:" + strings.Repeat("x", 252),
+		"crm:" + strings.Repeat("x", 253), "crm:a b", "Crm:1", "other:1", "contact-42", "crm:", ":1",
+		"crm:4\x00", "crm:\u00a0x", "user:u1", "user:", "user:a b",
+	}
+	indexable := 0
+	for _, s := range candidates {
+		ingestErr := validateItem(iface.RetrievalItem{Subjects: []string{s}}, "crm", ingestOwners)
+		if strings.HasPrefix(s, "user:") {
+			continue // user subjects are erased through the PII producer
+		}
+		eraseErr := svc.DeleteBySubject(context.Background(), "tA", s)
+		if (ingestErr == nil) != (eraseErr == nil) {
+			t.Fatalf("subject %q: ingest err %v, DeleteBySubject err %v", s, ingestErr, eraseErr)
+		}
+		if ingestErr == nil {
+			indexable++
+		}
+	}
+	assert.Equal(t, 4, indexable)
+	requireIs(t, svc.DeleteBySubject(context.Background(), "tA", "user:u1"), iface.ErrRetrievalInvalidRequest)
+}
+
 // flakyStore fails the first tenantFails EnsureTenant calls.
 type flakyStore struct {
 	*memStore

@@ -93,7 +93,7 @@ type RetrievalItem struct {
 	Text        string
 	Fields      map[string]any // keys must be declared filter fields
 	VisibleTo   []string       // "tenant:*", "role:<roleId>", "team:<teamId>", "user:<uuid>"
-	Subjects    []string       // "user:<uuid>" or "<owner>:<id>"
+	Subjects    []string       // "user:<uuid>" or "<owner>:<id>" with a registered corpus owner; ids without whitespace (else invalid_item)
 	ContentHash string         // over the source content; the module hashes the indexed text separately
 }
 

@@ -389,6 +389,26 @@ func TestWorker_InvalidItemParksForMaxBackoff(t *testing.T) {
 	}
 }
 
+// TestWorker_SubjectOwnerMustBeRegistered: a subject whose owner registers no
+// corpus could never be erased, so the item is refused (R-F1); once that
+// owner registers a corpus the same item indexes.
+func TestWorker_SubjectOwnerMustBeRegistered(t *testing.T) {
+	e := newTestWorker(t)
+	it := item(1)
+	it.Subjects = []string{"crm:1", "hr:7"}
+	e.source.put("t1", it)
+	e.enqueue(t, 1)
+	assert.Equal(t, 1, e.processNext(t, e.w).Rescheduled)
+	assert.Equal(t, codeInvalidItem, e.row().LastError)
+	assert.Equal(t, 0, e.eng.writes())
+	assert.Equal(t, false, strings.Contains(e.logs.String(), "hr:7"))
+
+	cat := e.deps.Catalog.(*fakeCatalog)
+	cat.specs = append(cat.specs, iface.RetrievalCorpusSpec{Name: "staff", Owner: "hr"})
+	e.clk.Advance(31 * time.Minute)
+	assert.Equal(t, 1, e.processNext(t, e.w).Indexed)
+}
+
 func TestWorker_FailureCodes(t *testing.T) {
 	cases := map[string]struct {
 		arm  func(e *workerEnv)

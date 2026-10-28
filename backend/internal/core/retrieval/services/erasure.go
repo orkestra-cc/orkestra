@@ -70,27 +70,57 @@ func ValidateOwnerSubject(subject string) (string, error) {
 	if owner == "user" {
 		return invalid("owner user is erased through compliance only")
 	}
-	for _, r := range id {
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
-			return invalid("id has whitespace or control characters")
-		}
+	if hasSpaceOrControl(id) {
+		return invalid("id has whitespace or control characters")
 	}
 	return owner, nil
+}
+
+// ValidateSubject is the one subject rule shared by indexing and erasure, so
+// every subject an item can carry is erasable. It accepts "user:<id>" (owner
+// "user") with a non-empty id free of whitespace and control characters, or
+// ValidateOwnerSubject's shape whose owner isOwner reports registered. The
+// whole subject is at most MaxRefBytes bytes. It returns the owner; errors
+// wrap iface.ErrRetrievalInvalidRequest and name no value.
+func ValidateSubject(subject string, isOwner func(owner string) bool) (string, error) {
+	if id, ok := strings.CutPrefix(subject, userSubjectPrefix); ok {
+		if len(subject) > MaxRefBytes || id == "" || hasSpaceOrControl(id) {
+			return "", fmt.Errorf(`%w: subject must be "user:<id>" with a non-empty id free of whitespace`, iface.ErrRetrievalInvalidRequest)
+		}
+		return "user", nil
+	}
+	owner, err := ValidateOwnerSubject(subject)
+	if err != nil {
+		return "", err
+	}
+	if isOwner == nil || !isOwner(owner) {
+		return "", fmt.Errorf("%w: subject owner is not a registered corpus owner", iface.ErrRetrievalInvalidRequest)
+	}
+	return owner, nil
+}
+
+func hasSpaceOrControl(s string) bool {
+	for _, r := range s {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteBySubject erases a non-user subject in one tenant: it records the
 // tombstone, then runs the first finalization pass inline. Only the tombstone
 // write can fail the call; a failed pass is logged and the sweep retries it.
+// The subject must pass ValidateSubject with an owner other than "user".
 func (e *ErasureService) DeleteBySubject(ctx context.Context, tenantID, subject string) error {
-	owner, err := ValidateOwnerSubject(subject)
-	if err != nil {
-		return err
+	if strings.HasPrefix(subject, userSubjectPrefix) {
+		return fmt.Errorf("%w: subject owner user is erased through compliance only", iface.ErrRetrievalInvalidRequest)
 	}
 	if tenantID == "" {
 		return fmt.Errorf("%w: tenant id is required", iface.ErrRetrievalInvalidRequest)
 	}
-	if e.isOwner == nil || !e.isOwner(owner) {
-		return fmt.Errorf("%w: subject owner is not a registered corpus owner", iface.ErrRetrievalInvalidRequest)
+	if _, err := ValidateSubject(subject, e.isOwner); err != nil {
+		return err
 	}
 	row, created, err := e.store.EnsureSubject(ctx, tenantID, subject, e.now())
 	if err != nil {

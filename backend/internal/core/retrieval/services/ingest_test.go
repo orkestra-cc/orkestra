@@ -65,15 +65,33 @@ func TestValidateItem_Bounds(t *testing.T) {
 		}
 		return out
 	}
-	assert.NoError(t, validateItem(iface.RetrievalItem{VisibleTo: n(1000, "u"), Subjects: n(100, strings.Repeat("s", 256))}))
+	assert.NoError(t, validateItem(iface.RetrievalItem{VisibleTo: n(1000, "u"), Subjects: n(100, "crm:"+strings.Repeat("s", 252))}, "crm", nil))
 	for _, it := range []iface.RetrievalItem{
 		{VisibleTo: n(1001, "u")},
-		{Subjects: n(101, "s")},
+		{Subjects: n(101, "crm:1")},
 		{VisibleTo: []string{""}},
-		{Subjects: []string{strings.Repeat("s", 257)}},
+		{Subjects: []string{"crm:" + strings.Repeat("s", 253)}},
 	} {
-		assert.Equal(t, true, errors.Is(validateItem(it), errInvalidItem))
+		assert.Equal(t, true, errors.Is(validateItem(it, "crm", nil), errInvalidItem))
 	}
+}
+
+// ingestOwners registers "billing" besides the item's corpus owner "crm".
+func ingestOwners(owner string) bool { return owner == "billing" }
+
+func TestValidateItem_SubjectsMustBeErasable(t *testing.T) {
+	refused := []string{"crm:a b", "Crm:1", "other:1", "contact-42", "user:", "user:a b", "user:a\x00", "crm:", ":1"}
+	for _, s := range refused {
+		err := validateItem(iface.RetrievalItem{Subjects: []string{"crm:ok", s}}, "crm", ingestOwners)
+		assert.Equal(t, true, errors.Is(err, errInvalidItem))
+		if err != nil && strings.Contains(err.Error(), s) && s != "" {
+			t.Fatalf("error %q names the subject %q", err, s)
+		}
+	}
+	accepted := []string{"user:0f8c3c1e-6a4b-4b8e-9d55-2f3b1c9a7e10", "crm:42", "billing:7"}
+	assert.NoError(t, validateItem(iface.RetrievalItem{Subjects: accepted}, "crm", ingestOwners))
+	// The corpus owner is registered even when isOwner does not know it.
+	assert.NoError(t, validateItem(iface.RetrievalItem{Subjects: []string{"crm:42"}}, "crm", nil))
 }
 
 func TestIndexedText(t *testing.T) {

@@ -282,19 +282,6 @@ func finalizerConfig(_ *module.Dependencies) func() services.FinalizerConfig {
 	}
 }
 
-// corpusOwner reports whether owner registered a corpus; it reads the
-// registry at call time, so corpora registered after Init count.
-func corpusOwner(svc *services.Service) func(owner string) bool {
-	return func(owner string) bool {
-		for _, c := range svc.Corpora() {
-			if c.Owner == owner {
-				return true
-			}
-		}
-		return false
-	}
-}
-
 // Init reads the operator environment and registers the service. It never
 // contacts Qdrant or llm, and never fails: a core Init error is fatal, so
 // missing infrastructure is a log line, not an error.
@@ -468,7 +455,7 @@ func wireErasure(deps *module.Dependencies, svc *services.Service, states *repos
 	hooks, hooksOK := module.GetTyped[iface.TenantPurgeHooks](deps.Services, module.ServiceTenantService)
 	// purged stays a nil interface when absent: reconciliation is then a no-op.
 	purged, purgedOK := module.GetTyped[iface.PurgedTenantIDLister](deps.Services, module.ServiceTenantService)
-	erasure := services.NewErasureService(store, finalizer, corpusOwner(svc), purged, relay, time.Now, logger)
+	erasure := services.NewErasureService(store, finalizer, services.RegisteredOwner(svc), purged, relay, time.Now, logger)
 	svc.SetAuditRelay(relay)
 	svc.SetErasure(erasure)
 

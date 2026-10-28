@@ -260,7 +260,7 @@ func (k *keyRun) run() {
 	// 4. validate
 	fields, err := normalizeFields(k.g.Spec.Filters, it.Fields)
 	if err == nil {
-		err = validateItem(it)
+		err = validateItem(it, k.g.Spec.Owner, RegisteredOwner(k.w.Catalog))
 	}
 	if err != nil {
 		// err names a field key at most, never a value (errInvalidItem).
