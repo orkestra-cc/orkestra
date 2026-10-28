@@ -14,7 +14,7 @@
 
 - Everything in the roadmap's **Global constraints** section applies to every task (trailers `Prop: upstream` + `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`, no method on an existing `iface` interface, no cross-module `services/`/`repository/` import outside `cmd/server` and the existing compliance exceptions, `tenantrepo` or an annotation on every Mongo call, Mongo tests gated by `MONGO_TEST_URI`).
 - Start only after PRs 2, 4 and 5 are merged into `dev`. Branch `feat/retrieval-06-erasure-dsr` from `dev`, in its own worktree.
-- Before Task 1, open the merged code and resolve the names this plan writes in angle brackets. They come from PRs 4 and 5, whose plans did not exist when this one was written; use their real names everywhere the placeholder appears. PR 2's names (`ErasureRequestService.Execute` returning `*ErasureOutcome`, `NewErasureRequestService(repo, dsr, logger)`, `RetryDue`, `models.ErasureRequestIncomplete`) are taken from `2026-10-26-retrieval-02-compliance-erasure-incomplete.md`; if the merged PR 2 differs, follow the merged code.
+- Before Task 1, open the merged code and resolve the names this plan writes in angle brackets. They come from PRs 4 and 5, whose plans did not exist when this one was written; use their real names everywhere the placeholder appears. PR 2's names (`ErasureRequestService.Execute` returning `*ErasureOutcome`, `NewErasureRequestService(repo, dsr, sink, logger)`, `RetryDue`, `models.ErasureRequestIncomplete`) are taken from `2026-10-26-retrieval-02-compliance-erasure-incomplete.md`; if the merged PR 2 differs, follow the merged code.
 
   | Placeholder | What it is | Where |
   |---|---|---|
@@ -856,7 +856,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 func TestRetrievalErasure_RequestIncompleteUntilFinalized(t *testing.T) {
 	// eng seeded: collection "orkestra_people_g1" with a point {tenant tA, subjects ["user:u1"]}
 	// producers := iface.NewPIIProducerRegistry(); producers.Register(retrieval PIIProducer)
-	// dsr := NewDSRService(producers, nil, logger); ers := NewErasureRequestService(NewErasureRequestRepo(db), dsr, logger)
+	// dsr := NewDSRService(producers, nil, logger); ers := NewErasureRequestService(NewErasureRequestRepo(db), dsr, nil, logger)
 	// req := ers.Lodge(ctx, "u1", "tA", "test")
 	// out, err := ers.Execute(ctx, req.UUID, iface.EraseHardDelete, "op"); err == nil
 	// out.Request.Status == models.ErasureRequestIncomplete
