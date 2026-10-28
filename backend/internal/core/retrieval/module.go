@@ -67,6 +67,7 @@ func (m *Module) Collections() []module.CollectionSpec {
 		{Name: repository.CollCorpusState},
 		{Name: repository.CollOutbox, Indexes: repository.OutboxIndexes()},
 		{Name: repository.CollTenantProgress, Indexes: repository.TenantProgressIndexes()},
+		{Name: repository.CollErasures, Indexes: repository.ErasureIndexes()},
 	}
 }
 

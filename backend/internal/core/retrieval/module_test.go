@@ -82,9 +82,10 @@ func TestModule_Declarations(t *testing.T) {
 		t.Fatalf("provided = %v", got)
 	}
 	cols := m.Collections()
-	if len(cols) != 3 || cols[0].Name != "retrieval_corpus_state" || repository.CollCorpusState != "retrieval_corpus_state" ||
+	if len(cols) != 4 || cols[0].Name != "retrieval_corpus_state" || repository.CollCorpusState != "retrieval_corpus_state" ||
 		cols[1].Name != "retrieval_outbox" || repository.CollOutbox != "retrieval_outbox" ||
-		cols[2].Name != "retrieval_tenant_progress" || repository.CollTenantProgress != "retrieval_tenant_progress" {
+		cols[2].Name != "retrieval_tenant_progress" || repository.CollTenantProgress != "retrieval_tenant_progress" ||
+		cols[3].Name != "retrieval_erasures" || repository.CollErasures != "retrieval_erasures" {
 		t.Fatalf("collections = %v", cols)
 	}
 	if p := module.PermissionsOf(m); len(p) != 0 {
@@ -104,7 +105,8 @@ func TestModule_IndexesLeadWithTenantOrAreDeclaredSweeps(t *testing.T) {
 		unique bool
 	}
 	sweeps := map[string][]sweep{
-		repository.CollOutbox: {{[]string{"dirty", "nextAttemptAt"}, false}, {[]string{"leaseUntil"}, false}},
+		repository.CollOutbox:   {{[]string{"dirty", "nextAttemptAt"}, false}, {[]string{"leaseUntil"}, false}},
+		repository.CollErasures: {{[]string{"uuid"}, true}, {[]string{"scope", "kind", "subject"}, false}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
