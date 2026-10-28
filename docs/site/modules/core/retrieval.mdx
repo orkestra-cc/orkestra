@@ -193,6 +193,8 @@ func (m *Module) find(ctx context.Context, text string) (*iface.RetrievalSearchR
 }
 ```
 
+**Never search inside a transaction.** Do not pass the `mongo.SessionContext` of a transaction (unlike `Enqueue`, which needs it): a successful search writes its search-log row with the context it was given, so that row would join your transaction, roll back with it, and leave a served result nobody can account for. Call `Search` before the transaction starts or after it commits, with the request context.
+
 **Request bounds.** `Query` is 1 to 2000 characters and not blank. `Limit` is 1 to 100 (0 means 10). `Mode` is `hybrid` (the default), `dense` or `keyword`. `Fusion` optionally overrides the corpus's weights (each in (0, 10]) and candidates per arm (1 to 500) for this request. `Filter` follows [Filters](#filters). A request outside these bounds fails with `iface.ErrRetrievalInvalidRequest`.
 
 **Who may search.** The organization in the context must be internal, the caller must hold the corpus's permission in it, and the corpus's owning module must be running. The caller's **principals** are resolved on every search: the user, the organization when the user is a member of it, the user's active roles in that organization, and whatever the registered principal contributors add (at most `principal_cap`). A result is returned only when one of its principals is among the item's `VisibleTo`. **Platform administrators get no bypass**: a `super_admin` resolves principals exactly like any other user and sees only what those principals allow.
