@@ -16,9 +16,9 @@ import (
 const CollSearchLog = "retrieval_search_log"
 
 // SearchLogIndexes are the declared indexes of CollSearchLog; the module and
-// the repository tests share them. The last two are system sweeps (not led by
-// tenantId): subjects serves the data-subject lookup, createdAt the retention
-// purge.
+// the repository tests share them. The last three are system sweeps (not led
+// by tenantId): subjects and userUuid serve the data-subject lookup and
+// erasure, createdAt the retention purge.
 func SearchLogIndexes() []module.IndexSpec {
 	key := func(fields ...string) []module.IndexKey {
 		out := make([]module.IndexKey, 0, len(fields))
@@ -32,6 +32,7 @@ func SearchLogIndexes() []module.IndexSpec {
 		{OrderedKeys: key("tenantId", "userUuid", "createdAt")},
 		{OrderedKeys: key("subjects")},
 		{OrderedKeys: key("createdAt")},
+		{OrderedKeys: key("userUuid")},
 	}
 }
 
@@ -76,14 +77,20 @@ var searchLogPurgeBatch int64 = 1000
 // batches so a backlog never becomes one huge delete. On error it returns the
 // total deleted so far.
 func (r *SearchLog) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	return deleteInBatches(ctx, r.coll, bson.M{"createdAt": bson.M{"$lt": ms(cutoff)}})
+}
+
+// deleteInBatches deletes the rows matching filter, searchLogPurgeBatch at a
+// time (find the _ids, then delete them), until a short batch. On error it
+// returns the total deleted so far. The caller owns the filter's scope.
+func deleteInBatches(ctx context.Context, coll *mongo.Collection, filter bson.M) (int64, error) {
 	var total int64
-	filter := bson.M{"createdAt": bson.M{"$lt": ms(cutoff)}}
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
-		//tenantscope:allow system: search-log retention runs for every tenant on the daily ticker; it selects only rows older than search_log_retention_days
-		cur, err := r.coll.Find(ctx, filter, options.Find().SetLimit(searchLogPurgeBatch).SetProjection(bson.M{"_id": 1}))
+		//tenantscope:allow system: bounded batched delete shared by the search-log retention purge and the DSR/tenant erasure; each caller passes an explicit, narrow filter
+		cur, err := coll.Find(ctx, filter, options.Find().SetLimit(searchLogPurgeBatch).SetProjection(bson.M{"_id": 1}))
 		if err != nil {
 			return total, err
 		}
@@ -98,8 +105,8 @@ func (r *SearchLog) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, e
 		for i, d := range ids {
 			in[i] = d["_id"]
 		}
-		//tenantscope:allow system: search-log retention runs for every tenant on the daily ticker; it deletes only the rows selected above (older than search_log_retention_days)
-		res, err := r.coll.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": in}})
+		//tenantscope:allow system: bounded batched delete shared by the search-log retention purge and the DSR/tenant erasure; it deletes only the rows selected above
+		res, err := coll.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": in}})
 		if res != nil {
 			total += res.DeletedCount
 		}

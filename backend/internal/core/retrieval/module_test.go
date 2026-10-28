@@ -122,8 +122,8 @@ func TestModule_IndexesLeadWithTenantOrAreDeclaredSweeps(t *testing.T) {
 	}
 	sweeps := map[string][]sweep{
 		repository.CollOutbox:    {{[]string{"dirty", "nextAttemptAt"}, false}, {[]string{"leaseUntil"}, false}},
-		repository.CollErasures:  {{[]string{"uuid"}, true}, {[]string{"scope", "kind", "subject"}, false}},
-		repository.CollSearchLog: {{[]string{"subjects"}, false}, {[]string{"createdAt"}, false}},
+		repository.CollErasures:  {{[]string{"uuid"}, true}, {[]string{"scope", "kind", "subject"}, false}, {[]string{"status", "nextAttemptAt"}, false}},
+		repository.CollSearchLog: {{[]string{"subjects"}, false}, {[]string{"createdAt"}, false}, {[]string{"userUuid"}, false}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
@@ -838,6 +838,7 @@ func TestCollections_DeclareSearchLog(t *testing.T) {
 		{[]string{"tenantId", "userUuid", "createdAt"}, false},
 		{[]string{"subjects"}, false},
 		{[]string{"createdAt"}, false},
+		{[]string{"userUuid"}, false},
 	}
 	if len(spec.Indexes) != len(want) {
 		t.Fatalf("indexes = %+v", spec.Indexes)
