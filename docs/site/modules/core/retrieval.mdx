@@ -228,7 +228,7 @@ When a person, a record or a whole organization is erased, retrieval does two th
 - The matching search-log rows are deleted on every pass. A search that was running while the erasure was recorded removes its own log row afterwards (one tombstone lookup per logged search); if that check fails, the row is left to the next pass.
 - Erasure records are **never deleted**. A finished erasure keeps hiding the data, so a later rebuild or a restored item cannot bring it back.
 
-**How long it takes.** A request normally completes 16 to 17 minutes after it was recorded. If the engine or the database is unavailable the pass is retried with a growing delay (15 seconds, doubling, at most 15 minutes) and the request stays pending; nothing is lost and nothing needs to be re-sent. Without a configured engine and with nothing ever indexed, the erasure completes at once. With no engine but collections that were indexed before, it stays pending until the engine is back, because the deletion cannot be confirmed.
+**How long it takes.** Retrieval's part of an erasure is normally confirmed 16 to 17 minutes after it was recorded; a GDPR erasure request in compliance then completes at compliance's next automatic run, typically about 30 minutes after the request. If the engine or the database is unavailable the pass is retried with a growing delay (15 seconds, doubling, at most 15 minutes) and the request stays pending; nothing is lost and nothing needs to be re-sent. Without a configured engine and with nothing ever indexed, the erasure completes at once. With no engine but collections that were indexed before, it stays pending until the engine is back, because the deletion cannot be confirmed.
 
 **What operators see.**
 

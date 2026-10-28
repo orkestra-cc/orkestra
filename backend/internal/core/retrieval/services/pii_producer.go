@@ -146,7 +146,7 @@ func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 		actx, cancel := context.WithTimeout(ctx, piiAttemptTimeout)
 		if _, err := p.fin.Attempt(actx, e.UUID); err != nil {
 			p.logger.WarnContext(ctx, "retrieval: inline erasure pass failed; the finalizer retries",
-				slog.String("erasure", e.UUID), slog.String("error", err.Error()))
+				slog.String("erasure", e.UUID), slog.String("reason", failureReason(err)))
 		}
 		cancel()
 	}

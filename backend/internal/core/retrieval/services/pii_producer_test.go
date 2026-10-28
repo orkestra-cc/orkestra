@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"slices"
@@ -19,9 +20,10 @@ import (
 
 // rowLogs is an in-memory SearchLogDSRRepo that really lists and deletes.
 type rowLogs struct {
-	mu    sync.Mutex
-	rows  []models.SearchLog
-	calls []string
+	mu        sync.Mutex
+	rows      []models.SearchLog
+	calls     []string
+	deleteErr error // returned by DeleteByUserAllTenants when set
 }
 
 var _ SearchLogDSRRepo = (*rowLogs)(nil)
@@ -47,6 +49,9 @@ func (r *rowLogs) DeleteByUserAllTenants(_ context.Context, u string) (int64, er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, "delete")
+	if r.deleteErr != nil {
+		return 0, r.deleteErr
+	}
 	var keep []models.SearchLog
 	var n int64
 	for _, row := range r.rows {
@@ -215,4 +220,58 @@ func TestPIIProducer_PurgeEngineDownStillRecordsTombstone(t *testing.T) {
 	rows, _ := env.store.ListUser(ctx, "u1")
 	require.Len(t, rows, 1)
 	require.Equal(t, models.ErasureStatusPending, rows[0].EffectiveStatus())
+}
+
+// TestPIIProducer_PurgeReturnsLogDeleteError: a failed search-log delete is
+// returned and nothing reports done, also on a repeat erasure whose user
+// tombstone is already done (no "done on faith").
+func TestPIIProducer_PurgeReturnsLogDeleteError(t *testing.T) {
+	ctx := context.Background()
+	boom := errors.New("mongo down")
+	for name, done := range map[string]bool{"first": false, "repeat after done": true} {
+		t.Run(name, func(t *testing.T) {
+			env := newProducerEnv(t, map[string][]string{}, false)
+			if done {
+				env.store.put(models.Erasure{UUID: "e-done", Scope: models.ErasureScopeGlobal, Kind: models.ErasureKindUser,
+					Subject: "user:u1", Status: models.ErasureStatusDone, DoneAt: timePtr(env.t0)})
+			}
+			env.logs.deleteErr = boom
+			res, err := env.prod.PurgePersonalData(ctx, "u1", iface.EraseHardDelete)
+			requireIs(t, err, boom)
+			require.Equal(t, iface.PurgeResult{}, res)
+			rows, _ := env.store.ListUser(ctx, "u1")
+			require.Len(t, rows, 1)
+			if !done {
+				// no inline pass ran: the tombstone is still pending
+				require.Equal(t, models.ErasureStatusPending, rows[0].EffectiveStatus())
+			}
+		})
+	}
+}
+
+// claimOneFailStore fails ClaimOne with an error whose text must never be logged.
+type claimOneFailStore struct{ *memStore }
+
+func (c claimOneFailStore) ClaimOne(context.Context, string, time.Time, time.Duration) (*models.Erasure, error) {
+	return nil, errors.New("store failure naming user:u1 secret-text")
+}
+
+// TestPIIProducer_InlinePassFailureLogsReasonOnly (M2): the WARN carries the
+// erasure uuid and a coarse reason, never the error text.
+func TestPIIProducer_InlinePassFailureLogsReasonOnly(t *testing.T) {
+	clk := newClock()
+	store := claimOneFailStore{newMemStore()}
+	logs := &lockedBuffer{}
+	logger := slog.New(slog.NewTextHandler(logs, nil))
+	fin := NewFinalizer(store, &rowLogs{}, &staticLister{cols: map[string][]string{}}, nil, testFinalizerConfig, NewAuditRelay(), clk.Now, logger)
+	prod := NewPIIProducer(store, &rowLogs{}, fin, clk.Now, logger)
+	res, err := prod.PurgePersonalData(context.Background(), "u1", iface.EraseHardDelete)
+	require.NoError(t, err)
+	require.Equal(t, true, res.Pending)
+	out := logs.String()
+	require.Contains(t, out, "inline erasure pass failed")
+	require.Contains(t, out, "reason=error")
+	for _, secret := range []string{"secret-text", "user:u1"} {
+		require.Equal(t, false, strings.Contains(out, secret), secret)
+	}
 }

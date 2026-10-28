@@ -41,7 +41,9 @@ func e2eDB(t *testing.T) *mongo.Database {
 		_ = db.Drop(context.Background())
 		_ = client.Disconnect(context.Background())
 	})
-	// The production keys: the tombstone upsert relies on the unique natural key.
+	// The production indexes. None is unique on a tombstone's natural key, so
+	// concurrent writers can create a duplicate tombstone (at-least-once); the
+	// readers tolerate duplicates.
 	var models []mongo.IndexModel
 	for _, s := range retrievalRepo.ErasureIndexes() {
 		var keys bson.D
