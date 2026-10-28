@@ -248,14 +248,16 @@ func (s *searchSource) Visible(ctx context.Context, tenantID string, pc iface.Re
 }
 
 // searchTombstones covers the source IDs set in covered and leaves the ones
-// in missing out of its answer.
+// in missing out of its answer. A source in coveredFrom is covered from that
+// 1-based call on (a tombstone landing between two calls).
 type searchTombstones struct {
-	mu      sync.Mutex
-	covered map[string]bool
-	missing map[string]bool
-	err     error
-	probes  [][]Probe
-	args    []string // "tenant|corpus" per call
+	mu          sync.Mutex
+	covered     map[string]bool
+	coveredFrom map[string]int
+	missing     map[string]bool
+	err         error
+	probes      [][]Probe
+	args        []string // "tenant|corpus" per call
 }
 
 func (t *searchTombstones) Covered(_ context.Context, tenantID, corpus string, probes []Probe) (map[string]bool, error) {
@@ -275,7 +277,8 @@ func (t *searchTombstones) Covered(_ context.Context, tenantID, corpus string, p
 		if t.missing[p.SourceID] {
 			continue
 		}
-		out[p.SourceID] = t.covered[p.SourceID]
+		from, ok := t.coveredFrom[p.SourceID]
+		out[p.SourceID] = t.covered[p.SourceID] || (ok && len(t.probes) >= from)
 	}
 	return out, nil
 }

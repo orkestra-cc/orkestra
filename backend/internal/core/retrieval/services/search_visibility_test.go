@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -347,6 +348,53 @@ func TestSearch_FullPageWithNoRoomToRefillIsFlagged(t *testing.T) {
 	assert.Equal(t, idRange("a", 91, 100), hitSources(res))
 	assert.Equal(t, true, res.Degraded)
 	assert.Len(t, fx.engine.queries, 1)
+}
+
+// The veto runs per engine call. A source whose first-call chunk survived
+// and whose refill chunk (same revision, same subjects) is covered by then
+// loses every chunk, not only the new one (F5).
+func TestSearch_RefillVetoDropsEveryChunkOfACoveredSource(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales", "user:carol")
+	s1 := cand("s", 1, 1, "candidate s chunk 1 for the head of sales", "user:carol")
+	first := append(candRange("a", 1, 7), s0)
+	second := append(append(slices.Clone(first), s1), candRange("b", 1, 3)...)
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 7)...)
+	fx.tombstones.coveredFrom = map[string]int{"s": 2}
+	req := contactsReq()
+	req.Limit = 2
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	require.Len(t, fx.engine.queries, 2)
+	require.Len(t, fx.tombstones.probes, 2)
+	// The first call let s through; the refill's probe of s found it covered.
+	assert.Equal(t, Probe{SourceID: "s", Subjects: []string{"user:carol"}}, fx.tombstones.probes[0][7])
+	assert.Equal(t, true, slices.ContainsFunc(fx.tombstones.probes[1], func(p Probe) bool {
+		return p.SourceID == "s" && slices.Equal(p.Subjects, []string{"user:carol"})
+	}))
+	assert.Equal(t, []string{"b1", "b2"}, hitSources(res))
+	row := onlyRow(t, fx)
+	assert.Equal(t, false, slices.Contains(row.SourceIDs, "s"))
+	assert.Equal(t, false, slices.Contains(row.Subjects, "user:carol"))
+}
+
+// A source seen in both calls and still clear keeps its first-call chunk in
+// its rank position ahead of the refill's points.
+func TestSearch_RefillKeepsRankOrderOfARecheckedSource(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales", "user:carol")
+	s1 := cand("s", 1, 1, "candidate s chunk 1 for the head of sales", "user:carol")
+	first := append([]engine.Candidate{s0}, candRange("a", 1, 15)...) // Limit 4 -> Fetch 16
+	second := append(append(slices.Clone(first), candRange("b", 1, 2)...), s1)
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 15)...)
+	req := contactsReq()
+	req.Limit = 4
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	require.Len(t, fx.engine.queries, 2)
+	assert.Equal(t, []string{"s", "b1", "b2", "s"}, hitSources(res))
 }
 
 func TestSearch_RefillDropsDuplicateNewPoints(t *testing.T) {

@@ -336,6 +336,18 @@ func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g 
 // call did not return (plan decision 3). There is never a third call. short
 // reports a page still under plan.Limit whose last engine call came back
 // full, so more permitted results may exist.
+//
+// The erasure veto runs once per engine call, with one probe per source
+// built from that call's chunks only. That is complete because of two
+// invariants: every chunk of one item revision carries the item's Subjects
+// (ingest.go buildPoints stamps them on each point), and the revision check
+// against Visible keeps a single revision per source. So a call's chunks of
+// a source probe exactly the subjects all its chunks share. Across the
+// refill the answer can still change (a tombstone landing between the two
+// calls): a source seen in both calls is re-checked together with its
+// first-call survivors, so a source the refill finds covered (or no longer
+// visible) loses every chunk, not only the new ones. This adds no source to
+// either call, and the survivors keep their rank positions.
 func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string, pc iface.RetrievalPrincipalContext,
 	rec *searchRecord, q engine.Query) (survivors []engine.Candidate, short bool, err error) {
 	query := func(q engine.Query) ([]engine.Candidate, error) {
@@ -383,11 +395,38 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 				fresh = append(fresh, c)
 			}
 		}
-		more, err := check(fresh)
+		freshSources := make(map[string]bool, len(fresh))
+		for _, c := range fresh {
+			freshSources[c.Runtime.SourceID] = true
+		}
+		var recheck []engine.Candidate
+		rechecked := map[string]bool{}
+		for _, c := range survivors {
+			if freshSources[c.Runtime.SourceID] {
+				recheck = append(recheck, c)
+				rechecked[c.PointID] = true
+			}
+		}
+		more, err := check(append(recheck, fresh...))
 		if err != nil {
 			return nil, false, err
 		}
-		survivors = append(survivors, more...)
+		passed := make(map[string]bool, len(more))
+		for _, c := range more {
+			passed[c.PointID] = true
+		}
+		kept := make([]engine.Candidate, 0, len(survivors)+len(more))
+		for _, c := range survivors {
+			if !rechecked[c.PointID] || passed[c.PointID] {
+				kept = append(kept, c)
+			}
+		}
+		for _, c := range more {
+			if !rechecked[c.PointID] {
+				kept = append(kept, c)
+			}
+		}
+		survivors = kept
 		last, lastLimit = second, q.Limit
 	}
 	return survivors, len(survivors) < g.plan.Limit && len(last) >= lastLimit, nil
