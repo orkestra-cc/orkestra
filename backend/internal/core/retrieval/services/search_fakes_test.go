@@ -180,15 +180,21 @@ func (r *searchReranker) Rerank(_ context.Context, req iface.RerankRequest) (*if
 	return r.res, nil
 }
 
-// searchSource answers Visible: an id in visible gets that answer, any other
-// id is visible at revision 1 (the fixture candidates' revision). With block
-// set it waits for ctx to end. Load and Enumerate panic: search never loads.
+// searchSource answers Visible: an id in missing is left out of the map, an
+// id in visible gets that answer, any other id is visible at revision 1 (the
+// fixture candidates' revision). With block set it waits for ctx to end.
+// onCall, when set, runs first with the call's ctx and 1-based number; a
+// non-nil return is the call's error. Load and Enumerate panic: search never
+// loads.
 type searchSource struct {
 	mu      sync.Mutex
 	visible map[string]iface.RetrievalVisibility
+	missing map[string]bool
 	err     error
 	block   bool
+	onCall  func(ctx context.Context, call int) error
 	calls   [][]string
+	tenants []string
 	pcs     []iface.RetrievalPrincipalContext
 }
 
@@ -200,14 +206,20 @@ func (s *searchSource) Enumerate(context.Context, string, string, int) (iface.Re
 	panic("searchSource: Enumerate")
 }
 
-func (s *searchSource) Visible(ctx context.Context, _ string, pc iface.RetrievalPrincipalContext, ids []string) (map[string]iface.RetrievalVisibility, error) {
+func (s *searchSource) Visible(ctx context.Context, tenantID string, pc iface.RetrievalPrincipalContext, ids []string) (map[string]iface.RetrievalVisibility, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, slices.Clone(ids))
+	s.tenants = append(s.tenants, tenantID)
 	pc.Principals = slices.Clone(pc.Principals)
 	s.pcs = append(s.pcs, pc)
-	block, err := s.block, s.err
-	visible := maps.Clone(s.visible)
+	block, err, hook, call := s.block, s.err, s.onCall, len(s.calls)
+	visible, missing := maps.Clone(s.visible), maps.Clone(s.missing)
 	s.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx, call); err != nil {
+			return nil, err
+		}
+	}
 	if block {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -217,6 +229,9 @@ func (s *searchSource) Visible(ctx context.Context, _ string, pc iface.Retrieval
 	}
 	out := make(map[string]iface.RetrievalVisibility, len(ids))
 	for _, id := range ids {
+		if missing[id] {
+			continue
+		}
 		if v, ok := visible[id]; ok {
 			out[id] = v
 			continue
@@ -226,17 +241,21 @@ func (s *searchSource) Visible(ctx context.Context, _ string, pc iface.Retrieval
 	return out, nil
 }
 
-// searchTombstones covers the source IDs set in covered.
+// searchTombstones covers the source IDs set in covered and leaves the ones
+// in missing out of its answer.
 type searchTombstones struct {
 	mu      sync.Mutex
 	covered map[string]bool
+	missing map[string]bool
 	err     error
 	probes  [][]Probe
+	args    []string // "tenant|corpus" per call
 }
 
-func (t *searchTombstones) Covered(_ context.Context, _, _ string, probes []Probe) (map[string]bool, error) {
+func (t *searchTombstones) Covered(_ context.Context, tenantID, corpus string, probes []Probe) (map[string]bool, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.args = append(t.args, tenantID+"|"+corpus)
 	cp := make([]Probe, len(probes))
 	for i, p := range probes {
 		cp[i] = Probe{SourceID: p.SourceID, Subjects: slices.Clone(p.Subjects)}
@@ -247,6 +266,9 @@ func (t *searchTombstones) Covered(_ context.Context, _, _ string, probes []Prob
 	}
 	out := make(map[string]bool, len(probes))
 	for _, p := range probes {
+		if t.missing[p.SourceID] {
+			continue
+		}
 		out[p.SourceID] = t.covered[p.SourceID]
 	}
 	return out, nil

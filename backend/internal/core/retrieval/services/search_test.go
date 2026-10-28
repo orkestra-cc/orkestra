@@ -176,6 +176,12 @@ func TestSearch_NilDependenciesFailClosed(t *testing.T) {
 		{"log", func(d *SearchDeps) { d.Log = nil }, []error{iface.ErrRetrievalUnavailable, ErrSearchLogWrite}},
 		{"state", func(d *SearchDeps) { d.State = nil }, []error{iface.ErrRetrievalUnavailable}},
 		{"principals", func(d *SearchDeps) { d.Principals = nil }, []error{iface.ErrRetrievalUnavailable}},
+		{"tombstones", func(d *SearchDeps) { d.Tombstones = nil }, []error{iface.ErrRetrievalVisibilityCheck}},
+		{"source", func(d *SearchDeps) {
+			spec := cloneSpec(d.Corpora.(*searchCorpora).specs["contacts"])
+			spec.Source = nil
+			d.Corpora = sharedLookup{spec: spec}
+		}, []error{iface.ErrRetrievalVisibilityCheck}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

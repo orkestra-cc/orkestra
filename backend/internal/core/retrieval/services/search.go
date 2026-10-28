@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
@@ -114,6 +115,10 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 		// A result nobody can answer for is never served (plan decision 2).
 		return nil, fmt.Errorf("%w: %w", iface.ErrRetrievalUnavailable, ErrSearchLogWrite)
 	}
+	if s.d.Tombstones == nil || g.spec.Source == nil {
+		// Step 6 could not run, so no candidate may be fetched at all.
+		return nil, fmt.Errorf("%w: the erasure or source check is not configured", iface.ErrRetrievalVisibilityCheck)
+	}
 
 	// Step 2: resolve and pin.
 	if s.d.Engine == nil {
@@ -151,8 +156,9 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 		keyword = ""
 	}
 
-	// Step 5: fusion.
-	cands, err := s.query(ctx, g, pinned.Collection, engine.Query{
+	// Steps 5 and 6: fusion, then erasure veto and source check, with one
+	// refill when the drops shorten the page.
+	cands, short, err := s.fetchChecked(ctx, g, pinned.Collection, pc, engine.Query{
 		TenantID:    g.tenantID,
 		Principals:  append([]string(nil), pc.Principals...),
 		Filter:      g.filter,
@@ -166,10 +172,184 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 	if err != nil {
 		return nil, err
 	}
+	// Never fewer than the permitted results without a flag (D5).
+	degraded = degraded || short
 
 	// Step 8: result.
 	cands = cands[:min(len(cands), g.plan.Limit)]
 	return &iface.RetrievalSearchResult{Hits: s.toHits(g.spec, req.Query, cands), Degraded: degraded}, nil
+}
+
+// fetchChecked runs the engine query q (step 5) and step 6 over its answer.
+// When the checks leave fewer than plan.Limit survivors, the engine returned
+// a full page and plan.Fusion.Candidates allows more, it queries once more
+// with Limit = plan.Fusion.Candidates and checks only the points the first
+// call did not return (plan decision 3). There is never a third call. short
+// reports a page still under plan.Limit whose last engine call came back
+// full, so more permitted results may exist.
+func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string, pc iface.RetrievalPrincipalContext,
+	q engine.Query) (survivors []engine.Candidate, short bool, err error) {
+	first, err := s.query(ctx, g, collection, q)
+	if err != nil {
+		return nil, false, err
+	}
+	survivors, err = s.checkCandidates(ctx, g.tenantID, g.spec.Name, g.spec.Source, pc, first)
+	if err != nil {
+		return nil, false, err
+	}
+	last, lastLimit := first, q.Limit
+	if len(survivors) < g.plan.Limit && len(first) >= q.Limit && q.Limit < g.plan.Fusion.Candidates {
+		q.Limit = g.plan.Fusion.Candidates
+		second, err := s.query(ctx, g, collection, q)
+		if err != nil {
+			return nil, false, err
+		}
+		seen := make(map[string]bool, len(first)+len(second))
+		for _, c := range first {
+			seen[c.PointID] = true
+		}
+		var fresh []engine.Candidate
+		for _, c := range second {
+			if !seen[c.PointID] {
+				seen[c.PointID] = true
+				fresh = append(fresh, c)
+			}
+		}
+		more, err := s.checkCandidates(ctx, g.tenantID, g.spec.Name, g.spec.Source, pc, fresh)
+		if err != nil {
+			return nil, false, err
+		}
+		survivors = append(survivors, more...)
+		last, lastLimit = second, q.Limit
+	}
+	return survivors, len(survivors) < g.plan.Limit && len(last) >= lastLimit, nil
+}
+
+// checkCandidates applies ADR D5 step 6 to cands in order and returns the
+// survivors in the same order. Any error wraps iface.ErrRetrievalVisibilityCheck.
+//
+// In order: a candidate of another tenant (or without a source ID) is
+// dropped; one Probe per distinct source, in first-seen order and carrying
+// the sorted union of its chunks' subjects, goes to the erasure veto and a
+// covered source is dropped; the remaining sources go to src.Visible under
+// VisibleTimeout, and a source missing from its answer, not visible, or
+// visible at another revision than the candidate's is dropped. A failed or
+// timed-out check returns no candidate at all. Neither the checker's nor the
+// source's error text is passed on: it may name a subject or a record.
+func (s *Searcher) checkCandidates(ctx context.Context, tenantID, corpus string, src iface.RetrievalSource,
+	pc iface.RetrievalPrincipalContext, cands []engine.Candidate) ([]engine.Candidate, error) {
+	if s.d.Tombstones == nil || src == nil {
+		return nil, fmt.Errorf("%w: the erasure or source check is not configured", iface.ErrRetrievalVisibilityCheck)
+	}
+
+	// 1. Second guard behind the engine's own tenant filter.
+	kept := make([]engine.Candidate, 0, len(cands))
+	foreign := false
+	for _, c := range cands {
+		if c.Runtime.TenantID != tenantID || c.Runtime.SourceID == "" {
+			foreign = true
+			continue
+		}
+		kept = append(kept, c)
+	}
+	if foreign {
+		s.d.Logger.Warn("retrieval: search dropped candidates of another tenant or without a source",
+			slog.String("corpus", corpus))
+	}
+	if len(kept) == 0 {
+		return []engine.Candidate{}, nil
+	}
+
+	// 2. One probe per source, in first-seen order.
+	var order []string
+	subjects := map[string][]string{}
+	for _, c := range kept {
+		id := c.Runtime.SourceID
+		if _, ok := subjects[id]; !ok {
+			order = append(order, id)
+			subjects[id] = nil
+		}
+		for _, sub := range c.Runtime.Subjects {
+			if !slices.Contains(subjects[id], sub) {
+				subjects[id] = append(subjects[id], sub)
+			}
+		}
+	}
+	probes := make([]Probe, 0, len(order))
+	for _, id := range order {
+		subs := subjects[id]
+		slices.Sort(subs)
+		probes = append(probes, Probe{SourceID: id, Subjects: subs})
+	}
+
+	// 3. Erasure veto. A source the answer does not mention counts as covered.
+	covered, err := s.d.Tombstones.Covered(ctx, tenantID, corpus, probes)
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		return nil, s.checkFailed(ctx, ctx, tenantID, corpus, "erasure_veto")
+	}
+	var ids []string
+	for _, id := range order {
+		if c, ok := covered[id]; ok && !c {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return []engine.Candidate{}, nil
+	}
+
+	// 4. The owning module's late visibility check.
+	vctx, cancel := context.WithTimeout(ctx, s.d.VisibleTimeout)
+	defer cancel()
+	callerPC := pc
+	callerPC.Principals = slices.Clone(pc.Principals)
+	vis, err := src.Visible(vctx, tenantID, callerPC, ids)
+	if err == nil && vctx.Err() != nil {
+		// An answer that arrives after the deadline is not trusted either.
+		err = vctx.Err()
+	}
+	if err != nil {
+		return nil, s.checkFailed(ctx, vctx, tenantID, corpus, "source_visible")
+	}
+	allowed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		allowed[id] = true
+	}
+	out := make([]engine.Candidate, 0, len(kept))
+	for _, c := range kept {
+		id := c.Runtime.SourceID
+		if !allowed[id] {
+			continue
+		}
+		v, ok := vis[id]
+		if !ok || !v.Visible || v.Revision != c.Runtime.SourceRevision {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// checkFailed logs a failed step-6 check by kind and returns the error the
+// search fails with. Only a context error stays in the chain: the checker's
+// or the source's own error text may name a subject or a record.
+func (s *Searcher) checkFailed(ctx, stageCtx context.Context, tenantID, corpus, stage string) error {
+	kind, cause := "error", error(nil)
+	switch {
+	case ctx.Err() != nil:
+		kind, cause = "canceled", ctx.Err()
+	case stageCtx.Err() != nil:
+		kind, cause = "timeout", stageCtx.Err()
+	}
+	s.d.Logger.Warn("retrieval: search visibility check failed",
+		slog.String("corpus", corpus), slog.String("tenant", tenantID),
+		slog.String("stage", stage), slog.String("kind", kind))
+	if cause != nil {
+		return fmt.Errorf("%w: %s: %w", iface.ErrRetrievalVisibilityCheck, stage, cause)
+	}
+	return fmt.Errorf("%w: %s failed", iface.ErrRetrievalVisibilityCheck, stage)
 }
 
 // gate is step 1, in this order: internal tenant, caller identity, corpus,
