@@ -153,7 +153,11 @@ func (w *Worker) indexPass(ctx context.Context, gates map[string]*corpusGate, na
 
 // buildPass enqueues one Enumerate page per (corpus, tenant) with an open
 // build, at most buildPagesPerPass pages per pass. It only enqueues: the
-// index pass does the writes.
+// index pass does the writes. The pairs are walked in (corpus, tenant) order
+// from where the previous pass stopped, so open builds share the page budget
+// across passes; after an Enumerate failure the corpus's remaining tenants
+// are skipped for the rest of the pass, so one broken source costs one call
+// per pass and leaves the budget to the other corpora.
 func (w *Worker) buildPass(ctx context.Context, gates map[string]*corpusGate, names []string, s WorkerSettings, rep *PassReport) error {
 	if len(names) == 0 {
 		return nil
@@ -162,20 +166,47 @@ func (w *Worker) buildPass(ctx context.Context, gates map[string]*corpusGate, na
 	if err != nil {
 		return err
 	}
-	pages := 0
+	tenants = slices.Sorted(slices.Values(tenants)) // a sorted copy: the lister owns its slice
+	type pair struct {
+		g      *corpusGate
+		tenant string
+	}
+	pairs := make([]pair, 0, len(names)*len(tenants))
 	for _, name := range names { // names follow Catalog.Corpora(): sorted
-		g := gates[name]
 		for _, t := range tenants {
-			if pages >= buildPagesPerPass {
-				return nil
-			}
-			loaded, err := w.buildPage(ctx, g, t, s, rep)
-			if err != nil {
-				return err
-			}
-			if loaded {
-				pages++
-			}
+			pairs = append(pairs, pair{gates[name], t})
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+
+	w.mu.Lock()
+	start := w.buildOffset % len(pairs)
+	w.mu.Unlock()
+	visited := 0
+	defer func() {
+		w.mu.Lock()
+		w.buildOffset = (start + visited) % len(pairs)
+		w.mu.Unlock()
+	}()
+	pages := 0
+	failed := map[string]bool{}
+	for visited < len(pairs) && pages < buildPagesPerPass {
+		p := pairs[(start+visited)%len(pairs)]
+		visited++
+		if failed[p.g.Spec.Name] {
+			continue
+		}
+		loaded, enumFailed, err := w.buildPage(ctx, p.g, p.tenant, s, rep)
+		if err != nil {
+			return err
+		}
+		if loaded {
+			pages++
+		}
+		if enumFailed {
+			failed[p.g.Spec.Name] = true
 		}
 	}
 	return nil
@@ -201,29 +232,30 @@ func (w *Worker) markBuilt(k buildKey) {
 }
 
 // buildPage claims the build row of one tenant and enqueues its next page.
-// It reports whether an Enumerate page was requested. A build known to be
-// done (finished here, or seen done once) costs no store call.
-func (w *Worker) buildPage(ctx context.Context, g *corpusGate, tenant string, s WorkerSettings, rep *PassReport) (bool, error) {
+// It reports whether an Enumerate page was requested and whether that call
+// failed. A build known to be done (finished here, or seen done once) costs
+// no store call.
+func (w *Worker) buildPage(ctx context.Context, g *corpusGate, tenant string, s WorkerSettings, rep *PassReport) (loaded, enumFailed bool, err error) {
 	corpus, gen := g.Spec.Name, g.State.ActiveGeneration
 	key := buildKey{corpus, gen, tenant}
 	if w.buildDone(key) {
-		return false, nil
+		return false, false, nil
 	}
 	tctx := tenantCtx(ctx, tenant)
 	p, err := w.Progress.ClaimBuild(tctx, corpus, gen, w.owner, w.Now(), s.Lease)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if p == nil {
 		// done, or held by another replica: only done is remembered
 		cur, err := w.Progress.Get(tctx, corpus, gen)
 		if err != nil {
-			return false, err
+			return false, false, err
 		}
 		if cur != nil && cur.Status == models.ProgressDone {
 			w.markBuilt(key)
 		}
-		return false, nil
+		return false, false, nil
 	}
 	advance := func(cursor string, added int64, done bool) error {
 		err := w.Progress.Advance(tctx, corpus, gen, p.Epoch, w.owner, cursor, added, done, w.Now())
@@ -241,7 +273,7 @@ func (w *Worker) buildPage(ctx context.Context, g *corpusGate, tenant string, s 
 	cancel()
 	if err != nil {
 		w.Logger.Warn("retrieval: enumerate failed", "corpus", corpus, "tenant", tenant)
-		return true, advance(p.Cursor, 0, false)
+		return true, true, advance(p.Cursor, 0, false)
 	}
 
 	intents := make([]iface.RetrievalIntent, 0, len(page.Items))
@@ -256,9 +288,9 @@ func (w *Worker) buildPage(ctx context.Context, g *corpusGate, tenant string, s 
 	}
 	if len(intents) > 0 {
 		if err := w.Outbox.Enqueue(tctx, intents, w.Now()); err != nil {
-			return true, err
+			return true, false, err
 		}
 	}
 	rep.Enqueued += len(intents)
-	return true, advance(page.Next, int64(len(intents)), page.Next == "")
+	return true, false, advance(page.Next, int64(len(intents)), page.Next == "")
 }

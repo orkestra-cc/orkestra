@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -337,4 +338,67 @@ func TestBuild_HeldBuildIsAskedAgain(t *testing.T) {
 	assert.Equal(t, 3, c) // the holder's claim and one per pass
 	assert.Equal(t, 2, g)
 	assert.Equal(t, 0, len(e.source.enumerated()))
+}
+
+func tenantIDs(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("t%02d", i)
+	}
+	return out
+}
+
+// The build pass starts each pass where the previous one stopped, so with
+// more open builds than pages per pass no tenant waits for the others to
+// finish.
+func TestBuild_RotatesTheStartAcrossPasses(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = tenantIDs(20)
+	for _, tn := range e.tenants.ids {
+		e.putMany(tn, 450) // three pages each: no build finishes in one pass
+	}
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 1} }
+	w := e.newWorker()
+
+	e.once(t, w)
+	first := e.source.enumerated()
+	require.Len(t, first, 16)
+	assert.Equal(t, "t00", first[0].tenant)
+	assert.Equal(t, "t15", first[15].tenant)
+
+	e.once(t, w)
+	second := e.source.enumerated()[16:]
+	require.Len(t, second, 16)
+	var got []string
+	for _, c := range second[:4] {
+		got = append(got, c.tenant)
+	}
+	assert.Equal(t, []string{"t16", "t17", "t18", "t19"}, got)
+	assert.Equal(t, "t00", second[4].tenant)
+	assert.Equal(t, "i199", second[4].cursor) // t00's second page
+}
+
+// A source whose Enumerate fails is called at most once per pass and does
+// not use up the page budget of the healthy corpora sorted after it.
+func TestBuild_FailingSourceDoesNotStallOtherCorpora(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = tenantIDs(20)
+	bad := newFakeSource()
+	bad.setEnumErr(errors.New("owner down"))
+	badSpec := e.spec
+	badSpec.Name, badSpec.Source = "a_bad", bad // sorts before crm_contacts
+	e.deps.Catalog = &fakeCatalog{specs: []iface.RetrievalCorpusSpec{badSpec, e.spec}}
+	for _, tn := range e.tenants.ids {
+		e.putFor(tn, "x")
+	}
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 1} }
+	w := e.newWorker()
+
+	for pass := 1; pass <= 2; pass++ {
+		e.once(t, w)
+		assert.Equal(t, pass, len(bad.enumerated()), "failing source calls after pass %d", pass)
+	}
+	for _, tn := range e.tenants.ids {
+		assert.Equal(t, models.ProgressDone, e.progress.get(tn, testCorpus, 1).Status, tn)
+	}
 }

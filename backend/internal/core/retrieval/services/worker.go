@@ -124,6 +124,9 @@ type Worker struct {
 	problems []string
 	ensured  map[ensureKey]bool // collections ensured by this process
 	built    map[buildKey]bool  // initial builds known to be done
+	// buildOffset is where the next build pass starts in the sorted
+	// (corpus, tenant) list.
+	buildOffset int
 	// tenantCursor is the round-robin position of the index pass: the last
 	// tenant served ("" = start). Per process; replicas keep their own.
 	tenantCursor string
