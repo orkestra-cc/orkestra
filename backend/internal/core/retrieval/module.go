@@ -111,13 +111,15 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 }
 
 // Collections declares the installation-wide corpus state, the per-key
-// indexing outbox and the per-tenant initial-build progress.
+// indexing outbox, the per-tenant initial-build progress, the erasure
+// tombstones and the search log.
 func (m *Module) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
 		{Name: repository.CollCorpusState},
 		{Name: repository.CollOutbox, Indexes: repository.OutboxIndexes()},
 		{Name: repository.CollTenantProgress, Indexes: repository.TenantProgressIndexes()},
 		{Name: repository.CollErasures, Indexes: repository.ErasureIndexes()},
+		{Name: repository.CollSearchLog, Indexes: repository.SearchLogIndexes()},
 	}
 }
 

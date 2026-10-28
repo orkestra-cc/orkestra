@@ -19,3 +19,8 @@
 # governed by the retention / legal-hold policy, not by a self-erasing
 # PIIProducer. (audit_events likewise are an append-only, retained trail.)
 pii.subject_collection.no_producer:compliance
+
+# ---------------------------------------------------------------------------
+# retrieval — retrieval_search_log carries userUuid (the searcher). The
+# retrieval PIIProducer arrives in PR 6, which deletes this line.
+pii.subject_collection.no_producer:retrieval
