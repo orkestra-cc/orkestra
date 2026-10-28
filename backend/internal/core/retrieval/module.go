@@ -1,7 +1,7 @@
 // Package retrieval is the core module for corpora, indexing and hybrid
 // search over tenant data with local inference (ADR-0023). This step holds
-// the corpus registry, the engine contract and the Qdrant driver; the
-// indexing worker, search and routes arrive in later steps.
+// the corpus registry, the engine contract, the Qdrant driver, the outbox and
+// the index worker; search and routes arrive in later steps.
 package retrieval
 
 import (
@@ -213,7 +213,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 			})
 		}
 	}
-	if eng != nil && worker == nil {
+	if deps.DB == nil {
+		// Production always has a DB; the repository constructors would
+		// panic on a nil handle, so the outbox stays unwired.
+		logger.Warn("retrieval: no database handle; the outbox is not wired and indexing is disabled",
+			slog.String("missing", missing))
+	} else if eng != nil && worker == nil {
 		logger.Warn("retrieval: indexing is disabled; the outbox fills but nothing is indexed",
 			slog.String("missing", missing))
 	}

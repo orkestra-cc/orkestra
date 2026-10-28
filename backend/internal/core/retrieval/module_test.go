@@ -633,3 +633,38 @@ func TestModule_HealthCheckReportsEngineAndCorpusProblems(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+func TestModule_NilDatabaseWarnsOnceAndLeavesTheOutboxUnwired(t *testing.T) {
+	for _, url := range []string{"", "http://qdrant.invalid:6333"} {
+		t.Run("QDRANT_URL="+url, func(t *testing.T) {
+			t.Setenv("QDRANT_URL", url)
+			t.Setenv("QDRANT_API_KEY", "k")
+			var buf bytes.Buffer
+			reg := module.NewServiceRegistry()
+			reg.Register(module.ServiceLLMGateway, fullGateway{})
+			reg.Register(module.ServiceTenantService, iface.TenantIDLister(fakeTenants{}))
+			reg.Register(module.ServiceModuleStatus, module.ModuleStatusReader(fakeStatus{}))
+			m := NewModule()
+			m.newEngine = func(qdrant.Config) (engine.Engine, error) { return &fakeEngine{}, nil }
+			logger := slog.New(slog.NewTextHandler(&buf, nil))
+			if err := m.Init(&module.Dependencies{Logger: logger, Services: reg}); err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			if m.worker != nil {
+				t.Fatal("worker built without a database")
+			}
+			out := buf.String()
+			if n := strings.Count(out, "level=WARN"); n != 1 || !strings.Contains(out, "no database handle") {
+				t.Fatalf("want exactly one database WARN, got %d: %s", n, out)
+			}
+			ob, ok := module.GetTyped[iface.RetrievalOutbox](reg, module.ServiceRetrieval)
+			if !ok {
+				t.Fatal("not a RetrievalOutbox")
+			}
+			ctx := ctxauth.WithTenantKind(context.WithValue(context.Background(), ctxauth.KeyTenantID, "t1"), "internal")
+			if err := ob.Enqueue(ctx, iface.RetrievalIntent{Corpus: "contacts", SourceID: "c1"}); err == nil {
+				t.Fatal("Enqueue succeeded with an unwired outbox")
+			}
+		})
+	}
+}
