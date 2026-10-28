@@ -22,6 +22,12 @@ type UserModule struct {
 	adminClientHandler    *handlers.AdminClientUserHandler
 	operatorAvatarHandler *handlers.AvatarHandler
 	clientAvatarHandler   *handlers.AvatarHandler
+	// preferenceHandler serves /v1/me/preferences* and the profile-section
+	// discovery routes (both tiers); see handlers.PreferenceHandler.
+	preferenceHandler  *handlers.PreferenceHandler
+	preferenceRepo     repository.PreferenceRepository
+	preferenceRegistry *module.UserPreferenceRegistry
+	services           *module.ServiceRegistry
 }
 
 func NewModule() *UserModule { return &UserModule{} }
@@ -48,6 +54,11 @@ func (m *UserModule) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
 		{Name: repository.OperatorUsersCollection, Indexes: tierUserIndexes},
 		{Name: repository.ClientUsersCollection, Indexes: tierUserIndexes},
+		// Per-user, per-module preference documents (module.HasUserPreferences).
+		// User-keyed: preferences follow the user across tenants.
+		{Name: repository.UserPreferencesCollection, Indexes: []module.IndexSpec{
+			{OrderedKeys: []module.IndexKey{{Field: "userUuid", Direction: 1}, {Field: "module", Direction: 1}}, Unique: true},
+		}},
 	}
 }
 
@@ -71,7 +82,7 @@ func (m *UserModule) Permissions() []iface.PermissionSpec {
 		{Key: "user.create", Module: "user", Description: "Create and invite users"},
 		{Key: "user.update", Module: "user", Description: "Update user profiles, roles and status"},
 		{Key: "user.delete", Module: "user", Description: "Delete users"},
-		{Key: "user.self", Module: "user", Description: "Edit your own profile"},
+		{Key: "user.self", Module: "user", Description: "Read and save your own per-module preferences; discover your profile sections"},
 		{Key: "user.avatar.self", Module: "user", Description: "Manage your own avatar (upload, pick from linked OAuth provider, reset to initials)"},
 	}
 }
@@ -135,8 +146,22 @@ func (m *UserModule) Init(deps *module.Dependencies) error {
 	// Register the user PII producer with the DSR registry pre-created in
 	// main.go. Missing registry means the platform was booted without
 	// compliance infrastructure — tolerate and skip.
+	// Per-user preferences: the schema catalog is the SDK registry the module
+	// registry created before Init and fills after it, so resolving the
+	// pointer here is safe and its content is read at request time. Module
+	// enabled/disabled is read from the config service at request time too
+	// (wired in RegisterRoutes, where RouteInfo carries it).
+	prefRepo := repository.NewPreferenceRepository(deps.DB)
+	m.preferenceRepo = prefRepo
+	if prefReg, ok := module.GetTyped[*module.UserPreferenceRegistry](deps.Services, module.ServiceUserPreferenceRegistry); ok {
+		m.preferenceRegistry = prefReg
+	} else {
+		m.preferenceRegistry = module.NewUserPreferenceRegistry()
+	}
+	m.services = deps.Services
+
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
-		reg.Register(services.NewPIIProducer(canonicalRepo))
+		reg.Register(services.NewPIIProducer(canonicalRepo, prefRepo))
 	}
 
 	// Backfill the language field on accounts that predate it so /me
@@ -229,6 +254,9 @@ func (m *UserModule) routeGroups() []userRouteGroup {
 		{Permission: "user.read", Register: func(api huma.API) {
 			RegisterReadRoutes(api, m.handler)
 			RegisterAdminClientReadRoutes(api, m.adminClientHandler)
+			if m.preferenceHandler != nil {
+				handlers.RegisterProfileSectionReadRoute(api, m.preferenceHandler)
+			}
 		}},
 		{Permission: "user.create", Register: func(api huma.API) {
 			RegisterCreateRoutes(api, m.handler)
@@ -261,7 +289,28 @@ func (m *UserModule) registrarFor(permission string, stepUp bool) func(huma.API)
 	panic("user: no route group declared for " + permission)
 }
 
+// buildPreferenceHandler wires the self-service preference store once the
+// RouteInfo (config service for enabled checks) is known. Idempotent.
+func (m *UserModule) buildPreferenceHandler(ri *module.RouteInfo) {
+	if m.preferenceHandler != nil || m.preferenceRepo == nil {
+		return
+	}
+	var enabled services.ModuleEnabledChecker
+	if ri.ConfigService != nil {
+		enabled = ri.ConfigService.IsEnabled
+	}
+	var authz iface.AuthzProvider
+	if m.services != nil {
+		if p, ok := module.GetTyped[iface.AuthzProvider](m.services, module.ServiceAuthzProvider); ok {
+			authz = p
+		}
+	}
+	svc := services.NewPreferenceService(m.preferenceRepo, m.preferenceRegistry, enabled)
+	m.preferenceHandler = handlers.NewPreferenceHandler(svc, m.preferenceRegistry, enabled, authz)
+}
+
 func (m *UserModule) RegisterRoutes(ri *module.RouteInfo) {
+	m.buildPreferenceHandler(ri)
 	// User management is a platform-level concern: users are global, so
 	// every group sits on the system-permission gate (global scope), one
 	// per-action key each — see routeGroups. The permission literals stay
@@ -313,5 +362,25 @@ func (m *UserModule) RegisterRoutes(ri *module.RouteInfo) {
 			api := humachi.New(r, ri.APIConfig)
 			registerAvatarRoutes(api, m.clientAvatarHandler, "client-")
 		})
+	}
+
+	// Self-service preferences and profile-section discovery — both
+	// audiences, like the avatar, on the per-action key `user.self`
+	// (conveyed by the .self suffix rule to every platform role but guest
+	// and to org members). The store is user-keyed, so the one handler
+	// serves both tiers.
+	if m.preferenceHandler != nil {
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequirePermission("user.self"))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterSelfPreferenceRoutes(api, m.preferenceHandler, "operator-")
+		})
+		if ri.Client != nil && ri.Client.ProtectedRouter != nil {
+			ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+				r.Use(ri.Client.AuthMW.RequirePermission("user.self"))
+				api := humachi.New(r, ri.APIConfig)
+				handlers.RegisterSelfPreferenceRoutes(api, m.preferenceHandler, "client-")
+			})
+		}
 	}
 }

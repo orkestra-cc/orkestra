@@ -19,6 +19,7 @@ Does not touch passwords, sessions, JWTs, or org memberships — those belong to
 | `routes.go` | Huma route registration (17 admin endpoints in five per-permission registrars, plus the 3 avatar routes in `module.go`) |
 | `handlers/user_handler.go` | HTTP handler implementations |
 | `services/user_service.go` | User CRUD business logic, role queries |
+| `services/preference_service.go`, `repository/preference_repository.go`, `handlers/preference_handler.go` | Per-user, per-module preference store (`module.HasUserPreferences` schemas from `module.ServiceUserPreferenceRegistry`, validated with `module.ValidateValues`) and the profile-section discovery routes (`module.HasProfileSections`) |
 | `repository/user_repository.go` | MongoDB persistence — upsert, find, filter, soft-delete |
 | `models/user.go` | `User` struct + `CreateUserInput`, `UpdateUserInput`, `UserFilters`, `UserManagementResponse` |
 
@@ -28,6 +29,7 @@ Does not touch passwords, sessions, JWTs, or org memberships — those belong to
 |---|---|---|
 | `operator_users` | `uuid` unique, `email` unique, `tier` | — |
 | `client_users` | `uuid` unique, `email` unique, `tier` | — |
+| `user_preferences` | `(userUuid, module)` unique | — |
 
 Declared in `module.go::Collections()`. Email uniqueness is scoped per collection — the same address may legitimately exist as both an operator and a client account (one human running an internal staff role and an external client account). The repository stamps `tier="operator"` / `tier="client"` on every insert so a tier-guard test can assert each collection only holds rows of its own tier.
 
@@ -46,7 +48,7 @@ Declared in `module.go::Collections()`. Email uniqueness is scoped per collectio
 | `user.create` | Create and invite users (`POST /v1/users`; client create, invite, resend, resend-verification) |
 | `user.update` | Update user profiles, roles and status (`PUT`, client `PATCH`, both + step-up) and `send-password-reset` (no step-up) |
 | `user.delete` | Delete users (both `DELETE`s, + step-up) |
-| `user.self` | Edit your own profile — reserved, gates no route today |
+| `user.self` | Self-service preferences and profile-section discovery: `GET /v1/me/preferences`, `GET`/`PUT /v1/me/preferences/{module}`, `GET /v1/me/profile-sections` — both tiers (`handlers/preference_handler.go`) |
 | `user.avatar.self` | Manage your own avatar (upload, pick from linked OAuth provider, reset to initials) |
 
 These keys gate the module's own HTTP endpoints, one per action — see `module.go::routeGroups()`, which `route_permissions_test.go` reads back from a throwaway Huma API so the mapping is checked, not reviewed. They are evaluated with `RequireSystemPermission`, i.e. at **global scope**: users are platform rows, a tenant membership never counts and no `X-Tenant-ID` is needed. At global scope a platform role conveys its seeded permission set (authz rule 2b): `super_admin`/`administrator` everything, `manager` read/create/update, `operator`/`guest` read. `system.users.admin` no longer gates anything here. A deployment that listed `system.users.admin` in `CEDAR_ENFORCE_ACTIONS` lists `user.read,user.create,user.update,user.delete` instead; `abac.require_mfa_for_user_admin` and `abac.deny_user_admin_from_public_ip_in_prod` carry the MFA and public-IP forbids that key had onto them. The avatar endpoints under `/v1/me/avatar/*` are wired through `RequirePermission("user.avatar.self")` on both operator and client mounts; the handler still asserts owner-self from the JWT user UUID, so a misconfigured role can never let user A edit user B's avatar.
@@ -56,7 +58,7 @@ These keys gate the module's own HTTP endpoints, one per action — see `module.
 - **Init**: constructs both per-tier user repositories and matching OAuth provider repositories (operator + client) from the auth package, wires the per-tier `UserService` instances, and registers each under `ServiceOperatorUserProvider` / `ServiceClientUserProvider`. The operator-tier provider is also registered under the canonical `ServiceUserService` key — that's what unaware consumers (setup wizard, dev token generator) get by default; audience-aware consumers (onboarding) request the per-tier key directly.
 - **Start / Stop / HealthCheck**: inherit the no-op from `BaseModule`.
 - **Seeding**: none. Users are created by the auth module's registration flows or the setup wizard.
-- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"user"`) on `ServicePIIProducerRegistry` at Init. Exports the profile projection (email, username, name, phone, avatar, role, OAuth links — **never** the password hash or PIN, which are server secrets, not portable personal data). Purge **anonymizes** the identity row under `EraseAnonymize` (keeps the UUID so foreign references stay valid, aliases the email, blanks the profile → the canonical tombstone the retention job later hard-deletes) and removes it outright under `EraseHardDelete`. Consumed by the [compliance module](../compliance/AGENTS.md)'s DSR pipeline (ADR-0009).
+- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"user"`) on `ServicePIIProducerRegistry` at Init. Exports the profile projection plus the user's `user_preferences` rows (`preferences`, keyed by module; deleted outright on purge in both modes) (email, username, name, phone, avatar, role, OAuth links — **never** the password hash or PIN, which are server secrets, not portable personal data). Purge **anonymizes** the identity row under `EraseAnonymize` (keeps the UUID so foreign references stay valid, aliases the email, blanks the profile → the canonical tombstone the retention job later hard-deletes) and removes it outright under `EraseHardDelete`. Consumed by the [compliance module](../compliance/AGENTS.md)'s DSR pipeline (ADR-0009).
 
 ## HTTP endpoints
 
@@ -81,6 +83,9 @@ Every admin route sits behind its own `user.*` key at global scope (`module.go::
 | POST | `/v1/admin/client-users/{id}/send-password-reset` | Admin-trigger variant of forgot-password — same enumeration-safe primitive but signals 404 / 503 directly to the operator. Answers **409** `auth.password_login_disabled` when the client surface has `passwordLoginEnabledClient=false` (a reset link would mint a credential the surface refuses) and **503** `auth.policy_unavailable` when the policy cannot be established. `mapInviteErr` matches those by **identity** on the `iface` sentinels (`errors.Is` against `iface.ErrPasswordLoginDisabled` / `iface.ErrAuthPolicyUnavailable`), never by message — this package must not import `auth/services`. Operator-side twin: `/v1/admin/users/{userId}/send-password-reset` |
 | PATCH | `/v1/admin/client-users/{id}` | Update name / username / email / phone / role / isActive on a client user. A `role` in the patch runs the same role-escalation and service-account guards as the operator `PUT`; the platform last-administrator quorum does **not** apply (a client user is never a platform administrator) |
 | DELETE | `/v1/admin/client-users/{id}` | Soft-delete + email alias on a client user (reuses `SoftDeleteAndAliasEmail`) |
+| GET | `/v1/users/{id}/profile-sections` | Sections modules contribute to a user's admin profile (`module.HasProfileSections`, surface `admin`), filtered to enabled modules and to the sections whose permission the caller holds at global scope; `user.read` group |
+
+Self-service, both tiers, `RequirePermission("user.self")` (`handlers.RegisterSelfPreferenceRoutes`): `GET /v1/me/preferences` (every enabled module with a schema, defaults filled), `GET`/`PUT /v1/me/preferences/{module}` (PUT semantics; `404 user.preferences.module_unknown`, `422 user.preferences.invalid` listing every problem), `GET /v1/me/profile-sections` (surface `self`). The schema catalog is `module.ServiceUserPreferenceRegistry`, created by the module registry before Init and filled after it; the handler reads it at request time and the enabled check comes from `RouteInfo.ConfigService`.
 
 The self-service avatar surface lives outside the admin gates — mounted on **both** operator and client protected routers under `RequirePermission("user.avatar.self")`:
 

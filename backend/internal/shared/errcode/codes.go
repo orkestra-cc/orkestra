@@ -333,6 +333,18 @@ const UserTargetTierForbidden = "user.target_tier_forbidden"
 // The caller reloads the user and retries.
 const UserTargetChanged = "user.target_changed"
 
+// UserPreferencesModuleUnknown signals a GET/PUT on /v1/me/preferences/{module}
+// for a module that declares no per-user preferences (module.HasUserPreferences)
+// or is currently disabled: there is no schema to validate against, so the
+// store holds nothing for it. HTTP 404.
+const UserPreferencesModuleUnknown = "user.preferences.module_unknown"
+
+// UserPreferencesInvalid signals that a PUT /v1/me/preferences/{module} body
+// did not satisfy the module's declared fields: an undeclared key, a missing
+// required field, or a value outside its type, options, min/max or pattern.
+// The detail lists every problem. HTTP 422.
+const UserPreferencesInvalid = "user.preferences.invalid"
+
 // --- marketing ---
 
 // MarketingCardCodeCollision signals that the card-emit path

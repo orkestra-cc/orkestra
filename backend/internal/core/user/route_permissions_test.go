@@ -20,6 +20,7 @@ func moduleWithStubHandlers() *UserModule {
 	return &UserModule{
 		handler:            handlers.NewUserHandler(nil),
 		adminClientHandler: handlers.NewAdminClientUserHandler(nil, nil),
+		preferenceHandler:  handlers.NewPreferenceHandler(nil, nil, nil, nil),
 	}
 }
 
@@ -96,6 +97,7 @@ func TestRouteGroups_VerbsHaveTheirOwnPermission(t *testing.T) {
 		"GET /v1/users/{id}":                                   {"user.read", false},
 		"GET /v1/users/count":                                  {"user.read", false},
 		"GET /v1/admin/client-users":                           {"user.read", false},
+		"GET /v1/users/{id}/profile-sections":                  {"user.read", false},
 		"POST /v1/users":                                       {"user.create", false},
 		"POST /v1/admin/client-users":                          {"user.create", false},
 		"POST /v1/admin/client-users/invite":                   {"user.create", false},
@@ -168,5 +170,38 @@ func TestRouteGroups_NoOperationRegisteredTwice(t *testing.T) {
 	}
 	if len(seen) == 0 {
 		t.Fatal("no operations collected — the harness is not exercising route registration")
+	}
+}
+
+// The self-service preference routes are mounted per audience under
+// RequirePermission("user.self"), outside the admin groups: none of them may
+// appear in routeGroups, and the registrar mounts exactly the four self ops.
+func TestSelfPreferenceRoutes_AreNotInTheAdminGroupsAndMountFourOps(t *testing.T) {
+	for g, list := range operationsPerGate(t) {
+		for _, op := range list {
+			if strings.Contains(op, "/v1/me/") {
+				t.Errorf("%s is mounted in admin group %+v — self routes live on user.self", op, g)
+			}
+		}
+	}
+	api := humachi.New(chi.NewRouter(), huma.DefaultConfig("test", "1.0.0"))
+	handlers.RegisterSelfPreferenceRoutes(api, handlers.NewPreferenceHandler(nil, nil, nil, nil), "operator-")
+	var ops []string
+	for path, item := range api.OpenAPI().Paths {
+		for method, op := range map[string]*huma.Operation{http.MethodGet: item.Get, http.MethodPut: item.Put} {
+			if op != nil {
+				ops = append(ops, method+" "+path)
+			}
+		}
+	}
+	sort.Strings(ops)
+	want := []string{
+		"GET /v1/me/preferences",
+		"GET /v1/me/preferences/{module}",
+		"GET /v1/me/profile-sections",
+		"PUT /v1/me/preferences/{module}",
+	}
+	if strings.Join(ops, ",") != strings.Join(want, ",") {
+		t.Errorf("self preference ops = %v, want %v", ops, want)
 	}
 }
