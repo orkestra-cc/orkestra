@@ -485,6 +485,13 @@ mkdir -p "$PROJECT_ROOT/frontend-client"
 prepare_dev_frontend_dirs; rc=$?
 check "dev frontend dirs: client dependencies and mount point" "yes" \
     "$([ "$rc" = 0 ] && [ -d "$PROJECT_ROOT/frontend-client/.docker/node_modules" ] && [ -d "$PROJECT_ROOT/frontend-client/node_modules" ] && echo yes)"
+check "dev frontend dirs: only the apps it is given" "yes" \
+    "$(rm -r "$PROJECT_ROOT/frontend-client/.npm-cache" && prepare_dev_frontend_dirs frontend-admin && [ ! -e "$PROJECT_ROOT/frontend-client/.npm-cache" ] && echo yes)"
+prepare_dev_frontend_dirs
+# The refusals rely on chmod making a directory unwritable, which root ignores.
+if [ "$(id -u)" = 0 ]; then
+    echo "  skip dev frontend dirs: unwritable-directory checks (running as root)"
+else
 chmod 555 "$PROJECT_ROOT/frontend-client/.docker/node_modules"
 msg=$(prepare_dev_frontend_dirs 2>&1); rc=$?
 check "dev frontend dirs: unwritable dependencies refused" "1" "$rc"
@@ -500,6 +507,12 @@ chmod 555 "$PROJECT_ROOT/frontend-admin/.npm-cache"
 prepare_dev_frontend_dirs 2>/dev/null; rc=$?
 check "dev frontend dirs: admin's unwritable npm cache refused" "1" "$rc"
 chmod 755 "$PROJECT_ROOT/frontend-admin/.npm-cache"
+# A backend-only deploy prepares no frontend: an unwritable one does not stop it.
+chmod 555 "$PROJECT_ROOT/frontend-client/.npm-cache"
+prepare_dev_frontend_dirs frontend-admin; rc=$?
+check "dev frontend dirs: an app not given is not checked" "0" "$rc"
+chmod 755 "$PROJECT_ROOT/frontend-client/.npm-cache"
+fi
 rm -r "$PROJECT_ROOT"
 PROJECT_ROOT="$old_project_root"
 
