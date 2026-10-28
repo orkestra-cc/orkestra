@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"time"
 
@@ -669,7 +670,8 @@ func (s *Searcher) rerank(ctx context.Context, tenantID string, spec iface.Retri
 	}
 	seen := make([]bool, n)
 	for _, r := range res.Results {
-		if r.Index < 0 || r.Index >= n || seen[r.Index] {
+		if r.Index < 0 || r.Index >= n || seen[r.Index] ||
+			math.IsNaN(float64(r.Score)) || math.IsInf(float64(r.Score), 0) {
 			return skip("bad_result")
 		}
 		seen[r.Index] = true

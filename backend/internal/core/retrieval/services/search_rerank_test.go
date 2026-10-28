@@ -3,9 +3,11 @@ package services
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/retrieval/engine"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -56,7 +58,7 @@ func TestSearch_RerankReordersHead(t *testing.T) {
 	assert.Equal(t, false, res.Degraded)
 }
 
-func TestSearch_RerankTailFollowsHeadInFusedOrder(t *testing.T) {
+func TestSearch_RerankNCappedByTopK(t *testing.T) {
 	fx := rerankFixture(t)
 	fx.spec.Rerank.TopK = 2 // RerankK = max(2, Limit 3) = 3 -> use Limit 1 to get n = 2
 	fx.reranker.res = &iface.RerankResult{Results: []iface.RerankScore{{Index: 1, Score: 0.8}, {Index: 0, Score: 0.2}}}
@@ -123,6 +125,9 @@ func TestSearch_RerankMalformedResultIsFailure(t *testing.T) {
 		"negative":  {Results: []iface.RerankScore{{Index: -1, Score: 0.9}, {Index: 0, Score: 0.5}, {Index: 1, Score: 0.1}}},
 		"short":     {Results: []iface.RerankScore{{Index: 0, Score: 0.9}}},
 		"nil":       nil,
+		"nan":       {Results: []iface.RerankScore{{Index: 0, Score: float32(math.NaN())}, {Index: 1, Score: 0.5}, {Index: 2, Score: 0.1}}},
+		"+inf":      {Results: []iface.RerankScore{{Index: 0, Score: float32(math.Inf(1))}, {Index: 1, Score: 0.5}, {Index: 2, Score: 0.1}}},
+		"-inf":      {Results: []iface.RerankScore{{Index: 0, Score: 0.9}, {Index: 1, Score: 0.5}, {Index: 2, Score: float32(math.Inf(-1))}}},
 	}
 	for name, rr := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -168,4 +173,21 @@ func TestSearch_RerankCancelledCallerReturnsCtxErr(t *testing.T) {
 	res, err := NewSearcher(fx.deps()).Search(ctx, limitReq(2))
 	requireIs(t, err, context.Canceled)
 	assert.Nil(t, res)
+}
+
+func TestRerank_HeadReorderedTailKeepsFusedOrder(t *testing.T) {
+	fx := rerankFixture(t)
+	fx.reranker.res = &iface.RerankResult{Results: []iface.RerankScore{{Index: 1, Score: 0.8}, {Index: 0, Score: 0.2}}}
+	surv := []engine.Candidate{
+		cand("s1", 1, 0, searchText1), cand("s2", 1, 0, searchText2), cand("s3", 1, 0, searchText3),
+	}
+	ordered, scores, ok := NewSearcher(fx.deps()).rerank(fx.ctx, "t-1", fx.spec, "q", surv, 2)
+	require.Equal(t, true, ok)
+	require.Len(t, ordered, 3)
+	got := []string{ordered[0].Runtime.SourceID, ordered[1].Runtime.SourceID, ordered[2].Runtime.SourceID}
+	assert.Equal(t, []string{"s2", "s1", "s3"}, got)
+	assert.Equal(t, []float32{0.8, 0.2}, scores)
+	assert.Equal(t, []float32{0.8, 0.2, surv[2].Score}, []float32{ordered[0].Score, ordered[1].Score, ordered[2].Score})
+	assert.Equal(t, float32(1), surv[0].Score) // input untouched
+	assert.Equal(t, []string{searchText1, searchText2}, fx.reranker.reqs[0].Documents)
 }
