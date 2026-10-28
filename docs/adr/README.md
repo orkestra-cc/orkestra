@@ -24,6 +24,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0020](0020-bearer-only-require-auth.md) | RequireAuth is bearer-only; refresh-token rotation only through explicit refresh endpoints | Accepted | 2026-08-29 |
 | [0021](0021-explicit-sender-selection.md) | Explicit per-send sender selection under operator policy | Accepted | 2026-09-11 |
 | [0022](0022-core-llm-module.md) | Core `llm` module: credentials, models, grants, budget and gateway for language models | Accepted | 2026-10-10 |
+| [0023](0023-core-retrieval-module.md) | Core `retrieval` module: hybrid search with local inference, principal-filtered visibility, durable erasure | Proposed | 2026-10-26 |
 
 ## Numbering across the fork chain
 
