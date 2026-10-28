@@ -374,6 +374,10 @@ type GraphProvider interface {
 // The single query method the agents module wraps in its own RAGBridge.
 // ---------------------------------------------------------------------------
 
+// RAGQueryProvider is the legacy question-answering contract the agents
+// module wraps in its own RAGBridge.
+//
+// Deprecated: use iface.RetrievalSearch, served by the core retrieval module under module.ServiceRetrieval (ADR-0023 D16). Removed in a later release.
 type RAGQueryProvider interface {
 	Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*RAGQueryResponse, error)
 }
