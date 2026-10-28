@@ -319,17 +319,22 @@ func TestRenderFilter_RefusesMalformed(t *testing.T) {
 	f64 := func(v float64) *float64 { return &v }
 	open := engine.Filter{Field: "status", Match: []any{"open"}}
 	cases := map[string]engine.Filter{
-		"field with children":      {Field: "status", Match: []any{"open"}, Must: []engine.Filter{open}},
-		"field with only children": {Field: "status", Should: []engine.Filter{open}},
-		"match and range":          {Field: "score", Match: []any{int64(1)}, Range: &engine.Range{Gte: f64(1)}},
-		"match and exists":         {Field: "score", Match: []any{int64(1)}, Exists: true},
-		"range and exists":         {Field: "score", Range: &engine.Range{Gte: f64(1)}, Exists: true},
-		"leaf without condition":   {Field: "ratio"},
-		"empty match":              {Field: "ratio", Match: []any{}},
-		"range without bounds":     {Field: "score", Range: &engine.Range{}},
-		"empty composite":          {},
-		"nested empty composite":   {Must: []engine.Filter{open, {}}},
-		"nested malformed leaf":    {Should: []engine.Filter{open, {MustNot: []engine.Filter{{Field: "x"}}}}},
+		"field with children":         {Field: "status", Match: []any{"open"}, Must: []engine.Filter{open}},
+		"field with only children":    {Field: "status", Should: []engine.Filter{open}},
+		"match and range":             {Field: "score", Match: []any{int64(1)}, Range: &engine.Range{Gte: f64(1)}},
+		"match and exists":            {Field: "score", Match: []any{int64(1)}, Exists: true},
+		"range and exists":            {Field: "score", Range: &engine.Range{Gte: f64(1)}, Exists: true},
+		"leaf without condition":      {Field: "ratio"},
+		"empty match":                 {Field: "ratio", Match: []any{}},
+		"range without bounds":        {Field: "score", Range: &engine.Range{}},
+		"empty composite":             {},
+		"nested empty composite":      {Must: []engine.Filter{open, {}}},
+		"composite with stray match":  {Must: []engine.Filter{open}, Match: []any{"x"}},
+		"composite with stray range":  {Must: []engine.Filter{open}, Range: &engine.Range{Gte: f64(1)}},
+		"composite with stray exists": {Must: []engine.Filter{open}, Exists: true},
+		"composite with empty range":  {Should: []engine.Filter{open}, Range: &engine.Range{}},
+		"nested stray exists":         {Must: []engine.Filter{{MustNot: []engine.Filter{open}, Exists: true}}},
+		"nested malformed leaf":       {Should: []engine.Filter{open, {MustNot: []engine.Filter{{Field: "x"}}}}},
 	}
 	for name, f := range cases {
 		t.Run(name, func(t *testing.T) {
