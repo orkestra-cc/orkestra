@@ -29,9 +29,15 @@ const (
 // ActiveRetentionErasurePartialFilter scopes the unique userUuid index of
 // ErasureRequestsCollection to incomplete retention requests: one subject has
 // at most one, so two replicas running retention at once cannot both record
-// and run a request for the same person. Returned fresh per call (a map).
+// and run a request for the same person. The two conditions are an ordered
+// $and of single-key maps, not one two-key map: a Go map marshals its keys in
+// random order, and the index specification must reach Mongo as the same
+// bytes on every boot. Returned fresh per call (a map).
 func ActiveRetentionErasurePartialFilter() map[string]any {
-	return map[string]any{"status": ErasureRequestIncomplete, "source": ErasureSourceRetention}
+	return map[string]any{"$and": []any{
+		map[string]any{"status": ErasureRequestIncomplete},
+		map[string]any{"source": ErasureSourceRetention},
+	}}
 }
 
 // Per-producer erasure outcomes.
