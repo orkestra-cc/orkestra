@@ -35,7 +35,7 @@ const report = (over: Record<string, unknown> = {}) => ({
   ...over
 });
 
-const stub = (body: unknown) =>
+const stub = (body: ReturnType<typeof report>) =>
   server.use(
     http.get(url('/v1/admin/retrieval/tenant/indexing'), () =>
       HttpResponse.json(body)
