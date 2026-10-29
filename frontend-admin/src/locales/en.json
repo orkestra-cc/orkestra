@@ -202,17 +202,17 @@
       "policy_persistence_failed": "The request could not be completed."
     },
     "retrieval": {
-      "not_configured": "Semantic search is not configured on this installation.",
-      "unavailable": "The search engine is not reachable right now. Try again later.",
-      "corpus_not_found": "That corpus does not exist.",
-      "corpus_registered": "That corpus is still registered by a running module: it cannot be dropped.",
-      "corpus_unavailable": "That corpus is not ready: its inference profile or locality check failed.",
-      "forbidden": "You may not do this.",
-      "invalid_filter": "The filter is not valid.",
-      "invalid_request": "Some fields are invalid.",
-      "locality_violation": "The corpus allows only local inference and the endpoint is hosted.",
-      "visibility_check_failed": "Visibility could not be verified, so no result is shown.",
-      "internal": "The operation failed."
+      "not_configured": "The vector engine is not configured on this installation.",
+      "unavailable": "The vector engine is not reachable right now. Try again shortly.",
+      "corpus_not_found": "No retrieval state exists for this corpus.",
+      "corpus_registered": "The corpus is still registered. Unregister it before dropping its state.",
+      "corpus_unavailable": "The module that owns this corpus is not running. Try again when it is.",
+      "forbidden": "You may not access this corpus.",
+      "invalid_filter": "The filter does not fit this corpus.",
+      "invalid_request": "The search request is not valid.",
+      "locality_violation": "An inference endpoint breaks the locality rule of this corpus.",
+      "visibility_check_failed": "The source visibility check could not run, so no result is shown. Try again shortly.",
+      "internal": "The retrieval request could not be completed."
     },
     "llm": {
       "not_configured": "No active model or credential is configured in this organization.",

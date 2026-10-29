@@ -202,17 +202,17 @@
       "policy_persistence_failed": "Non è stato possibile completare la richiesta."
     },
     "retrieval": {
-      "not_configured": "La ricerca semantica non è configurata su questa installazione.",
-      "unavailable": "Il motore di ricerca non è raggiungibile in questo momento. Riprova più tardi.",
-      "corpus_not_found": "Questo corpus non esiste.",
-      "corpus_registered": "Questo corpus è ancora registrato da un modulo attivo: non può essere eliminato.",
-      "corpus_unavailable": "Questo corpus non è pronto: il profilo di inferenza o il controllo di località è fallito.",
-      "forbidden": "Non puoi eseguire questa operazione.",
-      "invalid_filter": "Il filtro non è valido.",
-      "invalid_request": "Alcuni campi non sono validi.",
-      "locality_violation": "Il corpus ammette solo inferenza locale e l'endpoint è hosted.",
-      "visibility_check_failed": "Non è stato possibile verificare la visibilità, quindi nessun risultato viene mostrato.",
-      "internal": "L'operazione non è riuscita."
+      "not_configured": "Il motore vettoriale non è configurato su questa installazione.",
+      "unavailable": "Il motore vettoriale non è raggiungibile in questo momento. Riprova fra poco.",
+      "corpus_not_found": "Non esiste alcuno stato di retrieval per questo corpus.",
+      "corpus_registered": "Il corpus è ancora registrato. Annulla la registrazione prima di eliminarne lo stato.",
+      "corpus_unavailable": "Il modulo che possiede questo corpus non è in esecuzione. Riprova quando lo sarà.",
+      "forbidden": "Non puoi accedere a questo corpus.",
+      "invalid_filter": "Il filtro non è adatto a questo corpus.",
+      "invalid_request": "La richiesta di ricerca non è valida.",
+      "locality_violation": "Un endpoint di inferenza viola la regola di località di questo corpus.",
+      "visibility_check_failed": "Non è stato possibile eseguire il controllo di visibilità delle fonti, quindi nessun risultato viene mostrato. Riprova fra poco.",
+      "internal": "La richiesta di retrieval non è stata completata."
     },
     "llm": {
       "not_configured": "Nessun modello o credenziale attivi in questa organizzazione.",
