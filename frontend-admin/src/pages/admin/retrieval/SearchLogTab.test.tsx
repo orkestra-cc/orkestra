@@ -115,6 +115,31 @@ describe('SearchLogTab', () => {
     expect(screen.getByText('51 to 100 of 120')).toBeInTheDocument();
   });
 
+  it('returns to the first page when a later page comes back empty', async () => {
+    let total = 120;
+    server.use(
+      http.get(url('/v1/admin/retrieval/search-log'), ({ request }) => {
+        const offset = Number(new URL(request.url).searchParams.get('offset'));
+        searches.push(new URL(request.url).searchParams);
+        const count = Math.max(0, Math.min(50, total - offset));
+        return HttpResponse.json({
+          items: Array.from({ length: count }, (_, k) => entry(offset + k)),
+          total,
+          limit: 50,
+          offset
+        });
+      })
+    );
+    renderWithProviders(<SearchLogTab />);
+    await screen.findByText('query 0');
+    // Retention removes everything past the first page while the operator pages.
+    total = 30;
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('query 29')).toBeInTheDocument();
+    expect(screen.getByText('1 to 30 of 30')).toBeInTheDocument();
+    expect(searches.map(s => s.get('offset'))).toEqual(['0', '50', '0']);
+  });
+
   it('never shows the previous page while the next one loads', async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>(resolve => {

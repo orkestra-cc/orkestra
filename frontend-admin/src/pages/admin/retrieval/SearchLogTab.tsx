@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Col, Form, Row, Spinner } from 'react-bootstrap';
 import DatePicker from 'react-datepicker';
 import { Controller, useForm, type Resolver } from 'react-hook-form';
@@ -365,6 +365,15 @@ const SearchLogTab = () => {
     const next = typeof updater === 'function' ? updater(pagination) : updater;
     setPageIndex(next.pageIndex);
   };
+
+  // A later page can come back empty when rows leave the log while paging
+  // (retention, erasure); the pager is hidden with the empty state, so go
+  // back to the first page rather than strand the operator there.
+  const laterPageEmpty =
+    !!data && !isFetching && data.items.length === 0 && pageIndex > 0;
+  useEffect(() => {
+    if (laterPageEmpty) setPageIndex(0);
+  }, [laterPageEmpty]);
 
   const table = useAdvanceTable({
     data: data?.items ?? [],
