@@ -600,9 +600,14 @@ func (a *AdminService) SearchLog(ctx context.Context, q models.SearchLogQuery) (
 		Items: make([]models.RetrievalSearchLogEntry, 0, len(rows)), Total: total, Limit: q.Limit, Offset: q.Offset,
 	}
 	for _, r := range rows {
+		filter, ok := a.decodeLogFilter(ctx, r)
+		text := ""
+		if ok {
+			text = r.FilterJSON
+		}
 		page.Items = append(page.Items, models.RetrievalSearchLogEntry{
 			ID: r.UUID, CreatedAt: r.CreatedAt, UserUUID: r.UserUUID, Corpus: r.Corpus, Query: r.Query,
-			Filter: a.decodeLogFilter(ctx, r), Mode: r.Mode,
+			Filter: filter, FilterText: text, Mode: r.Mode,
 			Principals: nonNil(r.Principals), ReturnedSourceIDs: nonNil(r.SourceIDs), Subjects: nonNil(r.Subjects),
 			HitCount: r.HitCount, Degraded: r.Degraded, Outcome: r.Outcome, ErrorKind: r.ErrorKind,
 			DurationMs: r.Timings.TotalMs,
@@ -625,12 +630,13 @@ func nonNil(s []string) []string {
 	return slices.Clone(s)
 }
 
-// decodeLogFilter reads the stored filter text keeping numbers exact. A
-// filter that does not decode (or has trailing data) is shown as absent, and
-// the log names the tenant and corpus only.
-func (a *AdminService) decodeLogFilter(ctx context.Context, row models.SearchLog) any {
+// decodeLogFilter reads the stored filter text keeping numbers exact; ok is
+// true only on a clean decode of a non-empty text. A filter that does not
+// decode (or has trailing data) is shown as absent, and the log names the
+// tenant and corpus only.
+func (a *AdminService) decodeLogFilter(ctx context.Context, row models.SearchLog) (any, bool) {
 	if row.FilterJSON == "" {
-		return nil
+		return nil, false
 	}
 	dec := json.NewDecoder(strings.NewReader(row.FilterJSON))
 	dec.UseNumber()
@@ -638,7 +644,7 @@ func (a *AdminService) decodeLogFilter(ctx context.Context, row models.SearchLog
 	if err := dec.Decode(&v); err != nil || dec.Decode(new(any)) != io.EOF {
 		a.log.WarnContext(ctx, "retrieval admin: stored search filter could not be decoded; shown without it",
 			slog.String("tenant", row.TenantID), slog.String("corpus", row.Corpus))
-		return nil
+		return nil, false
 	}
-	return v
+	return v, true
 }

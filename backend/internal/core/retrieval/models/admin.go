@@ -124,7 +124,8 @@ type RetrievalDiagnosticsReport struct {
 }
 
 // RetrievalSearchLogEntry is one audited search. Filter is the decoded
-// canonical filter JSON, with numbers kept exact.
+// canonical filter JSON, with numbers kept exact; FilterText is the same JSON
+// as stored, verbatim.
 type RetrievalSearchLogEntry struct {
 	ID                string    `json:"id"` // row uuid
 	CreatedAt         time.Time `json:"createdAt"`
@@ -132,6 +133,7 @@ type RetrievalSearchLogEntry struct {
 	Corpus            string    `json:"corpus"`
 	Query             string    `json:"query"`
 	Filter            any       `json:"filter,omitempty"`
+	FilterText        string    `json:"filterText,omitempty" doc:"The stored canonical filter JSON, verbatim; present exactly when filter is. Display this text: re-serializing filter in a client that parses JSON numbers as doubles can change integers beyond 2^53."`
 	Mode              string    `json:"mode"`
 	Principals        []string  `json:"principals"`
 	ReturnedSourceIDs []string  `json:"returnedSourceIds"`

@@ -136,6 +136,10 @@ export interface RetrievalSearchLogEntry {
   query: string;
   // The decoded canonical filter JSON, numbers kept exact; shape unknown.
   filter?: unknown;
+  // The stored canonical filter JSON, verbatim; present exactly when
+  // `filter` is. Display this text and never JSON.parse/stringify it:
+  // integers beyond 2^53 would be rounded.
+  filterText?: string;
   mode: string;
   principals: string[];
   returnedSourceIds: string[];

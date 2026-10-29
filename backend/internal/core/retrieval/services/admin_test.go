@@ -929,6 +929,8 @@ func TestAdminSearchLog_FilterKeepsLargeIntegersExact(t *testing.T) {
 	out, err := json.Marshal(page)
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "9007199254740993")
+	// The text the console displays is the stored string, byte for byte.
+	assert.Equal(t, `{"field":"seniority","op":"eq","value":9007199254740993}`, page.Items[0].FilterText)
 }
 
 func TestAdminSearchLog_BadFilterIsOmittedWithoutLeaking(t *testing.T) {
@@ -945,6 +947,7 @@ func TestAdminSearchLog_BadFilterIsOmittedWithoutLeaking(t *testing.T) {
 	require.Len(t, page.Items, 3)
 	for _, it := range page.Items {
 		assert.Nil(t, it.Filter)
+		assert.Equal(t, "", it.FilterText) // both or neither
 		assert.NotNil(t, it.Principals)
 	}
 	assert.Equal(t, 2, strings.Count(buf.String(), "level=WARN"))

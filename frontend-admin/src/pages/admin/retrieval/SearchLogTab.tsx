@@ -152,11 +152,13 @@ const DetailsCell = ({ entry }: { entry: RetrievalSearchLogEntry }) => {
             )}
           </Detail>
           <Detail label={t('adminRetrieval.searchLog.details.filter')}>
-            {entry.filter == null ? (
+            {/* filterText verbatim, never `filter` re-serialized: the
+                browser rounds integers beyond 2^53. */}
+            {!entry.filterText ? (
               none
             ) : (
-              <pre className="font-monospace fs-11 bg-body-tertiary border rounded p-2 mb-0 text-wrap">
-                {JSON.stringify(entry.filter, null, 2)}
+              <pre className="font-monospace fs-11 bg-body-tertiary border rounded p-2 mb-0 text-wrap text-break">
+                {entry.filterText}
               </pre>
             )}
           </Detail>

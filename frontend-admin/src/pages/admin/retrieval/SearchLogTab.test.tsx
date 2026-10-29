@@ -9,6 +9,8 @@ import { completeStepUp, subscribeStepUp } from 'store/stepUp';
 import SearchLogTab from './SearchLogTab';
 
 const USER = '3f0c1f6e-1d2a-4b7e-9a51-2c4d5e6f7a80';
+// An integer above 2^53: JSON.parse would round it to ...992.
+const FILTER_TEXT = '{"field":"seniority","op":"eq","value":9007199254740993}';
 
 const entry = (i: number) => ({
   id: `row-${i}`,
@@ -17,6 +19,7 @@ const entry = (i: number) => ({
   corpus: 'crm',
   query: `query ${i}`,
   filter: { field: 'seniority', op: 'gte', value: 5 },
+  filterText: FILTER_TEXT,
   mode: 'hybrid',
   principals: ['tenant:*', 'user:u-1'],
   returnedSourceIds: ['contact-7', 'contact-9'],
@@ -135,10 +138,43 @@ describe('SearchLogTab', () => {
     expect(within(row).getByText('user:u-1')).toBeInTheDocument();
     expect(within(row).getByText(/contact-9/)).toBeInTheDocument();
     expect(within(row).getByText(/subject-a/)).toBeInTheDocument();
-    expect(within(row).getByText(/"seniority"/)).toBeInTheDocument();
+    // The stored text verbatim: the integer above 2^53 is not rounded.
+    expect(within(row).getByText(FILTER_TEXT)).toBeInTheDocument();
+    expect(within(row).queryByText(/9007199254740992/)).not.toBeInTheDocument();
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(within(row).queryByText('user:u-1')).not.toBeInTheDocument();
+  });
+
+  it('shows no filter for a row without filterText, never re-serializing filter', async () => {
+    // Row 0 has a decoded filter but no text; row 1 has neither.
+    const withFilterOnly: Record<string, unknown> = entry(0);
+    delete withFilterOnly.filterText;
+    const bare: Record<string, unknown> = { ...entry(1) };
+    delete bare.filter;
+    delete bare.filterText;
+    server.use(
+      http.get(url('/v1/admin/retrieval/search-log'), () =>
+        HttpResponse.json({
+          items: [withFilterOnly, bare],
+          total: 2,
+          limit: 50,
+          offset: 0
+        })
+      )
+    );
+    renderWithProviders(<SearchLogTab />);
+    for (const query of ['query 0', 'query 1']) {
+      const row = (await screen.findByText(query)).closest('tr');
+      if (!row) throw new Error('no row');
+      await userEvent.click(
+        within(row).getByRole('button', { name: /show details/i })
+      );
+      const filterLabel = within(row).getByText('Filter');
+      const value = filterLabel.nextElementSibling;
+      expect(value).toHaveTextContent('None');
+      expect(within(row).queryByText(/seniority/)).not.toBeInTheDocument();
+    }
   });
 
   it('offers to verify again when the step-up is dismissed', async () => {

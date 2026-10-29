@@ -8512,6 +8512,10 @@
             "type": "string"
           },
           "filter": {},
+          "filterText": {
+            "description": "The stored canonical filter JSON, verbatim; present exactly when filter is. Display this text: re-serializing filter in a client that parses JSON numbers as doubles can change integers beyond 2^53.",
+            "type": "string"
+          },
           "hitCount": {
             "format": "int64",
             "type": "integer"
