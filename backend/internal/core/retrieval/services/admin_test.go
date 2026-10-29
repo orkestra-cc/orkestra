@@ -450,6 +450,8 @@ func TestTenantIndexing_PointsOnlyWhenEngineOK(t *testing.T) {
 	assert.True(t, crm.OwnerRunning)
 	assert.Nil(t, fresh.Points)
 	assert.Equal(t, "pending", fresh.InitialBuild)
+	assert.Equal(t, "active", crm.State)
+	assert.Equal(t, "uninitialized", fresh.State)
 
 	fx.store.builds["crm"] = &models.TenantProgress{Status: models.ProgressDone}
 	rep, err = fx.svc.TenantIndexing(fx.ctx)
@@ -462,6 +464,27 @@ func TestTenantIndexing_PointsOnlyWhenEngineOK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, models.ComponentNotConfigured, rep.Engine.Status)
 	assert.Nil(t, rep.Corpora[0].Points)
+}
+
+// A broken corpus is reported as broken to the organization, not as a
+// queued build: its state says error (the reason stays operator-only).
+func TestTenantIndexing_ReportsTheCorpusState(t *testing.T) {
+	fx := newAdminFx(t, adminSpec("broken", "crm"), adminSpec("changed", "crm"))
+	fx.store.states["broken"] = models.CorpusState{Corpus: "broken", Status: models.CorpusStatusError, Reason: "locality", Version: 1}
+	fx.store.states["changed"] = models.CorpusState{Corpus: "changed", Status: models.CorpusStatusProfileChanged, ActiveGeneration: 1, Version: 1}
+	rep, err := fx.svc.TenantIndexing(fx.ctx)
+	require.NoError(t, err)
+	require.Len(t, rep.Corpora, 2)
+	byName := map[string]models.RetrievalTenantCorpus{}
+	for _, c := range rep.Corpora {
+		byName[c.Corpus] = c
+	}
+	assert.Equal(t, "error", byName["broken"].State)
+	assert.Equal(t, "pending", byName["broken"].InitialBuild)
+	assert.Equal(t, "profile_changed", byName["changed"].State)
+	out, err := json.Marshal(rep)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "locality")
 }
 
 func TestTenantIndexing_CountErrors(t *testing.T) {

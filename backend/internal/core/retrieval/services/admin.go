@@ -331,9 +331,10 @@ func (a *AdminService) TenantIndexing(ctx context.Context) (*models.RetrievalTen
 	}
 	for _, sp := range a.rt.Corpora() {
 		st := byName[sp.Name]
+		state, _ := stateOf(st)
 		c := models.RetrievalTenantCorpus{
 			Corpus: sp.Name, Owner: sp.Owner, OwnerRunning: a.ownerRunning(sp.Owner),
-			InitialBuild: "pending", Outbox: backlog[sp.Name],
+			State: state, InitialBuild: "pending", Outbox: backlog[sp.Name],
 		}
 		if st != nil && st.ActiveGeneration > 0 {
 			prog, err := a.store.TenantBuild(ctx, sp.Name, st.ActiveGeneration)

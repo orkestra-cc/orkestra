@@ -140,7 +140,7 @@ func (h *AdminHandler) DropCorpus(ctx context.Context, in *RetrievalDropInput) (
 type RetrievalSearchLogInput struct {
 	UserUUID string    `query:"userUuid" format:"uuid" doc:"Only searches by this user"`
 	Since    time.Time `query:"since" doc:"Only searches at or after this time (RFC 3339)"`
-	Until    time.Time `query:"until" doc:"Only searches before this time (RFC 3339)"`
+	Until    time.Time `query:"until" doc:"Only searches at or before this time (RFC 3339)"`
 	Limit    int       `query:"limit" default:"50" minimum:"1" maximum:"200"`
 	Offset   int       `query:"offset" default:"0" minimum:"0" maximum:"10000"`
 }

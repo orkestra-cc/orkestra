@@ -8538,10 +8538,7 @@
             "items": {
               "type": "string"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           },
           "query": {
             "type": "string"
@@ -8550,19 +8547,13 @@
             "items": {
               "type": "string"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           },
           "subjects": {
             "items": {
               "type": "string"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           },
           "userUuid": {
             "type": "string"
@@ -8653,12 +8644,22 @@
           "points": {
             "format": "int64",
             "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "uninitialized",
+              "active",
+              "profile_changed",
+              "error"
+            ],
+            "type": "string"
           }
         },
         "required": [
           "corpus",
           "owner",
           "ownerRunning",
+          "state",
           "initialBuild",
           "outbox"
         ],
@@ -15495,12 +15496,12 @@
             }
           },
           {
-            "description": "Only searches before this time (RFC 3339)",
+            "description": "Only searches at or before this time (RFC 3339)",
             "explode": false,
             "in": "query",
             "name": "until",
             "schema": {
-              "description": "Only searches before this time (RFC 3339)",
+              "description": "Only searches at or before this time (RFC 3339)",
               "format": "date-time",
               "type": "string"
             }

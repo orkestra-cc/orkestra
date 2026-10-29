@@ -79,6 +79,7 @@ type RetrievalTenantCorpus struct {
 	Corpus       string           `json:"corpus"`
 	Owner        string           `json:"owner"`
 	OwnerRunning bool             `json:"ownerRunning"`
+	State        string           `json:"state" enum:"uninitialized,active,profile_changed,error"` // as the corpus report, without the reason (installation detail)
 	InitialBuild string           `json:"initialBuild" enum:"pending,building,done"`
 	Points       *int64           `json:"points,omitempty"` // active generation, this tenant; absent unless engine ok
 	Outbox       RetrievalBacklog `json:"outbox"`
@@ -135,9 +136,9 @@ type RetrievalSearchLogEntry struct {
 	Filter            any       `json:"filter,omitempty"`
 	FilterText        string    `json:"filterText,omitempty" doc:"The stored canonical filter JSON, verbatim; present exactly when filter is. Display this text: re-serializing filter in a client that parses JSON numbers as doubles can change integers beyond 2^53."`
 	Mode              string    `json:"mode"`
-	Principals        []string  `json:"principals"`
-	ReturnedSourceIDs []string  `json:"returnedSourceIds"`
-	Subjects          []string  `json:"subjects"`
+	Principals        []string  `json:"principals" nullable:"false"`
+	ReturnedSourceIDs []string  `json:"returnedSourceIds" nullable:"false"`
+	Subjects          []string  `json:"subjects" nullable:"false"`
 	HitCount          int       `json:"hitCount"`
 	Degraded          bool      `json:"degraded"`
 	Outcome           string    `json:"outcome" enum:"ok,degraded,error"`
