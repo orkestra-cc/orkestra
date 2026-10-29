@@ -188,11 +188,12 @@ func (r *fakeUserRepo) ClearFailedLogins(_ context.Context, _ string) error     
 func (r *fakeUserRepo) GetForPINAuth(_ context.Context, _ string) (*iface.User, error) {
 	return nil, repository.ErrUserNotFound
 }
-func (r *fakeUserRepo) CountByUsername(_ context.Context, _ string) (int64, error)      { return 0, nil }
-func (r *fakeUserRepo) SetPINHash(_ context.Context, _, _ string) error                 { return nil }
-func (r *fakeUserRepo) ClearPIN(_ context.Context, _ string) error                      { return nil }
-func (r *fakeUserRepo) RecordFailedPIN(_ context.Context, _ string, _ *time.Time) error { return nil }
-func (r *fakeUserRepo) ClearFailedPINs(_ context.Context, _ string) error               { return nil }
+func (r *fakeUserRepo) CountByUsername(_ context.Context, _ string) (int64, error) { return 0, nil }
+func (r *fakeUserRepo) SetPINHash(_ context.Context, _, _ string) error            { return nil }
+func (r *fakeUserRepo) ClearPIN(_ context.Context, _ string) error                 { return nil }
+func (r *fakeUserRepo) RecordFailedPIN(_ context.Context, _ string) (int, error)   { return 1, nil }
+func (r *fakeUserRepo) LockPIN(_ context.Context, _ string, _ time.Time) error     { return nil }
+func (r *fakeUserRepo) ClearFailedPINs(_ context.Context, _ string) error          { return nil }
 func (r *fakeUserRepo) SetMFAGraceStartedAt(_ context.Context, id string, when time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -98,12 +98,18 @@ func TestPINFailures_CountLockAndClear(t *testing.T) {
 	ctx := context.Background()
 	seedPINUser(t, repo, bson.M{"uuid": "u-1", "pinHash": "h", "failedLoginCount": 2})
 
-	if err := repo.RecordFailedPIN(ctx, "u-1", nil); err != nil {
-		t.Fatal(err)
+	for want := 1; want <= 2; want++ {
+		n, err := repo.RecordFailedPIN(ctx, "u-1")
+		if err != nil || n != want {
+			t.Fatalf("RecordFailedPIN = %d, %v; want %d", n, err, want)
+		}
 	}
 	lock := time.Now().Add(15 * time.Minute).Truncate(time.Millisecond)
-	if err := repo.RecordFailedPIN(ctx, "u-1", &lock); err != nil {
+	if err := repo.LockPIN(ctx, "u-1", lock); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := repo.RecordFailedPIN(ctx, "missing"); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("missing user: %v", err)
 	}
 	u, _ := repo.GetByID(ctx, "u-1")
 	if u.PINFailedCount != 2 || u.PINLockedUntil == nil || !u.PINLockedUntil.Equal(lock) {

@@ -222,9 +222,13 @@ type PINCredentialStore interface {
 	SetPINHash(ctx context.Context, userUUID, hash string) error
 	// ClearPIN removes the PIN hash, its timestamp, counter and lock.
 	ClearPIN(ctx context.Context, userUUID string) error
-	// RecordFailedPIN increments PINFailedCount and, when lockUntil is
-	// non-nil, sets PINLockedUntil.
-	RecordFailedPIN(ctx context.Context, userUUID string, lockUntil *time.Time) error
+	// RecordFailedPIN atomically increments PINFailedCount and returns the
+	// NEW value, so concurrent attempts each see a distinct count: the PIN
+	// service reserves an attempt with it BEFORE verifying, which is what
+	// bounds a parallel burst. ErrUserNotFound for a missing or deleted row.
+	RecordFailedPIN(ctx context.Context, userUUID string) (int, error)
+	// LockPIN sets PINLockedUntil.
+	LockPIN(ctx context.Context, userUUID string, until time.Time) error
 	// ClearFailedPINs resets the PIN failure counter and lock.
 	ClearFailedPINs(ctx context.Context, userUUID string) error
 }

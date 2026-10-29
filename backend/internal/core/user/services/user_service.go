@@ -990,11 +990,20 @@ func (s *userService) ClearPIN(ctx context.Context, userUUID string) error {
 }
 
 // RecordFailedPIN implements iface.PINCredentialStore.
-func (s *userService) RecordFailedPIN(ctx context.Context, userUUID string, lockUntil *time.Time) error {
+func (s *userService) RecordFailedPIN(ctx context.Context, userUUID string) (int, error) {
+	if userUUID == "" {
+		return 0, ErrInvalidInput
+	}
+	n, err := s.userRepo.RecordFailedPIN(ctx, userUUID)
+	return n, asUserNotFound(err)
+}
+
+// LockPIN implements iface.PINCredentialStore.
+func (s *userService) LockPIN(ctx context.Context, userUUID string, until time.Time) error {
 	if userUUID == "" {
 		return ErrInvalidInput
 	}
-	return s.userRepo.RecordFailedPIN(ctx, userUUID, lockUntil)
+	return s.userRepo.LockPIN(ctx, userUUID, until)
 }
 
 // ClearFailedPINs implements iface.PINCredentialStore.

@@ -544,7 +544,19 @@ func (s *jwtService) GenerateTokenPairWithAMR(
 	ctx := *securityCtx
 	ctx.AMR = amr
 	ctx.LastOTPAt = lastOTPAt
+	s.applyPINLifetime(&ctx)
 	return s.GenerateTokenPair(user, deviceInfo, &ctx)
+}
+
+// applyPINLifetime gives an access token whose amr records a PIN sign-in
+// the PIN access lifetime when the caller set none. Issuance and refresh
+// set it explicitly; this is what keeps the re-mints that only ADD a
+// marker to an existing session (MFA / passkey step-up, password
+// reconfirm) from handing a PIN session the longer default lifetime.
+func (s *jwtService) applyPINLifetime(ctx *models.SecurityContext) {
+	if ctx.AccessTTL == 0 && models.HasPINAMR(ctx.AMR) && s.policy != nil {
+		ctx.AccessTTL = s.policy.PINAccessTokenTTL(context.Background())
+	}
 }
 
 // GenerateAccessTokenForSessionWithAMR mints an access token for the
@@ -563,6 +575,7 @@ func (s *jwtService) GenerateAccessTokenForSessionWithAMR(
 	ctx := *securityCtx
 	ctx.AMR = amr
 	ctx.LastOTPAt = lastOTPAt
+	s.applyPINLifetime(&ctx)
 	return s.GenerateEnhancedAccessToken(user, deviceInfo, &ctx)
 }
 

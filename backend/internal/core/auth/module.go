@@ -1360,7 +1360,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		logger.Warn("auth: no authz provider registered; PIN sign-in refuses every user (auth.pin_login cannot be evaluated)")
 	}
 	operatorPINDevices := repository.NewOperatorPINDeviceRepository(deps.DB)
-	operatorPIN := buildPINService(opBundle, operatorUser, operatorPINDevices, pinCodes, passwordSvc, authPolicy, attemptCounter, pinAuthz, logger)
+	operatorPIN := buildPINService(opBundle, operatorUser, operatorUser, operatorPINDevices, pinCodes, passwordSvc, authPolicy, attemptCounter, pinAuthz, logger)
 	m.operatorPINHandler = handlers.NewPINHandler(operatorPIN, cfg.Auth.Cookie.Name, operatorCookieDomain, cfg.Auth.Cookie.Secure)
 	m.operatorAdminUserAuthHandler.SetPINService(operatorPIN)
 	m.operatorSelfUserAuthHandler.SetPINService(operatorPIN)
@@ -1452,7 +1452,9 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		cfg.Auth.Cookie.Secure,
 	)
 	clientPINDevices := repository.NewClientPINDeviceRepository(deps.DB)
-	clientPIN := buildPINService(clBundle, clientUser, clientPINDevices, pinCodes, passwordSvc, authPolicy, attemptCounter, pinAuthz, logger)
+	// Admins act on client users from the operator console: the actor is an
+	// operator user, so the client service resolves it there.
+	clientPIN := buildPINService(clBundle, clientUser, operatorUser, clientPINDevices, pinCodes, passwordSvc, authPolicy, attemptCounter, pinAuthz, logger)
 	m.clientPINHandler = handlers.NewPINHandler(clientPIN, cfg.Auth.Cookie.Name, clientCookieDomain, cfg.Auth.Cookie.Secure)
 
 	m.clientAuthHandler = handlers.NewAuthHandler(
@@ -2096,7 +2098,7 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	// admin routes for BOTH tiers' users (admins act from the operator
 	// console, as for the client-user MFA reset).
 	m.registerPINRoutes(ri.Operator.PublicAPI, ri.Operator.ProtectedRouter, ri.Operator.AuthMW, ri.APIConfig,
-		m.operatorPINHandler, handlers.OperatorMount, operatorEnrolmentGate)
+		m.operatorPINHandler, handlers.OperatorMount, operatorEnrolmentGate, true)
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.read"))
 		api := humachi.New(r, ri.APIConfig)
@@ -2183,5 +2185,5 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.deviceTrustHandler.RegisterRoutes(api, handlers.ClientMount)
 	})
 	m.registerPINRoutes(ri.Client.PublicAPI, ri.Client.ProtectedRouter, ri.Client.AuthMW, ri.APIConfig,
-		m.clientPINHandler, handlers.ClientMount, clientEnrolmentGate)
+		m.clientPINHandler, handlers.ClientMount, clientEnrolmentGate, false)
 }

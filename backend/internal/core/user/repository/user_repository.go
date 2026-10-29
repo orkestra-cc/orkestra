@@ -72,7 +72,8 @@ type UserRepository interface {
 	CountByUsername(ctx context.Context, username string) (int64, error)
 	SetPINHash(ctx context.Context, userUUID, hash string) error
 	ClearPIN(ctx context.Context, userUUID string) error
-	RecordFailedPIN(ctx context.Context, userUUID string, lockUntil *time.Time) error
+	RecordFailedPIN(ctx context.Context, userUUID string) (int, error)
+	LockPIN(ctx context.Context, userUUID string, until time.Time) error
 	ClearFailedPINs(ctx context.Context, userUUID string) error
 
 	// MFA grace-period operations — used by the auth module when a privileged
@@ -1251,24 +1252,41 @@ func (r *mongoUserRepository) ClearPIN(ctx context.Context, userUUID string) err
 	return nil
 }
 
-// RecordFailedPIN increments the PIN failure counter and optionally locks
-// the PIN method until lockUntil.
-func (r *mongoUserRepository) RecordFailedPIN(ctx context.Context, userUUID string, lockUntil *time.Time) error {
+// RecordFailedPIN atomically increments the PIN failure counter and
+// returns the new value.
+func (r *mongoUserRepository) RecordFailedPIN(ctx context.Context, userUUID string) (int, error) {
 	filter := bson.M{
 		"uuid":      userUUID,
 		"deletedAt": bson.M{"$exists": false},
 	}
-	set := bson.M{"updatedAt": time.Now()}
-	if lockUntil != nil {
-		set["pinLockedUntil"] = *lockUntil
-	}
 	update := bson.M{
 		"$inc": bson.M{"pinFailedCount": 1},
-		"$set": set,
+		"$set": bson.M{"updatedAt": time.Now()},
+	}
+	var out struct {
+		PINFailedCount int `bson:"pinFailedCount"`
 	}
 	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
-	if _, err := r.collection.UpdateOne(ctx, filter, update); err != nil {
-		return fmt.Errorf("record failed pin: %w", err)
+	err := r.collection.FindOneAndUpdate(ctx, filter, update,
+		options.FindOneAndUpdate().SetReturnDocument(options.After).SetProjection(bson.M{"pinFailedCount": 1})).Decode(&out)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, ErrUserNotFound
+		}
+		return 0, fmt.Errorf("record failed pin: %w", err)
+	}
+	return out.PINFailedCount, nil
+}
+
+// LockPIN locks the PIN method until the given time.
+func (r *mongoUserRepository) LockPIN(ctx context.Context, userUUID string, until time.Time) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	if _, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"pinLockedUntil": until, "updatedAt": time.Now()}}); err != nil {
+		return fmt.Errorf("lock pin: %w", err)
 	}
 	return nil
 }

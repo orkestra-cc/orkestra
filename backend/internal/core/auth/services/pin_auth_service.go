@@ -61,9 +61,14 @@ type PINAuthConfig struct {
 	// Login is the tier's password service: the PIN path reuses its token
 	// issuance, lockout pairs, audit emitter and user-response builder so
 	// a PIN session is minted exactly like every other session.
-	Login     *PasswordAuthService
-	Store     iface.PINCredentialStore
-	Users     iface.UserProvider
+	Login *PasswordAuthService
+	Store iface.PINCredentialStore
+	Users iface.UserProvider
+	// Actors resolves the administrator behind an admin action for the
+	// target-tier guard. Administrators are operator users whatever the
+	// target's tier, so the client tier's service needs the operator
+	// provider here; nil falls back to Users.
+	Actors    iface.UserProvider
 	Devices   repository.PINDeviceRepository
 	Codes     PINEnrollmentCodeStore
 	Passwords PasswordService
@@ -93,6 +98,7 @@ type PINAuthService struct {
 	login     *PasswordAuthService
 	store     iface.PINCredentialStore
 	users     iface.UserProvider
+	actors    iface.UserProvider
 	devices   repository.PINDeviceRepository
 	codes     PINEnrollmentCodeStore
 	passwords PasswordService
@@ -112,8 +118,11 @@ func NewPINAuthService(cfg PINAuthConfig) *PINAuthService {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if cfg.Actors == nil {
+		cfg.Actors = cfg.Users
+	}
 	return &PINAuthService{
-		login: cfg.Login, store: cfg.Store, users: cfg.Users, devices: cfg.Devices,
+		login: cfg.Login, store: cfg.Store, users: cfg.Users, actors: cfg.Actors, devices: cfg.Devices,
 		codes: cfg.Codes, passwords: cfg.Passwords, policy: cfg.Policy, audience: cfg.Audience,
 		attempts: cfg.Attempts, authz: cfg.Authz, sessions: cfg.Sessions, events: cfg.Events,
 		logger: logger,
@@ -401,6 +410,9 @@ func (s *PINAuthService) EnrollDevice(ctx context.Context, in PINDeviceEnrollInp
 		return "", fmt.Errorf("store pin device: %w", err)
 	}
 	s.reset(ctx, enrollKey)
+	// A re-enrollment replaces the device's secret: whatever the old secret
+	// opened ends with it.
+	s.revokePINSessions(ctx, user.UUID, deviceID, "pin_device_reenrolled")
 	s.recordAdmin(ctx, "pin_device_enrolled", stored.By, user.UUID, map[string]interface{}{
 		"deviceId": deviceID, "deviceName": in.DeviceName, "platform": in.Platform, "via": stored.Via,
 	})
@@ -490,17 +502,35 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 			subtle.ConstantTimeCompare([]byte(device.SecretHash), []byte(hashPINSecret(in.DeviceSecret))) != 1 {
 			// The PIN is NOT verified here (dummy cost instead), so a
 			// caller without the device secret learns nothing about the
-			// PIN; the failure still counts against the PIN budget.
+			// PIN. Nor is it a PIN guess, so it is charged to the attempt
+			// counters (rate limiting) and NOT to the durable PIN count:
+			// otherwise anyone knowing a username could walk the count to
+			// the cap and wipe the worker's PIN and devices.
 			s.dummyVerify(in.PIN)
-			s.recordPINFailure(ctx, in.IP, pinKey, user)
+			s.charge(ctx, in.IP, pinKey)
 			s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_untrusted_device")
 			return nil, ErrInvalidCredentials
 		}
 	}
 
+	// Reserve the attempt BEFORE verifying: the atomic increment gives every
+	// concurrent request a distinct count, so a parallel burst gets at most
+	// PINMaxConsecutiveFailures verifications, not one per request.
+	attempt, err := s.store.RecordFailedPIN(ctx, user.UUID)
+	if err != nil {
+		s.dummyVerify(in.PIN)
+		return nil, fmt.Errorf("%w: pin attempt not recorded: %w", ErrAuthPolicyUnavailable, err)
+	}
+	if attempt > PINMaxConsecutiveFailures {
+		s.dummyVerify(in.PIN)
+		s.charge(ctx, in.IP, pinKey)
+		s.disablePIN(ctx, user.UUID, attempt-1)
+		s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_disabled_after_failures")
+		return nil, ErrInvalidCredentials
+	}
 	ok, err := s.passwords.Verify(in.PIN, user.PINHash)
 	if err != nil || !ok {
-		s.recordPINFailure(ctx, in.IP, pinKey, user)
+		s.recordPINFailure(ctx, in.IP, pinKey, user.UUID, attempt)
 		s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_bad_pin")
 		return nil, ErrInvalidCredentials
 	}
@@ -513,9 +543,8 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 		return nil, ErrPINNotAllowed
 	}
 
-	if user.PINFailedCount > 0 || user.PINLockedUntil != nil {
-		_ = s.store.ClearFailedPINs(ctx, user.UUID)
-	}
+	// The reserved attempt succeeded: the consecutive-failure run ends.
+	_ = s.store.ClearFailedPINs(ctx, user.UUID)
 	s.reset(ctx, pinKey)
 	now := time.Now()
 	if device != nil {
@@ -585,7 +614,7 @@ func (s *PINAuthService) loadAdminTarget(ctx context.Context, actorUUID, targetU
 	if actorUUID == targetUUID {
 		return user, nil
 	}
-	actor, err := s.users.GetUserByID(ctx, actorUUID)
+	actor, err := s.actors.GetUserByID(ctx, actorUUID)
 	if err != nil || actor == nil {
 		return nil, fmt.Errorf("%w: caller role unavailable", ErrAuthPolicyUnavailable)
 	}
@@ -634,12 +663,27 @@ func (s *PINAuthService) checkEligible(ctx context.Context, user *iface.User) er
 	if n != 1 {
 		return ErrPINUsernameNotUnique
 	}
-	// Privileged roles never hold a weak credential. The built-in list is
-	// checked even when MFA enforcement is off (MFARequired short-circuits
-	// to false then), and the configured list on top of it.
+	// Field roles only: a PIN is never stronger than what the operator
+	// role may do (read + self-service), so a manager, developer or
+	// administrator never holds one — whatever their permission set says.
+	if pinRoleTier(user.Role) < 0 || pinRoleTier(user.Role) > pinRoleTier("operator") {
+		return ErrPINNotAllowed
+	}
+	// Privileged memberships never hold a weak credential either. The
+	// built-in list is checked even when MFA enforcement is off
+	// (MFARequired short-circuits to false then), and the configured list
+	// on top of it.
 	memberships := s.login.loadMembershipsAsAuthModel(ctx, user.UUID)
 	if RoleRequiresMFA(user, memberships) || s.policy.MFARequired(user, memberships) {
 		return ErrPINNotAllowed
+	}
+	// auth.pin_login is evaluated on the operator tier only: the authz
+	// evaluator resolves system roles from operator users, so a client
+	// user's permission is not answerable there. On the client tier the
+	// grant is the administrator setting the PIN (and removing it revokes
+	// it), inside the role ceiling above.
+	if s.audience != PolicyAudienceOperator {
+		return nil
 	}
 	if s.authz == nil {
 		// Fail closed: without an evaluator nobody provably holds the
@@ -694,31 +738,31 @@ func (s *PINAuthService) revokePINSessions(ctx context.Context, userUUID, device
 	}
 }
 
-// recordPINFailure charges a wrong PIN (or a wrong device secret): both
-// counter scopes, the durable PIN lock, and the consecutive-failure cap
-// that removes the PIN outright.
-func (s *PINAuthService) recordPINFailure(ctx context.Context, ip, pinKey string, user *iface.User) {
+// recordPINFailure completes a wrong PIN whose attempt was already
+// reserved (attempt = the durable count including it): both counter
+// scopes, and the durable lock on the counter lock or on every
+// threshold-th failure. The cap itself is enforced at the next
+// reservation, before any verify.
+func (s *PINAuthService) recordPINFailure(ctx context.Context, ip, pinKey, userUUID string, attempt int) {
 	v := s.charge(ctx, ip, pinKey)
-	count := user.PINFailedCount + 1
 	threshold := s.policy.LockoutThreshold(ctx)
-	var lockUntil *time.Time
-	if v.Locked || (threshold > 0 && count%threshold == 0) {
-		t := time.Now().Add(s.policy.LockoutDuration(ctx))
-		lockUntil = &t
-	}
-	if err := s.store.RecordFailedPIN(ctx, user.UUID, lockUntil); err != nil {
-		s.logger.Warn("pin: failure not recorded", slog.String("user_uuid", user.UUID), slog.String("error", err.Error()))
-	}
-	if count >= PINMaxConsecutiveFailures {
-		if _, err := s.clearPIN(ctx, user.UUID, "pin_disabled_after_failures"); err != nil {
-			s.logger.Error("pin: could not remove a pin after the consecutive-failure cap",
-				slog.String("user_uuid", user.UUID), slog.String("error", err.Error()))
-			return
+	if v.Locked || (threshold > 0 && attempt%threshold == 0) {
+		if err := s.store.LockPIN(ctx, userUUID, time.Now().Add(s.policy.LockoutDuration(ctx))); err != nil {
+			s.logger.Warn("pin: lock not recorded", slog.String("user_uuid", userUUID), slog.String("error", err.Error()))
 		}
-		s.recordAdmin(ctx, "pin_disabled_after_failures", "", user.UUID, map[string]interface{}{
-			"failures": count,
-		})
 	}
+}
+
+// disablePIN removes a PIN whose consecutive-failure run passed the cap.
+func (s *PINAuthService) disablePIN(ctx context.Context, userUUID string, failures int) {
+	if _, err := s.clearPIN(ctx, userUUID, "pin_disabled_after_failures"); err != nil {
+		s.logger.Error("pin: could not remove a pin after the consecutive-failure cap",
+			slog.String("user_uuid", userUUID), slog.String("error", err.Error()))
+		return
+	}
+	s.recordAdmin(ctx, "pin_disabled_after_failures", "", userUUID, map[string]interface{}{
+		"failures": failures,
+	})
 }
 
 func (s *PINAuthService) peek(ctx context.Context, ip, accountKey string) (Verdict, bool) {

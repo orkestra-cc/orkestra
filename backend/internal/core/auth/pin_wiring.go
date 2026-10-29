@@ -32,6 +32,7 @@ func pinDeviceIndexes() []module.IndexSpec {
 func buildPINService(
 	bundle *authTierBundle,
 	users iface.UserProvider,
+	actors iface.UserProvider,
 	devices repository.PINDeviceRepository,
 	codes services.PINEnrollmentCodeStore,
 	passwords services.PasswordService,
@@ -52,6 +53,7 @@ func buildPINService(
 		Login:     bundle.passwordSvc,
 		Store:     store,
 		Users:     users,
+		Actors:    actors,
 		Devices:   devices,
 		Codes:     codes,
 		Passwords: passwords,
@@ -80,11 +82,17 @@ func buildPINService(
 //     gate (a fresh real sign-in or second factor; never a PIN session) +
 //     the permission.
 //
+// gatePermission is false on the client surface: the authz evaluator
+// resolves system roles from operator users only, so a client user's
+// auth.pin_login is unanswerable there and the gate would refuse every
+// client user. The service's eligibility rule (role ceiling, no
+// privileged membership, PIN set by an administrator) still applies.
+//
 // The service refuses a PIN session on every self route as well, so a
 // gate misconfiguration cannot turn a PIN session into a credential
 // manager.
 func (m *AuthModule) registerPINRoutes(public huma.API, protected chi.Router, mw module.RoleMiddleware, cfg huma.Config,
-	h *handlers.PINHandler, mount handlers.RouteMount, enrolmentProof func(http.Handler) http.Handler) {
+	h *handlers.PINHandler, mount handlers.RouteMount, enrolmentProof func(http.Handler) http.Handler, gatePermission bool) {
 	if h == nil {
 		return
 	}
@@ -96,7 +104,9 @@ func (m *AuthModule) registerPINRoutes(public huma.API, protected chi.Router, mw
 	protected.Group(func(r chi.Router) {
 		r.Use(mw.RequireGlobal())
 		r.Use(mw.RequireStepUp(5 * time.Minute))
-		r.Use(mw.RequireSystemPermission("auth.pin_login"))
+		if gatePermission {
+			r.Use(mw.RequireSystemPermission("auth.pin_login"))
+		}
 		h.RegisterSelfSetRoute(humachi.New(r, cfg), mount)
 	})
 	protected.Group(func(r chi.Router) {
@@ -107,7 +117,9 @@ func (m *AuthModule) registerPINRoutes(public huma.API, protected chi.Router, mw
 	protected.Group(func(r chi.Router) {
 		r.Use(mw.RequireGlobal())
 		r.Use(enrolmentProof)
-		r.Use(mw.RequireSystemPermission("auth.pin_login"))
+		if gatePermission {
+			r.Use(mw.RequireSystemPermission("auth.pin_login"))
+		}
 		h.RegisterSelfEnrolmentRoutes(humachi.New(r, cfg), mount)
 	})
 }

@@ -81,14 +81,17 @@ func (s *pinStoreFake) ClearPIN(_ context.Context, userUUID string) error {
 	})
 }
 
-func (s *pinStoreFake) RecordFailedPIN(_ context.Context, userUUID string, lockUntil *time.Time) error {
-	return s.with(userUUID, func(u *iface.User) {
+func (s *pinStoreFake) RecordFailedPIN(_ context.Context, userUUID string) (int, error) {
+	var n int
+	err := s.with(userUUID, func(u *iface.User) {
 		u.PINFailedCount++
-		if lockUntil != nil {
-			t := *lockUntil
-			u.PINLockedUntil = &t
-		}
+		n = u.PINFailedCount
 	})
+	return n, err
+}
+
+func (s *pinStoreFake) LockPIN(_ context.Context, userUUID string, until time.Time) error {
+	return s.with(userUUID, func(u *iface.User) { t := until; u.PINLockedUntil = &t })
 }
 
 func (s *pinStoreFake) ClearFailedPINs(_ context.Context, userUUID string) error {
@@ -246,7 +249,15 @@ const (
 
 func newPINFixture(t *testing.T, policy map[string]string) *pinFixture {
 	t.Helper()
-	values := map[string]string{"pinLoginEnabledAdmin": "true", "pinLength": "5"}
+	return newPINFixtureFor(t, policy, PolicyAudienceOperator)
+}
+
+// newPINFixtureFor builds the fixture for one audience. On the client
+// audience the administrator lives in a SEPARATE operator store (actors),
+// as in production, and the worker in the client store.
+func newPINFixtureFor(t *testing.T, policy map[string]string, aud PolicyAudience) *pinFixture {
+	t.Helper()
+	values := map[string]string{"pinLoginEnabledAdmin": "true", "pinLoginEnabledClient": "true", "pinLength": "5"}
 	for k, v := range policy {
 		values[k] = v
 	}
@@ -267,17 +278,21 @@ func newPINFixture(t *testing.T, policy map[string]string) *pinFixture {
 	// Rebind the login service onto this fixture's users and policy.
 	login.userService = f.users
 	login.policy = NewAuthPolicyServiceForTest(values)
-	login.audience = PolicyAudienceOperator
+	login.audience = aud
 	login.attempts = f.counter
 	f.jwt = jwt
+	actors := f.users
+	if aud == PolicyAudienceClient {
+		actors = newGateUserFake()
+	}
 	f.svc = NewPINAuthService(PINAuthConfig{
-		Login: login, Store: f.store, Users: f.users, Devices: f.devices, Codes: f.codes,
-		Passwords: f.pwd, Policy: login.policy, Audience: PolicyAudienceOperator,
+		Login: login, Store: f.store, Users: f.users, Actors: actors, Devices: f.devices, Codes: f.codes,
+		Passwords: f.pwd, Policy: login.policy, Audience: aud,
 		Attempts: f.counter, Authz: f.authz, Sessions: f.revoker, Events: f.events,
 		Logger: silentLogger(),
 	})
 	f.users.seed(&iface.User{UUID: pinWorkerUUID, Email: "mario@example.com", Username: pinWorker, Role: "operator", IsActive: true})
-	f.users.seed(&iface.User{UUID: "admin-1", Email: "admin@example.com", Username: "admin", Role: "administrator", IsActive: true})
+	actors.seed(&iface.User{UUID: "admin-1", Email: "admin@example.com", Username: "admin", Role: "administrator", IsActive: true})
 	return f
 }
 
@@ -472,8 +487,13 @@ func TestPIN_DeviceBinding(t *testing.T) {
 			t.Fatalf("%s: %d verifies, want exactly one dummy", name, got)
 		}
 	}
-	if f.user(t).PINFailedCount != 3 {
-		t.Fatalf("device failures not charged: %d", f.user(t).PINFailedCount)
+	// Not a PIN guess: rate-limited on the counters, never on the durable
+	// count — otherwise a username alone could walk the PIN to its cap.
+	if f.user(t).PINFailedCount != 0 {
+		t.Fatalf("device failures reached the durable PIN count: %d", f.user(t).PINFailedCount)
+	}
+	if v, _ := f.counter.Locked(context.Background(), AttemptKeyPIN(PolicyAudienceOperator, pinWorker), Limit{Threshold: 3, Window: time.Minute}); !v.Locked {
+		t.Fatal("device failures not charged to the attempt counter")
 	}
 
 	// Binding off: the PIN works from anywhere.
@@ -507,11 +527,22 @@ func TestPIN_WrongPINLocksThenRemovesPIN(t *testing.T) {
 		t.Fatal("PIN failures touched the password lock")
 	}
 
-	// After the window, five more wrong guesses remove the PIN outright.
-	f.counter.Reset(context.Background(), AttemptKeyPIN(PolicyAudienceOperator, pinWorker))
-	_ = f.store.with(pinWorkerUUID, func(u *iface.User) { past := time.Now().Add(-time.Minute); u.PINLockedUntil = &past })
+	// After the window, five more wrong guesses reach the cap; the next
+	// attempt — even with the right PIN — is refused unverified and removes it.
+	unlock := func() {
+		_ = f.counter.Reset(context.Background(), AttemptKeyPIN(PolicyAudienceOperator, pinWorker))
+		_ = f.store.with(pinWorkerUUID, func(u *iface.User) { past := time.Now().Add(-time.Minute); u.PINLockedUntil = &past })
+	}
+	unlock()
 	for i := 0; i < 5; i++ {
 		_, _ = f.login("99999", secret)
+	}
+	if f.user(t).PINHash == "" || f.user(t).PINFailedCount != PINMaxConsecutiveFailures {
+		t.Fatalf("after %d failures: hash set=%v count=%d", PINMaxConsecutiveFailures, f.user(t).PINHash != "", f.user(t).PINFailedCount)
+	}
+	unlock()
+	if _, err := f.login(goodPIN, secret); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("attempt past the cap: %v", err)
 	}
 	if f.user(t).PINHash != "" {
 		t.Fatalf("PIN survived %d consecutive failures", PINMaxConsecutiveFailures)
@@ -663,5 +694,96 @@ func TestPIN_AdminCannotReachAboveTheirRole(t *testing.T) {
 		if got := pinRoleTier(role); got != want {
 			t.Fatalf("pinRoleTier(%q)=%d, want %d (keep in step with user/handlers systemRoleTier)", role, got, want)
 		}
+	}
+}
+
+// passwordVerifyCounter tells real verifications from the dummy ones.
+type passwordVerifyCounter struct {
+	PasswordService
+	mu          sync.Mutex
+	real, dummy int
+}
+
+func (c *passwordVerifyCounter) Verify(plain, encoded string) (bool, error) {
+	c.mu.Lock()
+	if encoded == c.DummyHash() {
+		c.dummy++
+	} else {
+		c.real++
+	}
+	c.mu.Unlock()
+	return c.PasswordService.Verify(plain, encoded)
+}
+
+// A parallel burst gets at most the cap of real PIN verifications: the
+// attempt is reserved atomically before the verify, so concurrent
+// requests cannot all decide on the same stale count.
+func TestPIN_ParallelBurstIsBoundedByTheCap(t *testing.T) {
+	f := newPINFixture(t, map[string]string{"pinRequiresTrustedDevice": "false", "accountLockoutThreshold": "1000", "ipLockoutThreshold": "1000"})
+	if err := f.svc.AdminSetPIN(context.Background(), "admin-1", pinWorkerUUID, goodPIN); err != nil {
+		t.Fatal(err)
+	}
+	counter := &passwordVerifyCounter{PasswordService: f.svc.passwords}
+	f.svc.passwords = counter
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = f.svc.Login(context.Background(), PINLoginInput{Username: pinWorker, PIN: "99999", IP: "10.0.0.9"})
+		}()
+	}
+	wg.Wait()
+	if counter.real > PINMaxConsecutiveFailures {
+		t.Fatalf("%d real verifications in a burst, want at most %d", counter.real, PINMaxConsecutiveFailures)
+	}
+	if f.user(t).PINHash != "" {
+		t.Fatal("a burst past the cap must remove the PIN")
+	}
+}
+
+func TestPIN_FieldRolesOnly(t *testing.T) {
+	for _, role := range []string{"manager", "developer", "custom"} {
+		f := newPINFixture(t, nil)
+		f.user(t).Role = role
+		if err := f.svc.AdminSetPIN(context.Background(), "admin-1", pinWorkerUUID, goodPIN); !errors.Is(err, ErrPINNotAllowed) {
+			t.Fatalf("%s: %v, want ErrPINNotAllowed", role, err)
+		}
+	}
+	f := newPINFixture(t, nil)
+	f.user(t).Role = "guest"
+	if err := f.svc.AdminSetPIN(context.Background(), "admin-1", pinWorkerUUID, goodPIN); err != nil {
+		t.Fatalf("guest: %v", err)
+	}
+}
+
+// On the client tier the administrator is an operator user (separate
+// store) and auth.pin_login is not evaluated — the authz evaluator cannot
+// answer it for a client user.
+func TestPIN_ClientTier(t *testing.T) {
+	f := newPINFixtureFor(t, nil, PolicyAudienceClient)
+	f.authz.deny[pinWorkerUUID] = true
+	secret := f.enrolledDevice(t)
+	if _, err := f.login(goodPIN, secret); err != nil {
+		t.Fatalf("client PIN sign-in: %v", err)
+	}
+	if _, err := f.users.GetUserByID(context.Background(), "admin-1"); err == nil {
+		t.Fatal("fixture: the administrator must not be in the client store")
+	}
+}
+
+func TestPIN_ReenrollingADeviceEndsItsSessions(t *testing.T) {
+	f := newPINFixture(t, nil)
+	f.enrolledDevice(t)
+	f.revoker.calls = nil
+	code, _, err := f.svc.IssueEnrollmentCode(context.Background(), "admin-1", pinWorkerUUID, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.EnrollDevice(context.Background(), PINDeviceEnrollInput{Username: pinWorker, Code: code, DeviceID: "tab-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.revoker.calls) != 1 || f.revoker.calls[0] != pinWorkerUUID+"|tab-1|pin_device_reenrolled" {
+		t.Fatalf("revocations: %v", f.revoker.calls)
 	}
 }

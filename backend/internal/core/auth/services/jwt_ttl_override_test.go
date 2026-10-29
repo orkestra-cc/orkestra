@@ -68,3 +68,36 @@ func TestTokenPairHonoursPerMintTTLOverride(t *testing.T) {
 		})
 	}
 }
+
+// A re-mint that only adds a marker to a PIN session (step-up, password
+// reconfirm) keeps the PIN access lifetime instead of the default.
+func TestReMintOfAPINSessionKeepsThePINLifetime(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewJWTService(priv, &priv.PublicKey, "test", time.Hour, 7*24*time.Hour)
+	svc.SetPolicy(NewAuthPolicyServiceForTest(map[string]string{"pinAccessTokenTTL": "2m"}))
+	user := &iface.User{UUID: "u-1", Email: "a@b.com", Role: "operator"}
+	device := &authModels.DeviceInfo{DeviceID: "tab-1"}
+	for _, c := range []struct {
+		amr  []string
+		want time.Duration
+	}{
+		{[]string{authModels.AMRPIN, authModels.AMRReauth}, 2 * time.Minute},
+		{[]string{authModels.AMRPassword, authModels.AMRReauth}, time.Hour},
+	} {
+		before := time.Now()
+		tok, err := svc.GenerateAccessTokenForSessionWithAMR(user, device, &authModels.SecurityContext{SessionID: "s-1"}, c.amr, time.Now().Unix())
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims, err := svc.ValidateAccessToken(tok)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Unix(claims.ExpiresAt, 0).Sub(before); d < c.want-5*time.Second || d > c.want+5*time.Second {
+			t.Fatalf("amr %v: lifetime %v, want %v", c.amr, d, c.want)
+		}
+	}
+}

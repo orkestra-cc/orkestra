@@ -1708,7 +1708,7 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	return &ConfirmPasswordResult{
 		AccessToken: token,
 		TokenType:   "Bearer",
-		ExpiresIn:   int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
+		ExpiresIn:   s.reMintExpiresIn(ctx, token),
 	}, nil
 }
 
@@ -1901,6 +1901,18 @@ func (s *PasswordAuthService) resetLoginFailures(ctx context.Context, email stri
 // the password-method gate, the geo block), which must leave the
 // counters and the audit trail untouched and so deliberately cost
 // nothing.
+// reMintExpiresIn reads a re-minted access token's lifetime from its own
+// exp claim: a PIN session's re-mint carries the PIN lifetime, not the
+// configured default.
+func (s *PasswordAuthService) reMintExpiresIn(ctx context.Context, token string) int64 {
+	if claims, err := s.jwtService.ValidateAccessToken(token); err == nil && claims.ExpiresAt > 0 {
+		if d := time.Until(time.Unix(claims.ExpiresAt, 0)); d > 0 {
+			return int64(d.Round(time.Second).Seconds())
+		}
+	}
+	return int64(s.jwtService.AccessTokenTTL(ctx).Seconds())
+}
+
 func (s *PasswordAuthService) dummyVerify(password string) {
 	_, _ = s.passwordService.Verify(password, s.passwordService.DummyHash())
 }
