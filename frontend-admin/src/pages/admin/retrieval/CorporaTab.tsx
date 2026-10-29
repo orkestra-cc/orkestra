@@ -22,22 +22,19 @@ import {
   useDropRetrievalCorpusMutation,
   useGetRetrievalCorporaQuery,
   type RetrievalComponentStatus,
-  type RetrievalCorpusState,
   type RetrievalCorpusStatus
 } from 'store/api/retrievalApi';
 import ConfirmDeleteModal from 'pages/admin/llm/ConfirmDeleteModal';
 import DiagnosticsModal from './DiagnosticsModal';
 import RetrievalLoadError from './RetrievalLoadError';
-import { BacklogCell, OwnerCell, engineAccent } from './RetrievalCells';
+import {
+  BacklogCell,
+  CORPUS_STATE_COLOR,
+  OwnerCell,
+  engineAccent
+} from './RetrievalCells';
 import { isReauthCancelled, retrievalErrorMessage } from './retrievalErrors';
 import { useRetrievalPermissions } from './retrievalPermissions';
-
-const STATE_COLOR: Record<RetrievalCorpusState, BadgeColor> = {
-  uninitialized: 'secondary',
-  active: 'success',
-  profile_changed: 'warning',
-  error: 'danger'
-};
 
 const INFERENCE_COLOR: Record<RetrievalComponentStatus, BadgeColor> = {
   ok: 'success',
@@ -129,7 +126,10 @@ const CorporaTab = () => {
           row: { original }
         }: CellContext<RetrievalCorpusStatus, unknown>) => (
           <div>
-            <SubtleBadge pill bg={STATE_COLOR[original.state] ?? 'danger'}>
+            <SubtleBadge
+              pill
+              bg={CORPUS_STATE_COLOR[original.state] ?? 'danger'}
+            >
               {t(`adminRetrieval.corpora.states.${original.state}`)}
             </SubtleBadge>
             {original.reason && (

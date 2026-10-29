@@ -3,10 +3,18 @@ import SubtleBadge, { type BadgeColor } from 'components/common/SubtleBadge';
 import { formatDateTime } from 'helpers/dateFormat';
 import type {
   RetrievalBacklog,
+  RetrievalCorpusState,
   RetrievalEngineStatus
 } from 'store/api/retrievalApi';
 
 // Cells and status helpers shared by the Corpora and Indexing tabs.
+
+export const CORPUS_STATE_COLOR: Record<RetrievalCorpusState, BadgeColor> = {
+  uninitialized: 'secondary',
+  active: 'success',
+  profile_changed: 'warning',
+  error: 'danger'
+};
 
 // The engine tile's status edge: earned only by a state that stops search.
 export const engineAccent = (

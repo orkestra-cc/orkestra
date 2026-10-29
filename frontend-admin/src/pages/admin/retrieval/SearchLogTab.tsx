@@ -180,12 +180,19 @@ const SearchLogTab = () => {
   const [applied, setApplied] = useState<AppliedFilters>({});
   const [pageIndex, setPageIndex] = useState(0);
 
-  const { data, isLoading, isFetching, error, refetch } =
-    useListRetrievalSearchLogQuery({
-      ...applied,
-      limit: PAGE_SIZE,
-      offset: pageIndex * PAGE_SIZE
-    });
+  // currentData, not data: while another page or other filters load, data
+  // would still hold the previous rows under the new page's range. An
+  // audit view shows only rows that answer the request on screen.
+  const {
+    currentData: data,
+    isFetching,
+    error,
+    refetch
+  } = useListRetrievalSearchLogQuery({
+    ...applied,
+    limit: PAGE_SIZE,
+    offset: pageIndex * PAGE_SIZE
+  });
 
   const schema = useMemo(
     () =>
@@ -442,7 +449,7 @@ const SearchLogTab = () => {
         </Row>
       </Form>
 
-      {isLoading ? (
+      {!data && isFetching ? (
         <Spinner animation="border" size="sm" />
       ) : stepUpDismissed ? (
         <Alert

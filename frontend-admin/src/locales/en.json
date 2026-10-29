@@ -3937,7 +3937,7 @@
         "actions": "Actions"
       },
       "dropTitle": "Drop corpus",
-      "dropConfirm": "Drop the stored state of {{name}}? Generations {{generations}} and their collections are deleted, with every organization's pending updates and build progress for it. The search log is kept.",
+      "dropConfirm": "Drop the stored state of {{name}}? Generations {{generations}} and their collections are deleted, with every organization's pending updates and build progress for it. The search log is kept. Only drop it once no running server registers this corpus: during a rolling deploy, a server that still registers it rebuilds it from scratch.",
       "dropSuccess": "Corpus {{name}} dropped."
     },
     "searchLog": {
@@ -4052,6 +4052,7 @@
       "columns": {
         "corpus": "Corpus",
         "owner": "Owner",
+        "state": "Corpus state",
         "initialBuild": "Initial build",
         "points": "Indexed points",
         "outbox": "Pending updates"

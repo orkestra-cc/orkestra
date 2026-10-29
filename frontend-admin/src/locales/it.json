@@ -3937,7 +3937,7 @@
         "actions": "Azioni"
       },
       "dropTitle": "Elimina corpus",
-      "dropConfirm": "Eliminare lo stato memorizzato di {{name}}? Le generazioni {{generations}} e le loro collezioni vengono eliminate, insieme agli aggiornamenti in attesa e all'avanzamento della costruzione di ogni organizzazione. Il log di ricerca viene conservato.",
+      "dropConfirm": "Eliminare lo stato memorizzato di {{name}}? Le generazioni {{generations}} e le loro collezioni vengono eliminate, insieme agli aggiornamenti in attesa e all'avanzamento della costruzione di ogni organizzazione. Il log di ricerca viene conservato. Eliminalo solo quando nessun server in esecuzione registra più questo corpus: durante un rilascio graduale, un server che lo registra ancora lo ricostruisce da zero.",
       "dropSuccess": "Corpus {{name}} eliminato."
     },
     "searchLog": {
@@ -4052,6 +4052,7 @@
       "columns": {
         "corpus": "Corpus",
         "owner": "Proprietario",
+        "state": "Stato del corpus",
         "initialBuild": "Costruzione iniziale",
         "points": "Punti indicizzati",
         "outbox": "Aggiornamenti in attesa"

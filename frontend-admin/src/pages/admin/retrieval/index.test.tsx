@@ -93,6 +93,24 @@ describe('RetrievalAdminPage', () => {
     expect(reads).toEqual(['search-log']);
   });
 
+  // An organization owner has no platform role, so the nav hides the page:
+  // they open the search-log URL directly and must land on it.
+  it('opens the search log for an organization owner by its URL', async () => {
+    mockedUseAuth.mockReturnValue(
+      authWith(['retrieval.tenant.read', 'retrieval.searchlog.admin'])
+    );
+    renderPage('/admin/retrieval?tab=search-log');
+    expect(tabNames()).toEqual(['Indexing', 'Search log']);
+    expect(screen.getByRole('tab', { name: 'Search log' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(
+      await screen.findByText(/no search matches these filters/i)
+    ).toBeVisible();
+    expect(reads).toEqual(['search-log']);
+  });
+
   it('shows the no-access alert without any retrieval permission', () => {
     mockedUseAuth.mockReturnValue(authWith(['llm.admin.read']));
     renderPage('/admin/retrieval');

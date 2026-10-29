@@ -72,6 +72,8 @@ export interface RetrievalTenantCorpus {
   corpus: string;
   owner: string;
   ownerRunning: boolean;
+  // The corpus state as the operator report has it, without the reason.
+  state: RetrievalCorpusState;
   initialBuild: 'pending' | 'building' | 'done';
   points?: number;
   outbox: RetrievalBacklog;

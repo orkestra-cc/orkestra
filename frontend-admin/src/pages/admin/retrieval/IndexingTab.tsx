@@ -16,7 +16,12 @@ import {
   type RetrievalTenantCorpus
 } from 'store/api/retrievalApi';
 import RetrievalLoadError from './RetrievalLoadError';
-import { BacklogCell, OwnerCell, engineAccent } from './RetrievalCells';
+import {
+  BacklogCell,
+  CORPUS_STATE_COLOR,
+  OwnerCell,
+  engineAccent
+} from './RetrievalCells';
 
 const BUILD_COLOR: Record<RetrievalTenantCorpus['initialBuild'], BadgeColor> = {
   pending: 'secondary',
@@ -25,8 +30,8 @@ const BUILD_COLOR: Record<RetrievalTenantCorpus['initialBuild'], BadgeColor> = {
 };
 
 // IndexingTab is the active organization's view of retrieval
-// (retrieval.tenant.read): for each registered corpus, whether its initial
-// build for this organization is done, how many points it holds, and the
+// (retrieval.tenant.read): for each registered corpus, its state, whether
+// its initial build for this organization is done, how many points it holds, and the
 // organization's own pending updates, plus its erasures still pending.
 const IndexingTab = () => {
   const { t, i18n } = useTranslation();
@@ -51,6 +56,23 @@ const IndexingTab = () => {
           row: { original }
         }: CellContext<RetrievalTenantCorpus, unknown>) => (
           <OwnerCell owner={original.owner} running={original.ownerRunning} />
+        )
+      },
+      {
+        // A broken corpus reads as broken here, not as a build that is
+        // merely pending; the reason stays on the operator's Corpora tab.
+        id: 'state',
+        accessorFn: c => t(`adminRetrieval.corpora.states.${c.state}`),
+        header: t('adminRetrieval.indexing.columns.state'),
+        meta: { headerProps: { className: 'text-900' } },
+        cell: ({
+          row: { original }
+        }: CellContext<RetrievalTenantCorpus, unknown>) => (
+          <SubtleBadge pill bg={CORPUS_STATE_COLOR[original.state] ?? 'danger'}>
+            {t(`adminRetrieval.corpora.states.${original.state}`, {
+              defaultValue: original.state
+            })}
+          </SubtleBadge>
         )
       },
       {

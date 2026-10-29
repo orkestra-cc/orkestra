@@ -115,6 +115,38 @@ describe('SearchLogTab', () => {
     expect(screen.getByText('51 to 100 of 120')).toBeInTheDocument();
   });
 
+  it('never shows the previous page while the next one loads', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    server.use(
+      http.get(url('/v1/admin/retrieval/search-log'), async ({ request }) => {
+        const offset = Number(new URL(request.url).searchParams.get('offset'));
+        if (offset > 0) await gate;
+        return HttpResponse.json({
+          items: Array.from({ length: Math.min(50, 120 - offset) }, (_, k) =>
+            entry(offset + k)
+          ),
+          total: 120,
+          limit: 50,
+          offset
+        });
+      })
+    );
+    renderWithProviders(<SearchLogTab />);
+    await screen.findByText('query 0');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    // Page 1's rows must not sit under the "51 to 100" range meanwhile.
+    await waitFor(() =>
+      expect(screen.queryByText('query 0')).not.toBeInTheDocument()
+    );
+    expect(screen.queryByText('51 to 100 of 120')).not.toBeInTheDocument();
+    release();
+    expect(await screen.findByText('query 50')).toBeInTheDocument();
+    expect(screen.getByText('51 to 100 of 120')).toBeInTheDocument();
+  });
+
   it("shows the server page and total as they are: hidden unchecked rows are the server's business", async () => {
     // The backend omits unchecked rows from both the page and the total; the
     // client neither asks for them nor second-guesses the count.
