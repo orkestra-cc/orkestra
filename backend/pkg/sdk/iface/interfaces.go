@@ -202,6 +202,37 @@ type InitialPasswordSetter interface {
 
 var ErrPasswordAlreadySet = errors.New("password already set")
 
+// PINCredentialStore is the storage half of the PIN sign-in method,
+// resolved by the auth module from the tier's user provider by type
+// assertion (the InitialPasswordSetter precedent: additive, so a fork's
+// UserProvider that predates it still compiles; auth then reports the PIN
+// method as unavailable). Every method addresses one tier's collection.
+type PINCredentialStore interface {
+	// GetUserForPINAuth returns the raw user (hashes and lockout fields
+	// included) whose username is exactly username, excluding soft-deleted
+	// rows. ErrUserNotFound when none matches, ErrUsernameAmbiguous when
+	// more than one does: usernames are not unique in the user module, and
+	// a PIN must never authenticate as an arbitrary one of several users.
+	GetUserForPINAuth(ctx context.Context, username string) (*User, error)
+	// CountUsersByUsername counts live (not soft-deleted) users with
+	// exactly this username. Used before a PIN is set.
+	CountUsersByUsername(ctx context.Context, username string) (int64, error)
+	// SetPINHash stores a new argon2id PIN hash, stamps PINUpdatedAt and
+	// clears the PIN failure counter and lock.
+	SetPINHash(ctx context.Context, userUUID, hash string) error
+	// ClearPIN removes the PIN hash, its timestamp, counter and lock.
+	ClearPIN(ctx context.Context, userUUID string) error
+	// RecordFailedPIN increments PINFailedCount and, when lockUntil is
+	// non-nil, sets PINLockedUntil.
+	RecordFailedPIN(ctx context.Context, userUUID string, lockUntil *time.Time) error
+	// ClearFailedPINs resets the PIN failure counter and lock.
+	ClearFailedPINs(ctx context.Context, userUUID string) error
+}
+
+// ErrUsernameAmbiguous reports that more than one live user of a tier
+// carries the same username, so a username-keyed sign-in cannot pick one.
+var ErrUsernameAmbiguous = errors.New("username matches more than one user")
+
 // ---------------------------------------------------------------------------
 // MFAEpochBumper — consumed by: the auth module's MFA service and WebAuthn
 // service, on every credential removal or replacement. Narrow on purpose

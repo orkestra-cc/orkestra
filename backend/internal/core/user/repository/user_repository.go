@@ -17,6 +17,9 @@ import (
 var (
 	ErrUserNotFound      = errors.New("user not found")
 	ErrUserAlreadyExists = errors.New("user already exists")
+	// ErrUsernameAmbiguous aliases the SDK sentinel so a consumer outside
+	// this module can classify it with errors.Is.
+	ErrUsernameAmbiguous = iface.ErrUsernameAmbiguous
 	ErrInvalidUserID     = errors.New("invalid user ID")
 )
 
@@ -62,6 +65,15 @@ type UserRepository interface {
 	MarkEmailVerified(ctx context.Context, userUUID string) error
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	ClearFailedLogins(ctx context.Context, userUUID string) error
+
+	// PIN-auth operations (iface.PINCredentialStore). The PIN failure
+	// counter and lock are separate fields from the password ones.
+	GetForPINAuth(ctx context.Context, username string) (*iface.User, error)
+	CountByUsername(ctx context.Context, username string) (int64, error)
+	SetPINHash(ctx context.Context, userUUID, hash string) error
+	ClearPIN(ctx context.Context, userUUID string) error
+	RecordFailedPIN(ctx context.Context, userUUID string, lockUntil *time.Time) error
+	ClearFailedPINs(ctx context.Context, userUUID string) error
 
 	// MFA grace-period operations — used by the auth module when a privileged
 	// user first logs in without an enrolled factor (set) or when an admin
@@ -274,9 +286,6 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *ifac
 	}
 	if input.Phone != "" {
 		update["$set"].(bson.M)["phone"] = input.Phone
-	}
-	if input.PIN != "" {
-		update["$set"].(bson.M)["pin"] = input.PIN
 	}
 	if input.Role != "" {
 		update["$set"].(bson.M)["role"] = input.Role
@@ -1152,6 +1161,125 @@ func (r *mongoUserRepository) ClearFailedLogins(ctx context.Context, userUUID st
 	_, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("clear failed logins: %w", err)
+	}
+	return nil
+}
+
+// GetForPINAuth returns the single live user whose username is exactly
+// username. Usernames carry no unique index, so two matches are reported
+// as ErrUsernameAmbiguous rather than resolved to an arbitrary one.
+func (r *mongoUserRepository) GetForPINAuth(ctx context.Context, username string) (*iface.User, error) {
+	if username == "" {
+		return nil, ErrUserNotFound
+	}
+	filter := bson.M{
+		"username":  username,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	cur, err := r.collection.Find(ctx, filter, options.Find().SetLimit(2))
+	if err != nil {
+		return nil, fmt.Errorf("find user for pin auth: %w", err)
+	}
+	var users []iface.User
+	if err := cur.All(ctx, &users); err != nil {
+		return nil, fmt.Errorf("decode user for pin auth: %w", err)
+	}
+	switch len(users) {
+	case 0:
+		return nil, ErrUserNotFound
+	case 1:
+		return &users[0], nil
+	default:
+		return nil, ErrUsernameAmbiguous
+	}
+}
+
+// CountByUsername counts live users carrying exactly this username.
+func (r *mongoUserRepository) CountByUsername(ctx context.Context, username string) (int64, error) {
+	n, err := r.collection.CountDocuments(ctx, bson.M{
+		"username":  username,
+		"deletedAt": bson.M{"$exists": false},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count users by username: %w", err)
+	}
+	return n, nil
+}
+
+// SetPINHash stores a new PIN hash and resets the PIN failure state.
+func (r *mongoUserRepository) SetPINHash(ctx context.Context, userUUID, hash string) error {
+	now := time.Now()
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	update := bson.M{
+		"$set":   bson.M{"pinHash": hash, "pinUpdatedAt": now, "updatedAt": now},
+		"$unset": bson.M{"pinFailedCount": "", "pinLockedUntil": ""},
+	}
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("set pin hash: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ClearPIN removes the PIN credential and its failure state.
+func (r *mongoUserRepository) ClearPIN(ctx context.Context, userUUID string) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	update := bson.M{
+		"$set":   bson.M{"updatedAt": time.Now()},
+		"$unset": bson.M{"pinHash": "", "pinUpdatedAt": "", "pinFailedCount": "", "pinLockedUntil": ""},
+	}
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("clear pin: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// RecordFailedPIN increments the PIN failure counter and optionally locks
+// the PIN method until lockUntil.
+func (r *mongoUserRepository) RecordFailedPIN(ctx context.Context, userUUID string, lockUntil *time.Time) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	set := bson.M{"updatedAt": time.Now()}
+	if lockUntil != nil {
+		set["pinLockedUntil"] = *lockUntil
+	}
+	update := bson.M{
+		"$inc": bson.M{"pinFailedCount": 1},
+		"$set": set,
+	}
+	if _, err := r.collection.UpdateOne(ctx, filter, update); err != nil {
+		return fmt.Errorf("record failed pin: %w", err)
+	}
+	return nil
+}
+
+// ClearFailedPINs resets the PIN failure counter and lock.
+func (r *mongoUserRepository) ClearFailedPINs(ctx context.Context, userUUID string) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	update := bson.M{
+		"$set":   bson.M{"updatedAt": time.Now()},
+		"$unset": bson.M{"pinFailedCount": "", "pinLockedUntil": ""},
+	}
+	if _, err := r.collection.UpdateOne(ctx, filter, update); err != nil {
+		return fmt.Errorf("clear failed pins: %w", err)
 	}
 	return nil
 }

@@ -2177,9 +2177,6 @@
           "phone": {
             "type": "string"
           },
-          "pin": {
-            "type": "string"
-          },
           "role": {
             "type": "string"
           },
@@ -2192,7 +2189,6 @@
           "username",
           "fullName",
           "phone",
-          "pin",
           "role"
         ],
         "type": "object"
@@ -10597,9 +10593,6 @@
             "type": "string"
           },
           "phone": {
-            "type": "string"
-          },
-          "pin": {
             "type": "string"
           },
           "role": {

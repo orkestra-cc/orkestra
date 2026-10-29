@@ -57,7 +57,7 @@ func TestSearch_WritesSearchLogRow(t *testing.T) {
 	assert.Equal(t, "u-1", row.UserUUID)
 	assert.Equal(t, "contacts", row.Corpus)
 	assert.Equal(t, req.Query, row.Query)
-	// Canonical JSON of the request's filter (F3): the SDK's json tags, no
+	// Canonical JSON of the request's filter: the SDK's json tags, no
 	// unset fields.
 	assert.Equal(t, `{"field":"team","op":"eq","value":"sales"}`, row.FilterJSON)
 	assert.Equal(t, "hybrid", row.Mode)
