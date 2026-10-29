@@ -151,6 +151,7 @@ type searchRecord struct {
 	principals []string
 	returned   []engine.Candidate // the candidates behind the returned hits
 	kind       string             // set with the error
+	diag       *diagRecord        // nil except for a diagnostic run (Diagnose)
 }
 
 // since is the milliseconds elapsed from t0 by the Searcher's clock.
@@ -168,7 +169,15 @@ func (r *searchRecord) fail(kind string, err error) error {
 // a failed search is logged best-effort. Nothing in this method logs the
 // query, a snippet, chunk text, principals or subjects.
 func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest) (*iface.RetrievalSearchResult, error) {
-	rec := &searchRecord{now: s.d.Now, start: s.d.Now()}
+	return s.search(ctx, req, nil)
+}
+
+// search is the pipeline behind Search and Diagnose. diag is nil for a
+// consumer search; a diagnostic run passes a record, which only sets
+// engine.Query.Diagnostics and collects scores: the gate, the principals,
+// step 6, the search-log row and its re-check are the same code either way.
+func (s *Searcher) search(ctx context.Context, req iface.RetrievalSearchRequest, diag *diagRecord) (*iface.RetrievalSearchResult, error) {
+	rec := &searchRecord{now: s.d.Now, start: s.d.Now(), diag: diag}
 	// Step 1: gate. A refusal writes no row.
 	g, err := s.gate(ctx, req)
 	if err != nil {
@@ -348,6 +357,7 @@ func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g 
 	}
 	rec.principals = pc.Principals
 	rec.timings.ResolveMs = rec.since(rec.start)
+	rec.diag.resolved(pinned, pc.Principals)
 
 	// Step 4: arms.
 	var (
@@ -371,7 +381,7 @@ func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g 
 
 	// Steps 5 and 6: fusion, then erasure veto and source check, with one
 	// refill when the drops shorten the page.
-	cands, short, err := s.fetchChecked(ctx, g, pinned.Collection, pc, rec, engine.Query{
+	q := engine.Query{
 		TenantID:    g.tenantID,
 		Principals:  append([]string(nil), pc.Principals...),
 		Filter:      g.filter,
@@ -380,21 +390,25 @@ func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g 
 		Weights:     engine.Weights{Dense: g.plan.Fusion.DenseWeight, Keyword: g.plan.Fusion.KeywordWeight},
 		PerArm:      g.plan.Fusion.Candidates,
 		Limit:       g.plan.Fetch,
-		Diagnostics: false,
-	})
+		Diagnostics: rec.diag != nil, // the refill copies q, so it inherits
+	}
+	cands, short, err := s.fetchChecked(ctx, g, pinned.Collection, pc, rec, q)
 	if err != nil {
 		return nil, err // fetchChecked recorded the kind
 	}
 	// Never fewer than the permitted results without a flag (D5).
 	degraded = degraded || short
+	// Before step 7, which overwrites Score with the reranker's.
+	rec.diag.survivors(q, cands)
 
 	// Step 7: optional rerank of the checked candidates.
 	if g.plan.RerankK > 0 && len(cands) > 0 {
 		t0 := s.d.Now()
-		ordered, _, ok := s.rerank(ctx, g.tenantID, g.spec, req.Query, cands, g.plan.RerankK)
+		ordered, scores, ok := s.rerank(ctx, g.tenantID, g.spec, req.Query, cands, g.plan.RerankK)
 		rec.timings.RerankMs = rec.since(t0)
 		if ok {
 			cands = ordered
+			rec.diag.reranked(ordered, scores)
 		} else {
 			if err := ctx.Err(); err != nil {
 				return nil, rec.fail(errKindUnavailable, err)
@@ -406,6 +420,7 @@ func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g 
 	// Step 8: result.
 	cands = cands[:min(len(cands), g.plan.Limit)]
 	rec.returned = cands
+	rec.diag.returned(cands)
 	return &iface.RetrievalSearchResult{Hits: s.toHits(g.spec, req.Query, cands), Degraded: degraded}, nil
 }
 

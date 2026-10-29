@@ -22,6 +22,24 @@ func TestService_SearchWithoutSearcherIsNotConfigured(t *testing.T) {
 	assert.Nil(t, res)
 }
 
+func TestService_DiagnoseWithoutSearcherNotConfigured(t *testing.T) {
+	res, err := New(Options{}).Diagnose(context.Background(), contactsReq())
+	requireIs(t, err, iface.ErrRetrievalNotConfigured)
+	assert.Nil(t, res)
+}
+
+func TestService_DiagnoseDelegates(t *testing.T) {
+	fx := newSearchFixture(t)
+	svc := New(Options{})
+	svc.SetSearch(NewSearcher(fx.deps()), nil)
+	res, err := svc.Diagnose(fx.ctx, contactsReq())
+	require.NoError(t, err)
+	assert.Len(t, res.Result.Hits, 3)
+	assert.Len(t, res.Scores, 3)
+	assert.Equal(t, true, fx.lastQuery().Diagnostics)
+	assert.Len(t, fx.log.rows, 1)
+}
+
 func TestService_PrincipalsWithoutResolverFailsClosed(t *testing.T) {
 	fx := newSearchFixture(t)
 	pc, err := New(Options{}).Principals(fx.ctx)
