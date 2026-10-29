@@ -1,4 +1,32 @@
 import { baseApi } from './baseApi';
+import type { ConfigField } from './moduleApi';
+
+// --- Per-module preferences and profile sections (user module) ---
+// Mirror of services.ModulePreferences / module.ProfileSectionSpec in the Go
+// backend. Fields use the ConfigField vocabulary of the admin module config,
+// so ModuleConfigFields renders them.
+
+export interface ModulePreferences {
+  module: string;
+  fields: ConfigField[];
+  /** Stored values with the declared defaults filled in. */
+  values: Record<string, string>;
+  updatedAt?: string;
+}
+
+export interface ProfileSectionSpec {
+  key: string;
+  module: string;
+  labelKey: string;
+  permission?: string;
+  surfaces?: ('self' | 'admin')[];
+  order?: number;
+}
+
+export interface ProfileSectionsResponse {
+  surface: 'self' | 'admin';
+  sections: ProfileSectionSpec[];
+}
 
 // OAuth Provider information
 export interface UserOAuthProviderInfo {
@@ -304,6 +332,38 @@ export const userApi = baseApi.injectEndpoints({
       ]
     }),
 
+    // --- Per-module preferences (self-service, user.self) ---
+    getMyPreferencesAll: builder.query<{ modules: ModulePreferences[] }, void>({
+      query: () => '/v1/me/preferences',
+      providesTags: [{ type: 'UserPreferences', id: 'ALL' }]
+    }),
+    getMyPreferences: builder.query<ModulePreferences, string>({
+      query: module => `/v1/me/preferences/${module}`,
+      providesTags: (_r, _e, module) => [
+        { type: 'UserPreferences', id: module }
+      ]
+    }),
+    putMyPreferences: builder.mutation<
+      ModulePreferences,
+      { module: string; values: Record<string, string> }
+    >({
+      query: ({ module, values }) => ({
+        url: `/v1/me/preferences/${module}`,
+        method: 'PUT',
+        body: { values }
+      }),
+      invalidatesTags: (_r, _e, { module }) => [
+        { type: 'UserPreferences', id: module },
+        { type: 'UserPreferences', id: 'ALL' }
+      ]
+    }),
+    getMyProfileSections: builder.query<ProfileSectionsResponse, void>({
+      query: () => '/v1/me/profile-sections'
+    }),
+    getUserProfileSections: builder.query<ProfileSectionsResponse, string>({
+      query: userId => `/v1/users/${userId}/profile-sections`
+    }),
+
     // Get user metrics
     getUserMetrics: builder.query<UserMetrics, string>({
       query: userId => `/v1/users/${userId}/metrics`,
@@ -499,6 +559,11 @@ export const {
   useDeleteUserMutation,
 
   useGetUserMetricsQuery,
+  useGetMyPreferencesAllQuery,
+  useGetMyPreferencesQuery,
+  usePutMyPreferencesMutation,
+  useGetMyProfileSectionsQuery,
+  useGetUserProfileSectionsQuery,
   useListClientUsersAdminQuery,
   useGetClientUserAdminQuery,
   useUpdateClientUserAdminMutation,

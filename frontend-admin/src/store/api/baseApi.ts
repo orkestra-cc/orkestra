@@ -808,6 +808,7 @@ export const baseApi = createApi({
   // Global tag types for cache invalidation
   tagTypes: [
     'User',
+    'UserPreferences',
     'Auth',
     'Navigation',
     'Dashboard',

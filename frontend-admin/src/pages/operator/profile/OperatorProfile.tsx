@@ -5,10 +5,17 @@ import OperatorMembershipsCard from 'components/common/OperatorMembershipsCard';
 import { Col, Row, Alert, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import type { User } from 'store/api/userApi';
+import { useSlotContributions } from 'modules/useSlotContributions';
+import ContributedProfileSections from 'pages/user/ContributedProfileSections';
+import {
+  USER_PROFILE_SECTIONS,
+  type UserProfileSectionProps
+} from 'pages/user/profileSlots';
 
 const OperatorProfile: React.FC = () => {
   const { t } = useTranslation();
   const { data: backendUser, isLoading, error } = useGetCurrentUserQuery();
+  const sections = useSlotContributions(USER_PROFILE_SECTIONS);
 
   if (isLoading) {
     return (
@@ -57,6 +64,12 @@ const OperatorProfile: React.FC = () => {
         </Col>
         <Col lg={12}>
           <OperatorMembershipsCard />
+        </Col>
+        <Col lg={12}>
+          <ContributedProfileSections<UserProfileSectionProps>
+            contributions={sections}
+            sectionProps={{ userId: user.id, user, viewer: 'self' }}
+          />
         </Col>
       </Row>
     </>

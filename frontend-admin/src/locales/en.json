@@ -760,6 +760,17 @@
         "toastCopied": "Token copied to clipboard",
         "errorUnknown": "unknown error"
       }
+    },
+    "modulePreferences": {
+      "title": "Module preferences",
+      "description": "Settings each module keeps for you. They follow your account, not the organization.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Preferences saved",
+      "saveFailed": "Could not save preferences: {{error}}",
+      "empty": "No module declares preferences yet.",
+      "lastSaved": "Last saved {{when}}",
+      "unknownError": "Unknown error"
     }
   },
   "adminTenants": {
