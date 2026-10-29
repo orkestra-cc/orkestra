@@ -37,6 +37,7 @@ const CompliancePolicyPage = lazy(
   () => import('pages/admin/compliance/policies')
 );
 const LlmAdminPage = lazy(() => import('pages/admin/llm'));
+const RetrievalAdminPage = lazy(() => import('pages/admin/retrieval'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
@@ -203,6 +204,34 @@ export function buildCoreRoutes(
                     >
                       <Suspense key="admin-llm" fallback={<OrkestraLoader />}>
                         <LlmAdminPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0023 — retrieval corpora, indexing and search log.
+                  // The page gates each tab by its own permission, so an
+                  // org owner or admin with retrieval.searchlog.admin and
+                  // no platform role reaches ?tab=search-log directly.
+                  path: 'retrieval',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'retrieval.corpus.read',
+                          'retrieval.tenant.read',
+                          'retrieval.searchlog.admin',
+                          'super_admin',
+                          'administrator',
+                          'developer'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-retrieval"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <RetrievalAdminPage />
                       </Suspense>
                     </ProtectedRoute>
                   )

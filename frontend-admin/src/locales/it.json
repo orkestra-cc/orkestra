@@ -3886,6 +3886,23 @@
         "unavailable": "Non disponibile",
         "mismatch": "Profilo non coincidente",
         "wrong_kind": "Tipo di endpoint errato"
+      },
+      "healthy": "{{ok}} su {{total}} in salute",
+      "none": "Nessun endpoint di inferenza in uso",
+      "columns": {
+        "endpoint": "Endpoint",
+        "kind": "Usato per",
+        "status": "Stato",
+        "profile": "Profilo",
+        "boundary": "Confine"
+      },
+      "kinds": {
+        "embed": "Embedding",
+        "rerank": "Rerank"
+      },
+      "boundaries": {
+        "local": "Locale",
+        "hosted": "Ospitato"
       }
     },
     "corpora": {
@@ -3901,7 +3918,27 @@
         "endpoint_unknown": "Endpoint sconosciuto",
         "endpoint_kind": "Tipo di endpoint errato",
         "unknown_state": "Stato sconosciuto"
-      }
+      },
+      "notConfigured": "Il motore vettoriale non è configurato in questa installazione. I corpora sono elencati, ma nulla viene indicizzato né è ricercabile finché non lo è.",
+      "empty": "Nessun corpus registrato o memorizzato.",
+      "search": "Cerca corpora…",
+      "notRegistered": "Non registrato",
+      "ownerRunning": "In esecuzione",
+      "ownerStopped": "Non in esecuzione",
+      "outboxOldest": "il più vecchio {{date}}",
+      "tenants": "{{done}} completate · {{building}} in costruzione",
+      "columns": {
+        "name": "Corpus",
+        "owner": "Proprietario",
+        "state": "Stato",
+        "generation": "Generazione",
+        "outbox": "Aggiornamenti in attesa",
+        "tenants": "Organizzazioni",
+        "actions": "Azioni"
+      },
+      "dropTitle": "Elimina corpus",
+      "dropConfirm": "Eliminare lo stato memorizzato di {{name}}? Le generazioni {{generations}} e le loro collezioni vengono eliminate, insieme agli aggiornamenti in attesa e all'avanzamento della costruzione di ogni organizzazione. Il log di ricerca viene conservato.",
+      "dropSuccess": "Corpus {{name}} eliminato."
     },
     "searchLog": {
       "title": "Log di ricerca",
@@ -3916,6 +3953,108 @@
         "principals": "Ricerca dei principal fallita",
         "visibility_check": "Controllo di visibilità fallito",
         "canceled": "Annullata"
+      },
+      "audited": "Ogni consultazione di questo log viene registrata nel registro di audit. Le ricerche degli ultimi secondi potrebbero non essere ancora elencate.",
+      "empty": "Nessuna ricerca corrisponde a questi filtri.",
+      "stepUpNeeded": "La consultazione del log di ricerca richiede una nuova verifica.",
+      "durationMs": "{{ms}} ms",
+      "filters": {
+        "userUuid": "UUID utente",
+        "since": "Dal",
+        "until": "Al",
+        "datePlaceholder": "aaaa-mm-gg",
+        "invalidUuid": "Inserisci un UUID valido.",
+        "untilBeforeSince": "La data di fine precede quella di inizio."
+      },
+      "columns": {
+        "createdAt": "Ora",
+        "user": "Utente",
+        "corpus": "Corpus",
+        "query": "Query",
+        "returned": "Restituiti",
+        "subjects": "Soggetti",
+        "duration": "Durata",
+        "outcome": "Esito",
+        "details": "Dettagli"
+      },
+      "details": {
+        "show": "Mostra dettagli",
+        "hide": "Nascondi dettagli",
+        "showAria": "Mostra i dettagli della ricerca del {{date}}",
+        "hideAria": "Nascondi i dettagli della ricerca del {{date}}",
+        "mode": "Modalità",
+        "principals": "Principal",
+        "returned": "Fonti restituite",
+        "subjects": "Soggetti",
+        "filter": "Filtro",
+        "none": "Nessuno"
+      }
+    },
+    "loadError": "Non è stato possibile caricare i dati di retrieval.",
+    "actions": {
+      "retry": "Riprova",
+      "diagnose": "Diagnostica",
+      "diagnoseAria": "Diagnostica {{name}}",
+      "drop": "Elimina",
+      "dropAria": "Elimina {{name}}",
+      "close": "Chiudi",
+      "run": "Esegui ricerca",
+      "running": "Ricerca in corso…",
+      "apply": "Applica filtri",
+      "verify": "Verifica e carica"
+    },
+    "erasures": {
+      "pending": "Cancellazioni in attesa",
+      "fencing": "Cancellazioni in recinzione"
+    },
+    "diagnostics": {
+      "title": "Diagnostica {{name}}",
+      "hint": "Esegue una ricerca reale a tuo nome, con i tuoi principal. Viene registrata nel log di ricerca e nel registro di audit.",
+      "query": "Query",
+      "mode": "Modalità",
+      "limit": "Risultati",
+      "modes": {
+        "hybrid": "Ibrida",
+        "dense": "Densa",
+        "keyword": "Parole chiave"
+      },
+      "validation": {
+        "queryRequired": "Inserisci una query.",
+        "queryTooLong": "Al massimo {{max}} caratteri.",
+        "limitRange": "Tra 1 e 100."
+      },
+      "result": "Risultato",
+      "pinned": "Collezione {{collection}} · profilo di embedding {{profile}}",
+      "principals": "Principal applicati",
+      "degraded": "Ricerca degradata: una parte della pipeline non era disponibile, quindi questo ordinamento può differire da quello di una ricerca in salute.",
+      "noHits": "Nessuna fonte a te visibile corrisponde a questa query.",
+      "columns": {
+        "rank": "#",
+        "sourceId": "Fonte",
+        "chunkId": "Frammento",
+        "score": "Punteggio",
+        "fused": "Fuso",
+        "dense": "Denso",
+        "keyword": "Parole chiave",
+        "rerank": "Rerank",
+        "snippet": "Estratto"
+      }
+    },
+    "indexing": {
+      "empty": "Nessun corpus registrato.",
+      "search": "Cerca corpora…",
+      "erasuresPending": "Cancellazioni in attesa",
+      "initialBuild": {
+        "pending": "In attesa",
+        "building": "In costruzione",
+        "done": "Completata"
+      },
+      "columns": {
+        "corpus": "Corpus",
+        "owner": "Proprietario",
+        "initialBuild": "Costruzione iniziale",
+        "points": "Punti indicizzati",
+        "outbox": "Aggiornamenti in attesa"
       }
     }
   }

@@ -3886,6 +3886,23 @@
         "unavailable": "Unavailable",
         "mismatch": "Profile mismatch",
         "wrong_kind": "Wrong endpoint kind"
+      },
+      "healthy": "{{ok}} of {{total}} healthy",
+      "none": "No inference endpoint in use",
+      "columns": {
+        "endpoint": "Endpoint",
+        "kind": "Used for",
+        "status": "Status",
+        "profile": "Profile",
+        "boundary": "Boundary"
+      },
+      "kinds": {
+        "embed": "Embedding",
+        "rerank": "Rerank"
+      },
+      "boundaries": {
+        "local": "Local",
+        "hosted": "Hosted"
       }
     },
     "corpora": {
@@ -3901,7 +3918,27 @@
         "endpoint_unknown": "Unknown endpoint",
         "endpoint_kind": "Wrong endpoint kind",
         "unknown_state": "Unknown state"
-      }
+      },
+      "notConfigured": "The vector engine is not configured on this installation. Corpora are listed, but nothing is indexed or searchable until it is.",
+      "empty": "No corpus is registered or stored.",
+      "search": "Search corpora…",
+      "notRegistered": "Not registered",
+      "ownerRunning": "Running",
+      "ownerStopped": "Not running",
+      "outboxOldest": "oldest {{date}}",
+      "tenants": "{{done}} done · {{building}} building",
+      "columns": {
+        "name": "Corpus",
+        "owner": "Owner",
+        "state": "State",
+        "generation": "Generation",
+        "outbox": "Pending updates",
+        "tenants": "Organizations",
+        "actions": "Actions"
+      },
+      "dropTitle": "Drop corpus",
+      "dropConfirm": "Drop the stored state of {{name}}? Generations {{generations}} and their collections are deleted, with every organization's pending updates and build progress for it. The search log is kept.",
+      "dropSuccess": "Corpus {{name}} dropped."
     },
     "searchLog": {
       "title": "Search log",
@@ -3916,6 +3953,108 @@
         "principals": "Principals lookup failed",
         "visibility_check": "Visibility check failed",
         "canceled": "Cancelled"
+      },
+      "audited": "Each view of this log is recorded in the audit trail. Searches from the last few seconds may not be listed yet.",
+      "empty": "No search matches these filters.",
+      "stepUpNeeded": "Viewing the search log requires a fresh verification.",
+      "durationMs": "{{ms}} ms",
+      "filters": {
+        "userUuid": "User UUID",
+        "since": "From",
+        "until": "To",
+        "datePlaceholder": "yyyy-mm-dd",
+        "invalidUuid": "Enter a valid UUID.",
+        "untilBeforeSince": "The end date is before the start date."
+      },
+      "columns": {
+        "createdAt": "Time",
+        "user": "User",
+        "corpus": "Corpus",
+        "query": "Query",
+        "returned": "Returned",
+        "subjects": "Subjects",
+        "duration": "Duration",
+        "outcome": "Outcome",
+        "details": "Details"
+      },
+      "details": {
+        "show": "Show details",
+        "hide": "Hide details",
+        "showAria": "Show details of the search at {{date}}",
+        "hideAria": "Hide details of the search at {{date}}",
+        "mode": "Mode",
+        "principals": "Principals",
+        "returned": "Returned sources",
+        "subjects": "Subjects",
+        "filter": "Filter",
+        "none": "None"
+      }
+    },
+    "loadError": "The retrieval data could not be loaded.",
+    "actions": {
+      "retry": "Retry",
+      "diagnose": "Diagnose",
+      "diagnoseAria": "Diagnose {{name}}",
+      "drop": "Drop",
+      "dropAria": "Drop {{name}}",
+      "close": "Close",
+      "run": "Run search",
+      "running": "Searching…",
+      "apply": "Apply filters",
+      "verify": "Verify and load"
+    },
+    "erasures": {
+      "pending": "Erasures pending",
+      "fencing": "Erasures fencing"
+    },
+    "diagnostics": {
+      "title": "Diagnose {{name}}",
+      "hint": "Runs one real search as you, with your own principals. It is recorded in the search log and the audit trail.",
+      "query": "Query",
+      "mode": "Mode",
+      "limit": "Results",
+      "modes": {
+        "hybrid": "Hybrid",
+        "dense": "Dense",
+        "keyword": "Keyword"
+      },
+      "validation": {
+        "queryRequired": "Enter a query.",
+        "queryTooLong": "At most {{max}} characters.",
+        "limitRange": "Between 1 and 100."
+      },
+      "result": "Result",
+      "pinned": "Collection {{collection}} · embedding profile {{profile}}",
+      "principals": "Principals applied",
+      "degraded": "Degraded search: part of the pipeline was unavailable, so this ranking may differ from a healthy one.",
+      "noHits": "No source visible to you matches this query.",
+      "columns": {
+        "rank": "#",
+        "sourceId": "Source",
+        "chunkId": "Chunk",
+        "score": "Score",
+        "fused": "Fused",
+        "dense": "Dense",
+        "keyword": "Keyword",
+        "rerank": "Rerank",
+        "snippet": "Snippet"
+      }
+    },
+    "indexing": {
+      "empty": "No corpus is registered.",
+      "search": "Search corpora…",
+      "erasuresPending": "Erasures pending",
+      "initialBuild": {
+        "pending": "Pending",
+        "building": "Building",
+        "done": "Done"
+      },
+      "columns": {
+        "corpus": "Corpus",
+        "owner": "Owner",
+        "initialBuild": "Initial build",
+        "points": "Indexed points",
+        "outbox": "Pending updates"
       }
     }
   }
