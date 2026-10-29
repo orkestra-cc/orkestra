@@ -3,7 +3,8 @@
 // corpus registry, the engine contract, the Qdrant driver, the outbox, the
 // index worker, the search pipeline with its principal resolver and search
 // log, the search-log retention loop, and erasure (tombstones, the
-// finalizer, the tenant purge). The admin routes arrive in PR 7.
+// finalizer, the tenant purge). Its operator-host admin routes live in
+// routes.go.
 package retrieval
 
 import (
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -18,8 +20,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
 	"github.com/orkestra/backend/internal/core/retrieval/engine/qdrant"
+	"github.com/orkestra/backend/internal/core/retrieval/handlers"
+	"github.com/orkestra/backend/internal/core/retrieval/models"
 	"github.com/orkestra/backend/internal/core/retrieval/repository"
 	"github.com/orkestra/backend/internal/core/retrieval/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -81,6 +88,10 @@ const (
 	healthTimeout = 2 * time.Second
 )
 
+// stepUpMaxAge is the MFA freshness required on the diagnostic search, the
+// orphan drop and the search-log read.
+const stepUpMaxAge = 5 * time.Minute
+
 // prefixPattern has no "_": collection names are "<prefix>_<corpus>_g<n>" and
 // corpus names may hold "_", so an underscore in the prefix would let two
 // (prefix, corpus) pairs share a collection ("a_b"+"c" and "a"+"b_c").
@@ -118,6 +129,9 @@ type Module struct {
 	// finalization sweep and the purged-tenant reconciliation.
 	finalizer *services.Finalizer
 	erasure   *services.ErasureService
+	// admin serves the operator-host admin routes; nil without a database
+	// (the routes then answer retrieval.unavailable).
+	admin *handlers.AdminHandler
 	// reconcile cadence; zero means the defaults (test seam).
 	reconcileFirst, reconcileInterval time.Duration
 	// finalizer sweep interval; zero means finalizerInterval (test seam, set
@@ -372,6 +386,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		sweeper   services.UncheckedSearchLogSweeper
 		finalizer *services.Finalizer
 		erasure   *services.ErasureService
+		admin     *handlers.AdminHandler
 		settings  = func() searchSettings { return readSearchSettings(deps) }
 	)
 	missing := ""
@@ -455,7 +470,17 @@ func (m *Module) Init(deps *module.Dependencies) error {
 				slog.String("missing", strings.Join(gaps, ", ")))
 		}
 
-		finalizer, erasure = wireErasure(deps, svc, states, eng, prefix, m.finalizerConfig(deps), logger)
+		var relay *services.AuditRelay
+		finalizer, erasure, relay = wireErasure(deps, svc, states, eng, prefix, m.finalizerConfig(deps), logger)
+
+		// The admin service shares the erasure relay, so the sink compliance
+		// pushes later through Service.SetAuditSink reaches its events too.
+		// It contacts nothing at Init (D1).
+		admin = handlers.NewAdminHandler(services.NewAdminService(services.AdminDeps{
+			Runtime:  svc,
+			Store:    adminStoreAdapter{AdminStore: repository.NewAdminStore(deps.DB), states: states, progress: progress},
+			Profiles: svcs.profiles, Modules: modules, Audit: relay, Logger: logger,
+		}), logger)
 	}
 	if deps.DB == nil {
 		// Production always has a DB; the repository constructors would
@@ -471,6 +496,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.logger, m.svc, m.eng, m.worker, m.missing = logger, svc, eng, worker, missing
 	m.purger, m.sweeper, m.settings = purger, sweeper, settings
 	m.finalizer, m.erasure = finalizer, erasure
+	m.admin = admin
 	m.mu.Unlock()
 	deps.Services.Register(module.ServiceRetrieval, svc)
 	return nil
@@ -484,7 +510,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 // silently (compliance absent); a tenant service that cannot take the purge
 // hook or list purged tenants gives one WARN.
 func wireErasure(deps *module.Dependencies, svc *services.Service, states *repository.CorpusStates,
-	eng engine.Engine, prefix string, cfg func() services.FinalizerConfig, logger *slog.Logger) (*services.Finalizer, *services.ErasureService) {
+	eng engine.Engine, prefix string, cfg func() services.FinalizerConfig, logger *slog.Logger) (*services.Finalizer, *services.ErasureService, *services.AuditRelay) {
 	relay := services.NewAuditRelay()
 	store := repository.NewErasureFinalization(deps.DB)
 	logs := repository.NewSearchLogDSR(deps.DB)
@@ -515,7 +541,27 @@ func wireErasure(deps *module.Dependencies, svc *services.Service, states *repos
 		logger.Warn("retrieval: tenant purge erasure is not fully wired",
 			slog.String("missing", strings.Join(absent, ", ")))
 	}
-	return finalizer, erasure
+	return finalizer, erasure, relay
+}
+
+// adminStoreAdapter satisfies services.AdminStoreAPI: the admin queries of
+// AdminStore plus the existing corpus-state and tenant-progress reads.
+type adminStoreAdapter struct {
+	*repository.AdminStore
+	states   *repository.CorpusStates
+	progress *repository.TenantProgress
+}
+
+func (a adminStoreAdapter) CorpusState(ctx context.Context, name string) (*models.CorpusState, error) {
+	return a.states.Get(ctx, name)
+}
+
+func (a adminStoreAdapter) CorpusStateList(ctx context.Context) ([]models.CorpusState, error) {
+	return a.states.List(ctx)
+}
+
+func (a adminStoreAdapter) TenantBuild(ctx context.Context, corpus string, generation int) (*models.TenantProgress, error) {
+	return a.progress.Get(ctx, corpus, generation)
 }
 
 // Start seals corpus registration, then starts the background jobs: the
@@ -780,4 +826,49 @@ func (m *Module) HealthCheck(ctx context.Context) error {
 		return errors.New("retrieval: " + strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func (m *Module) NavItems() []module.NavItemSpec {
+	return []module.NavItemSpec{
+		{Realm: "platform", Tier: "internal", Name: "Retrieval", Icon: "search", Path: "/admin/retrieval", MinRole: "administrator", Active: true},
+	}
+}
+
+// RegisterRoutes mounts the five admin routes on the operator surface
+// (Tier-1 only) behind RequireInternalTenant and a permission. The two
+// operator actions that change state or read what people searched for
+// (diagnostics and drop, the search log) also carry RequireMFA then a fresh
+// step-up, in the llm order: with CEDAR_ENFORCE_ACTIONS unset the role
+// table decides, so without these a password-only administrator could run
+// them. Without a database the routes still mount and answer 503.
+func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
+	op := ri.Operator
+	m.mu.Lock()
+	h, logger := m.admin, m.logger
+	m.mu.Unlock()
+	if h == nil {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		h = handlers.NewAdminHandler(nil, logger)
+	}
+	group := func(register func(r chi.Router), gates ...func(http.Handler) http.Handler) {
+		op.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(op.AuthMW.RequireInternalTenant())
+			for _, g := range gates {
+				r.Use(g)
+			}
+			register(r)
+		})
+	}
+	api := func(r chi.Router) huma.API { return humachi.New(r, ri.APIConfig) }
+
+	group(func(r chi.Router) { RegisterCorpusReadRoutes(api(r), h) },
+		op.AuthMW.RequireSystemPermission("retrieval.corpus.read"))
+	group(func(r chi.Router) { RegisterCorpusAdminRoutes(api(r), h) },
+		op.AuthMW.RequireSystemPermission("retrieval.corpus.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
+	group(func(r chi.Router) { RegisterTenantReadRoutes(api(r), h) },
+		op.AuthMW.RequirePermission("retrieval.tenant.read"))
+	group(func(r chi.Router) { RegisterSearchLogRoutes(api(r), h) },
+		op.AuthMW.RequirePermission("retrieval.searchlog.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
 }

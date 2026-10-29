@@ -449,7 +449,7 @@ func (a *AdminService) DropOrphanCorpus(ctx context.Context, corpus string) erro
 	meta := map[string]any{"collections": collections}
 	err = a.dropOrphan(ctx, st, collections, meta)
 	if err != nil {
-		meta["reason"] = auditReason(err)
+		meta["reason"] = AuditReason(err)
 		a.audit.EmitOutcome(ctx, AuditCorpusDropped, auditResourceCorpus, corpus, "failure", meta)
 		return err
 	}
@@ -509,9 +509,11 @@ func (a *AdminService) dropOrphan(ctx context.Context, st *models.CorpusState, c
 	}
 }
 
-// auditReason is the error code the admin handler answers a failed action
-// with, so the audit trail and the response agree.
-func auditReason(err error) string {
+// AuditReason is the error code the admin handler answers a failed action
+// with, so the audit trail and the response agree. It is exported only so
+// handlers' TestAuditReasonAgreesWithMapError can pin it against mapError:
+// change the two together.
+func AuditReason(err error) string {
 	switch {
 	case errors.Is(err, iface.ErrRetrievalNotConfigured):
 		return errcode.RetrievalNotConfigured
