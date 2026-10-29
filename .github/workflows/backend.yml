@@ -23,6 +23,9 @@ on:
       - 'scripts/env-validate.sh'
       - 'scripts/test-env-file.sh'
       - 'scripts/test-env-validate.sh'
+      - 'orkestra.sh'
+      - 'scripts/test-orkestra-helpers.sh'
+      - 'docker/frontend-deps.sh'
   push:
     branches: [dev, main]
     # Release tags (vX.Y.Z) build versioned images. paths filters do not
@@ -49,6 +52,9 @@ on:
       - 'scripts/env-validate.sh'
       - 'scripts/test-env-file.sh'
       - 'scripts/test-env-validate.sh'
+      - 'orkestra.sh'
+      - 'scripts/test-orkestra-helpers.sh'
+      - 'docker/frontend-deps.sh'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

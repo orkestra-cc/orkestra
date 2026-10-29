@@ -467,6 +467,55 @@ ENV_FILE="$old_env_file"
 rm -f "$pin_tmp"
 
 
+# prepare_dev_frontend_dirs creates each dev frontend's bind sources and its
+# node_modules mount point before compose would create them as root, skips an
+# app the checkout does not have, and refuses a dependency or npm cache
+# directory the container could not write.
+old_project_root="$PROJECT_ROOT"
+PROJECT_ROOT=$(mktemp -d)
+mkdir -p "$PROJECT_ROOT/frontend-admin"
+prepare_dev_frontend_dirs; rc=$?
+check "dev frontend dirs: succeeds" "0" "$rc"
+check "dev frontend dirs: admin dependencies and mount point" "yes" \
+    "$([ -d "$PROJECT_ROOT/frontend-admin/.docker/node_modules" ] && [ -d "$PROJECT_ROOT/frontend-admin/node_modules" ] && echo yes)"
+check "dev frontend dirs: caches" "yes" \
+    "$([ -d "$PROJECT_ROOT/frontend-admin/.npm-cache" ] && [ -d "$PROJECT_ROOT/frontend-admin/.vite-cache" ] && echo yes)"
+check "dev frontend dirs: a missing app is skipped" "no" "$([ -e "$PROJECT_ROOT/frontend-client" ] && echo yes || echo no)"
+mkdir -p "$PROJECT_ROOT/frontend-client"
+prepare_dev_frontend_dirs; rc=$?
+check "dev frontend dirs: client dependencies and mount point" "yes" \
+    "$([ "$rc" = 0 ] && [ -d "$PROJECT_ROOT/frontend-client/.docker/node_modules" ] && [ -d "$PROJECT_ROOT/frontend-client/node_modules" ] && echo yes)"
+check "dev frontend dirs: only the apps it is given" "yes" \
+    "$(rm -r "$PROJECT_ROOT/frontend-client/.npm-cache" && prepare_dev_frontend_dirs frontend-admin && [ ! -e "$PROJECT_ROOT/frontend-client/.npm-cache" ] && echo yes)"
+prepare_dev_frontend_dirs
+# The refusals rely on chmod making a directory unwritable, which root ignores.
+if [ "$(id -u)" = 0 ]; then
+    echo "  skip dev frontend dirs: unwritable-directory checks (running as root)"
+else
+chmod 555 "$PROJECT_ROOT/frontend-client/.docker/node_modules"
+msg=$(prepare_dev_frontend_dirs 2>&1); rc=$?
+check "dev frontend dirs: unwritable dependencies refused" "1" "$rc"
+check "dev frontend dirs: the refusal names the directory" "yes" \
+    "$(grep -Fq "$PROJECT_ROOT/frontend-client/.docker/node_modules" <<<"$msg" && echo yes)"
+chmod 755 "$PROJECT_ROOT/frontend-client/.docker/node_modules"
+chmod 555 "$PROJECT_ROOT/frontend-client/.npm-cache"
+prepare_dev_frontend_dirs 2>/dev/null; rc=$?
+check "dev frontend dirs: unwritable npm cache refused" "1" "$rc"
+chmod 755 "$PROJECT_ROOT/frontend-client/.npm-cache"
+# frontend-admin's npm cache is /app/.npm-cache too: an unwritable one is refused.
+chmod 555 "$PROJECT_ROOT/frontend-admin/.npm-cache"
+prepare_dev_frontend_dirs 2>/dev/null; rc=$?
+check "dev frontend dirs: admin's unwritable npm cache refused" "1" "$rc"
+chmod 755 "$PROJECT_ROOT/frontend-admin/.npm-cache"
+# A backend-only deploy prepares no frontend: an unwritable one does not stop it.
+chmod 555 "$PROJECT_ROOT/frontend-client/.npm-cache"
+prepare_dev_frontend_dirs frontend-admin; rc=$?
+check "dev frontend dirs: an app not given is not checked" "0" "$rc"
+chmod 755 "$PROJECT_ROOT/frontend-client/.npm-cache"
+fi
+rm -r "$PROJECT_ROOT"
+PROJECT_ROOT="$old_project_root"
+
 echo
 printf 'orkestra-helpers: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

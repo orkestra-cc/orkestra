@@ -272,8 +272,13 @@ services:
       # owned by the remapped range, not the real host UID 1000). Relocate
       # it onto the writable /app bind mount. Mirrors docker-compose.staging.yml.
       npm_config_cache: /app/.npm-cache
+    # Dependencies: see the frontend-deps.sh header. orkestra.sh creates the
+    # .docker/node_modules source and the node_modules mount point first, or
+    # Docker would create them as root.
     volumes:
       - ../frontend-admin:/app
+      - ../frontend-admin/.docker/node_modules:/app/node_modules
+      - ./frontend-deps.sh:/opt/orkestra/frontend-deps.sh:ro
       - ../frontend-admin/.vite-cache:/app/.vite
       - ../frontend-admin/.npm-cache:/app/.npm-cache
     # Regenerate public/config.js from the VITE_* env vars BEFORE
@@ -301,7 +306,7 @@ services:
           startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')"
         };
         EOF
-        npm install && npm run dev -- --host 0.0.0.0
+        sh /opt/orkestra/frontend-deps.sh && npm run dev -- --host 0.0.0.0
 
   # Tier-2 (external client) demo SPA — consumes the ADR-0003 client API
   # surface (client.localhost:3000, JWT aud=client). Sibling app to the
@@ -344,8 +349,13 @@ services:
       # owned by the remapped range, not the real host UID 1000). Relocate
       # it onto the writable /app bind mount. Mirrors docker-compose.staging.yml.
       npm_config_cache: /app/.npm-cache
+    # Dependencies: see the frontend-deps.sh header. orkestra.sh creates the
+    # .docker/node_modules source and the node_modules mount point first, or
+    # Docker would create them as root.
     volumes:
       - ../frontend-client:/app
+      - ../frontend-client/.docker/node_modules:/app/node_modules
+      - ./frontend-deps.sh:/opt/orkestra/frontend-deps.sh:ro
       - ../frontend-client/.vite-cache:/app/.vite
       - ../frontend-client/.npm-cache:/app/.npm-cache
     # Regenerate public/config.js from VITE_API_BASE BEFORE `npm run dev`.
@@ -365,7 +375,7 @@ services:
           stripePublishableKey: "$${VITE_STRIPE_PUBLISHABLE_KEY}"
         };
         EOF
-        npm install && npm run dev -- --host 0.0.0.0
+        sh /opt/orkestra/frontend-deps.sh && npm run dev -- --host 0.0.0.0
     # Probes the in-process /health endpoint registered by the Vite
     # plugin in frontend-client/vite.config.ts. Must use 127.0.0.1, NOT
     # localhost: /etc/hosts maps localhost to ::1 as well, busybox wget

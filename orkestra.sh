@@ -699,6 +699,32 @@ resolve_running_container() {
         --filter "label=com.docker.compose.service=$service" \
         --filter "status=running" 2> /dev/null | head -1
 }
+
+# prepare_dev_frontend_dirs — the dev frontends bind <app>/.docker/node_modules
+# over /app/node_modules (docker/frontend-deps.sh installs there), so their
+# Alpine packages never replace the host's, and mount .npm-cache and
+# .vite-cache. Docker would create a missing bind source or mount point as
+# root (under userns-remap, as the remapped root), which the uid-1000 container
+# cannot write and the host's own `npm ci` cannot clean, so create them all
+# first. Takes the apps to prepare (default: both), so a deploy checks only the
+# frontends it starts. Returns non-zero when a directory the container writes
+# (dependencies, npm cache) exists but is not writable: one Docker created.
+# Vite does not use .vite-cache (its cache is in node_modules).
+prepare_dev_frontend_dirs() {
+    local app dir
+    [ $# -gt 0 ] || set -- frontend-admin frontend-client
+    for app in "$@"; do
+        [ -d "$PROJECT_ROOT/$app" ] || continue
+        mkdir -p "$PROJECT_ROOT/$app/node_modules" "$PROJECT_ROOT/$app/.docker/node_modules" \
+            "$PROJECT_ROOT/$app/.npm-cache" "$PROJECT_ROOT/$app/.vite-cache" || return 1
+        for dir in .docker/node_modules .npm-cache; do
+            if [ ! -w "$PROJECT_ROOT/$app/$dir" ]; then
+                p_err "$PROJECT_ROOT/$app/$dir is not writable by $(id -un): remove it (it holds only container data) and deploy again"
+                return 1
+            fi
+        done
+    done
+}
 # ---------------------------------------------------------------------------
 # Full-stack profile operations
 # ---------------------------------------------------------------------------
@@ -1313,6 +1339,15 @@ fullstack_execute_deploy() {
         fi
         with_spinner "Waiting for services to stabilize" sleep 30
     else
+        if [ "$ENV" = "development" ]; then
+            # Only the frontends this scope starts: a backend-only deploy never
+            # mounts their directories, so it must not stop on them.
+            case "$DEPLOY_SCOPE" in
+                all) prepare_dev_frontend_dirs frontend-admin frontend-client ;;
+                frontend-admin | frontend-admin+backend) prepare_dev_frontend_dirs frontend-admin ;;
+                *) true ;;
+            esac || die "Cannot prepare the dev frontends' dependency directories"
+        fi
         if [ "$DEPLOY_SCOPE" = "all" ]; then
             # One project, one `up -d` — do NOT `down` first (that would
             # tear down infra too, since infra is now part of this project).

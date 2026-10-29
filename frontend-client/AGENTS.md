@@ -307,7 +307,7 @@ npm run lint               # eslint src --ext .ts,.tsx
 npm run build              # tsc -b && vite build (production bundle)
 ```
 
-The Vite dev server runs inside Docker; if you need to rebuild outside Docker (e.g. for local typechecking), `npm install` is fine — the dependency tree is small and the container's `node_modules` is volume-isolated.
+The Vite dev server runs inside Docker; if you need to rebuild outside Docker (e.g. for local typechecking), `npm ci` on the host is fine: the container installs its own dependencies into `.docker/node_modules` (see `docker/AGENTS.md`, "Development") and never touches the host's `node_modules`.
 
 ### Runtime config
 

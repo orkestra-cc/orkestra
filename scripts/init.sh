@@ -271,6 +271,16 @@ if [ "${SKIP_JWT:-no}" != "yes" ]; then
   ok "generated jwt-private.pem (chmod 600) + jwt-public.pem"
 fi
 
+# The dev frontends' dependency directories (see prepare_dev_frontend_dirs in
+# orkestra.sh), so that the `docker compose up` suggested below does not create
+# them as root.
+for app in frontend-admin frontend-client; do
+  if [ -d "$REPO_ROOT/$app" ]; then
+    mkdir -p "$REPO_ROOT/$app/node_modules" "$REPO_ROOT/$app/.docker/node_modules" \
+      "$REPO_ROOT/$app/.npm-cache" "$REPO_ROOT/$app/.vite-cache"
+  fi
+done
+
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
