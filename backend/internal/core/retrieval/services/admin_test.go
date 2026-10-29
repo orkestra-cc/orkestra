@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -94,6 +95,11 @@ type adminStoreFake struct {
 	pending   int64
 	listErr   error
 
+	logRows  []models.SearchLog
+	logTotal int64
+	logErr   error
+	logCalls []models.SearchLogQuery
+
 	rowsErr       error
 	stateDelErr   error
 	afterFirstGet func() // runs once, after the first CorpusState read returned its copy
@@ -129,8 +135,9 @@ func (s *adminStoreFake) OutboxBacklogTenant(ctx context.Context) (map[string]mo
 	return s.tenantBkl, nil
 }
 func (s *adminStoreFake) TenantErasuresPending(context.Context) (int64, error) { return s.pending, nil }
-func (s *adminStoreFake) SearchLog(context.Context, models.SearchLogQuery) ([]models.SearchLog, int64, error) {
-	return nil, 0, nil
+func (s *adminStoreFake) SearchLog(_ context.Context, q models.SearchLogQuery) ([]models.SearchLog, int64, error) {
+	s.logCalls = append(s.logCalls, q)
+	return s.logRows, s.logTotal, s.logErr
 }
 func (s *adminStoreFake) CorpusState(_ context.Context, name string) (*models.CorpusState, error) {
 	s.getCalls++
@@ -739,4 +746,132 @@ func TestDropOrphan_MongoStoreAlreadyGone(t *testing.T) {
 	// and the raw compare-and-delete on a gone row is a conflict, which the
 	// service resolves by re-reading (covered with the fake above)
 	assert.ErrorIs(t, st.DeleteCorpusState(ctx, "old", 1), repository.ErrStateConflict)
+}
+
+// ---- SearchLog ----
+
+func TestSearchLog_EmitsOneAuditEventEvenWhenEmpty(t *testing.T) {
+	fx := newAdminFx(t)
+	page, err := fx.svc.SearchLog(fx.ctx, models.SearchLogQuery{})
+	require.NoError(t, err)
+	assert.NotNil(t, page.Items)
+	assert.Empty(t, page.Items)
+	assert.Equal(t, int64(0), page.Total)
+	assert.Equal(t, 50, page.Limit)
+
+	evs := fx.sink.byAction(AuditSearchLogRead)
+	require.Len(t, evs, 1)
+	assert.Len(t, fx.sink.events, 1)
+	assert.Equal(t, "retrieval_search_log", evs[0].ResourceType)
+	assert.Equal(t, "tA", evs[0].ResourceID)
+	assert.Equal(t, "success", evs[0].Outcome)
+	assert.Equal(t, 0, evs[0].Metadata["returned"])
+	assert.Equal(t, 50, evs[0].Metadata["limit"])
+}
+
+func TestSearchLog_Validation(t *testing.T) {
+	fx := newAdminFx(t)
+	now := time.Now()
+	later := now.Add(time.Hour)
+	for name, q := range map[string]models.SearchLogQuery{
+		"since after until": {Since: &later, Until: &now},
+		"limit too big":     {Limit: 500},
+		"limit negative":    {Limit: -1},
+		"offset too big":    {Offset: 10001},
+		"offset negative":   {Offset: -1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := fx.svc.SearchLog(fx.ctx, q)
+			assert.ErrorIs(t, err, iface.ErrRetrievalInvalidRequest)
+		})
+	}
+	assert.Empty(t, fx.store.logCalls)
+	assert.Empty(t, fx.sink.events)
+
+	_, err := fx.svc.SearchLog(fx.ctx, models.SearchLogQuery{Limit: 200, Offset: 10000})
+	require.NoError(t, err)
+	_, err = fx.svc.SearchLog(fx.ctx, models.SearchLogQuery{})
+	require.NoError(t, err)
+	require.Len(t, fx.store.logCalls, 2)
+	assert.Equal(t, 50, fx.store.logCalls[1].Limit)
+}
+
+func TestSearchLog_RequiresInternalTenant(t *testing.T) {
+	fx := newAdminFx(t)
+	_, err := fx.svc.SearchLog(ctxauth.WithTenantKind(fx.ctx, "external"), models.SearchLogQuery{})
+	assert.ErrorIs(t, err, iface.ErrRetrievalForbidden)
+	assert.Empty(t, fx.store.logCalls)
+	assert.Empty(t, fx.sink.events)
+}
+
+func TestSearchLog_AuditHasNoRowContent(t *testing.T) {
+	fx := newAdminFx(t)
+	fx.store.logRows = []models.SearchLog{{
+		UUID: "l1", TenantID: "tA", UserUUID: "u-9", Corpus: "crm", Query: "mario rossi",
+		FilterJSON: `{"field":"city","op":"eq","value":"roma"}`, Subjects: []string{"subj-1"}, SourceIDs: []string{"src-1"},
+		CreatedAt: time.Unix(1700000000, 0).UTC(),
+	}}
+	fx.store.logTotal = 1
+	since := time.Unix(1699000000, 0).UTC()
+	page, err := fx.svc.SearchLog(fx.ctx, models.SearchLogQuery{UserUUID: "u-9", Since: &since})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, "mario rossi", page.Items[0].Query)
+
+	evs := fx.sink.byAction(AuditSearchLogRead)
+	require.Len(t, evs, 1)
+	assert.Equal(t, 1, evs[0].Metadata["returned"])
+	assert.Equal(t, "u-9", evs[0].Metadata["userUuid"])
+	assert.Equal(t, "", evs[0].Metadata["until"])
+	for _, v := range evs[0].Metadata {
+		s := fmt.Sprint(v)
+		for _, secret := range []string{"mario", "rossi", "roma", "subj-1", "src-1", "city"} {
+			assert.NotContains(t, s, secret)
+		}
+	}
+}
+
+func TestSearchLog_StoreErrorIsAuditedAsFailure(t *testing.T) {
+	fx := newAdminFx(t)
+	fx.store.logErr = errors.New("boom")
+	_, err := fx.svc.SearchLog(fx.ctx, models.SearchLogQuery{})
+	require.Error(t, err)
+	evs := fx.sink.byAction(AuditSearchLogRead)
+	require.Len(t, evs, 1)
+	assert.Equal(t, "failure", evs[0].Outcome)
+	assert.Equal(t, 0, evs[0].Metadata["returned"])
+}
+
+func TestAdminSearchLog_FilterKeepsLargeIntegersExact(t *testing.T) {
+	fx := newAdminFx(t)
+	fx.store.logRows = []models.SearchLog{{
+		UUID: "l1", TenantID: "tA", FilterJSON: `{"field":"seniority","op":"eq","value":9007199254740993}`,
+	}}
+	page, err := fx.svc.SearchLog(fx.ctx, models.SearchLogQuery{})
+	require.NoError(t, err)
+	out, err := json.Marshal(page)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "9007199254740993")
+}
+
+func TestAdminSearchLog_BadFilterIsOmittedWithoutLeaking(t *testing.T) {
+	fx := newAdminFx(t)
+	var buf strings.Builder
+	fx.svc.log = slog.New(slog.NewTextHandler(&buf, nil))
+	fx.store.logRows = []models.SearchLog{
+		{UUID: "l1", TenantID: "tA", Corpus: "crm", FilterJSON: `{"value":"secret-val"`},
+		{UUID: "l2", TenantID: "tA", Corpus: "crm", FilterJSON: `{"a":1} {"b":"secret-val"}`},
+		{UUID: "l3", TenantID: "tA", Corpus: "crm"},
+	}
+	page, err := fx.svc.SearchLog(fx.ctx, models.SearchLogQuery{})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 3)
+	for _, it := range page.Items {
+		assert.Nil(t, it.Filter)
+		assert.NotNil(t, it.Principals)
+	}
+	assert.Equal(t, 2, strings.Count(buf.String(), "level=WARN"))
+	assert.NotContains(t, buf.String(), "secret-val")
+	assert.Contains(t, buf.String(), "tenant=tA")
+	assert.Contains(t, buf.String(), "corpus=crm")
 }

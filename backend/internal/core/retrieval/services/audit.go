@@ -16,6 +16,7 @@ const (
 	AuditErasureFinalized = "retrieval.erasure.finalized"
 	AuditDiagnosticsRun   = "retrieval.diagnostics.run"
 	AuditCorpusDropped    = "retrieval.corpus.dropped"
+	AuditSearchLogRead    = "retrieval.searchlog.read"
 )
 
 // AuditRelay forwards retrieval audit events to the sink compliance publishes

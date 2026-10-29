@@ -2,11 +2,14 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -34,7 +37,17 @@ const (
 	adminCountTimeout   = 5 * time.Second
 )
 
-const auditResourceCorpus = "retrieval_corpus"
+const (
+	auditResourceCorpus    = "retrieval_corpus"
+	auditResourceSearchLog = "retrieval_search_log"
+)
+
+// Bounds of the search-log read.
+const (
+	searchLogDefaultLimit = 50
+	searchLogMaxLimit     = 200
+	searchLogMaxOffset    = 10000
+)
 
 // AdminStoreAPI is the persistence AdminService needs: the new admin queries
 // plus the existing corpus-state and tenant-progress reads.
@@ -511,4 +524,83 @@ func auditReason(err error) string {
 	default:
 		return errcode.RetrievalInternal
 	}
+}
+
+// SearchLog is one page of the calling tenant's audited searches, newest
+// first. Every call that reaches the store is itself audited, with the shape
+// of the request and the number of rows returned, never a row's content.
+func (a *AdminService) SearchLog(ctx context.Context, q models.SearchLogQuery) (*models.RetrievalSearchLogPage, error) {
+	if err := requireOperator(ctx); err != nil {
+		return nil, err
+	}
+	if q.Limit == 0 {
+		q.Limit = searchLogDefaultLimit
+	}
+	switch {
+	case q.Limit < 1 || q.Limit > searchLogMaxLimit:
+		return nil, fmt.Errorf("%w: limit must be 1-%d", iface.ErrRetrievalInvalidRequest, searchLogMaxLimit)
+	case q.Offset < 0 || q.Offset > searchLogMaxOffset:
+		return nil, fmt.Errorf("%w: offset must be 0-%d", iface.ErrRetrievalInvalidRequest, searchLogMaxOffset)
+	case q.Since != nil && q.Until != nil && q.Since.After(*q.Until):
+		return nil, fmt.Errorf("%w: since is after until", iface.ErrRetrievalInvalidRequest)
+	}
+
+	tenant, _ := tenantrepo.CurrentTenantID(ctx)
+	meta := map[string]any{
+		"userUuid": q.UserUUID, "since": formatBound(q.Since), "until": formatBound(q.Until),
+		"limit": q.Limit, "offset": q.Offset, "returned": 0,
+	}
+	rows, total, err := a.store.SearchLog(ctx, q)
+	if err != nil {
+		a.audit.EmitOutcome(ctx, AuditSearchLogRead, auditResourceSearchLog, tenant, "failure", meta)
+		return nil, fmt.Errorf("retrieval admin: search log: %w", err)
+	}
+	meta["returned"] = len(rows)
+	a.audit.EmitOutcome(ctx, AuditSearchLogRead, auditResourceSearchLog, tenant, "success", meta)
+
+	page := &models.RetrievalSearchLogPage{
+		Items: make([]models.RetrievalSearchLogEntry, 0, len(rows)), Total: total, Limit: q.Limit, Offset: q.Offset,
+	}
+	for _, r := range rows {
+		page.Items = append(page.Items, models.RetrievalSearchLogEntry{
+			ID: r.UUID, CreatedAt: r.CreatedAt, UserUUID: r.UserUUID, Corpus: r.Corpus, Query: r.Query,
+			Filter: a.decodeLogFilter(ctx, r), Mode: r.Mode,
+			Principals: nonNil(r.Principals), ReturnedSourceIDs: nonNil(r.SourceIDs), Subjects: nonNil(r.Subjects),
+			HitCount: r.HitCount, Degraded: r.Degraded, Outcome: r.Outcome, ErrorKind: r.ErrorKind,
+			DurationMs: r.Timings.TotalMs,
+		})
+	}
+	return page, nil
+}
+
+func formatBound(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return slices.Clone(s)
+}
+
+// decodeLogFilter reads the stored filter text keeping numbers exact. A
+// filter that does not decode (or has trailing data) is shown as absent, and
+// the log names the tenant and corpus only.
+func (a *AdminService) decodeLogFilter(ctx context.Context, row models.SearchLog) any {
+	if row.FilterJSON == "" {
+		return nil
+	}
+	dec := json.NewDecoder(strings.NewReader(row.FilterJSON))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil || dec.Decode(new(any)) != io.EOF {
+		a.log.WarnContext(ctx, "retrieval admin: stored search filter could not be decoded; shown without it",
+			slog.String("tenant", row.TenantID), slog.String("corpus", row.Corpus))
+		return nil
+	}
+	return v
 }
