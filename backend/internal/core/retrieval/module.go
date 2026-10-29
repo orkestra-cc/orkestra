@@ -266,6 +266,18 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceRetrieval}
 }
 
+// Permissions declares only the keys a mounted route uses (policycoverage
+// rejects a declared permission with no route). retrieval.tenant.admin
+// arrives with reconciliation, delivery step 2.
+func (m *Module) Permissions() []iface.PermissionSpec {
+	return []iface.PermissionSpec{
+		{Key: "retrieval.corpus.read", Module: "retrieval", Description: "Read corpus states, generations, engine and inference health and counters (never content or scores)", System: true},
+		{Key: "retrieval.corpus.admin", Module: "retrieval", Description: "Run per-stage score diagnostics and drop orphan corpora", System: true},
+		{Key: "retrieval.tenant.read", Module: "retrieval", Description: "Read the organization's indexing state and backlog counts"},
+		{Key: "retrieval.searchlog.admin", Module: "retrieval", Description: "Read the organization's search log (who searched what, and whom the results described)"},
+	}
+}
+
 // Collections declares the installation-wide corpus state, the per-key
 // indexing outbox, the per-tenant initial-build progress, the erasure
 // tombstones and the search log.
