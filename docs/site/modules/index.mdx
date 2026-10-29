@@ -18,7 +18,7 @@ See [Core modules](/modules/core/user) and the rest under that section. ([compli
 
 [`llm`](/modules/core/llm) ([ADR-0022](/adrs/core-llm-module)) is the ninth core module: language-model credentials, models, grants and the `LLMGateway` addons consume. It is catalogued before `compliance` so compliance can hand it the KMS provider and audit sink.
 
-[`retrieval`](/modules/core/retrieval) ([ADR-0023](/adrs/core-retrieval-module)) is the tenth core module: corpus registration and, in later releases, hybrid search over tenant data on a Qdrant engine. It is catalogued after `llm` and before `compliance`, which will hand it the audit sink.
+[`retrieval`](/modules/core/retrieval) ([ADR-0023](/adrs/core-retrieval-module)) is the tenth core module: corpus registration, indexing and hybrid search over tenant data on a Qdrant engine, with an operator console page for corpus health, score diagnostics and the audited search log. It is catalogued after `llm` and before `compliance`, which will hand it the audit sink.
 
 ## Archived verticals (fork crib material)
 
