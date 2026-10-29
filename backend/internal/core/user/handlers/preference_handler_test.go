@@ -29,10 +29,15 @@ func (f *fakePrefService) Put(_ context.Context, u, m string, v map[string]strin
 	return f.put(u, m, v)
 }
 
-type fakeAuthz struct{ allowed map[string]bool }
+// fakeAuthz grants `allowed` at any scope, and `inTenant[tenant]` only in
+// that tenant.
+type fakeAuthz struct {
+	allowed  map[string]bool
+	inTenant map[string]map[string]bool
+}
 
-func (f fakeAuthz) HasPermission(_ context.Context, _, _, perm string) (bool, error) {
-	return f.allowed[perm], nil
+func (f fakeAuthz) HasPermission(_ context.Context, _, tenantID, perm string) (bool, error) {
+	return f.allowed[perm] || f.inTenant[tenantID][perm], nil
 }
 func (f fakeAuthz) GetEffectivePermissions(context.Context, string, string) ([]string, error) {
 	return nil, nil
@@ -164,5 +169,43 @@ func TestPreferenceHandler_ProfileSectionsFilterByModuleStateAndPermission(t *te
 	self, _ = h4.MyProfileSections(userCtx("u-1"), nil)
 	if self.Body.Sections == nil || len(self.Body.Sections) != 0 {
 		t.Errorf("no catalog → empty list, got %v", self.Body.Sections)
+	}
+}
+
+// The section permission is checked in the request tenant, the scope the
+// SPA's slot registry and the module's own routes use; at global scope a
+// platform role conveys every `.self` key, so a global check listed a
+// section the module then refused with 403.
+func TestPreferenceHandler_ProfileSectionPermissionIsTenantScoped(t *testing.T) {
+	reg := module.NewUserPreferenceRegistry()
+	if err := reg.RegisterSections("people", []module.ProfileSectionSpec{
+		{Key: "people.person", LabelKey: "l", Permission: "people.self", Surfaces: []string{"self"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	enabled := func(context.Context, string) bool { return true }
+	// Held at global scope only (a platform operator), and in tenant-1 only.
+	authz := fakeAuthz{inTenant: map[string]map[string]bool{"": {"people.self": true}, "tenant-1": {"people.self": true}}}
+	h := NewPreferenceHandler(&fakePrefService{}, reg, enabled, authz)
+
+	inTenant := func(tid string) context.Context {
+		return context.WithValue(userCtx("u-1"), ctxauth.KeyTenantID, tid)
+	}
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want int
+	}{
+		{"member tenant", inTenant("tenant-1"), 1},
+		{"tenant without the key", inTenant("tenant-2"), 0},
+		{"no tenant resolved: global scope", userCtx("u-1"), 1},
+	} {
+		got, err := h.MyProfileSections(tc.ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Body.Sections) != tc.want {
+			t.Errorf("%s: sections = %+v, want %d", tc.name, got.Body.Sections, tc.want)
+		}
 	}
 }

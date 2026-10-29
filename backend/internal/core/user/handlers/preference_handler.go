@@ -151,18 +151,25 @@ type ProfileSectionsForUserRequest struct {
 
 // visibleSections filters the declared sections of a surface to enabled
 // modules and, when an authz provider is wired, to the ones whose
-// Permission the caller holds at global scope.
+// Permission the caller holds — in the request tenant when the request
+// resolved one, at global scope otherwise. That is the scope the SPA's slot
+// registry checks (the tenant's effective permissions), and the one a
+// module's own routes enforce with RequirePermission: section permissions
+// are module keys, and inside a tenant a platform role conveys none of
+// them (authz rule 2b), while at global scope it conveys every `.read` /
+// `.self` key — so a global check listed sections the module then refused.
 func (h *PreferenceHandler) visibleSections(ctx context.Context, callerUUID, surface string) []module.ProfileSectionSpec {
 	out := []module.ProfileSectionSpec{}
 	if h.sections == nil {
 		return out
 	}
+	tenantID, _ := ctxauth.GetTenantID(ctx)
 	for _, s := range h.sections.SectionsFor(surface) {
 		if !h.enabled(ctx, s.Module) {
 			continue
 		}
 		if s.Permission != "" && h.authz != nil {
-			ok, err := h.authz.HasPermission(ctx, callerUUID, "", s.Permission)
+			ok, err := h.authz.HasPermission(ctx, callerUUID, tenantID, s.Permission)
 			if err != nil || !ok {
 				continue
 			}
@@ -234,7 +241,7 @@ func RegisterSelfPreferenceRoutes(api huma.API, h *PreferenceHandler, idPrefix s
 		Method:      http.MethodGet,
 		Path:        "/v1/me/profile-sections",
 		Summary:     "Profile sections modules contribute to my own profile",
-		Description: "Declared by modules (module.HasProfileSections), filtered to enabled modules and to the sections whose permission the caller holds.",
+		Description: "Declared by modules (module.HasProfileSections), filtered to enabled modules and to the sections whose permission the caller holds in the request tenant (at global scope when the request resolves none).",
 		Tags:        []string{"Users", "Self-Service"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.MyProfileSections)
@@ -248,7 +255,7 @@ func RegisterProfileSectionReadRoute(api huma.API, h *PreferenceHandler) {
 		Method:      http.MethodGet,
 		Path:        "/v1/users/{id}/profile-sections",
 		Summary:     "Profile sections modules contribute to a user's admin profile",
-		Description: "Declared by modules (module.HasProfileSections) for the admin surface, filtered to enabled modules and to the sections whose permission the caller holds.",
+		Description: "Declared by modules (module.HasProfileSections) for the admin surface, filtered to enabled modules and to the sections whose permission the caller holds in the request tenant (at global scope when the request resolves none).",
 		Tags:        []string{"Users"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.ProfileSectionsForUser)
