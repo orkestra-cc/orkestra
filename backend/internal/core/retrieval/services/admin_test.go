@@ -635,6 +635,20 @@ func TestDropOrphan_RowsFailureKeepsState(t *testing.T) {
 	assert.Equal(t, "retrieval.internal", fx.sink.byAction(AuditCorpusDropped)[0].Metadata["reason"])
 }
 
+// A partial rows failure (the store deleted some rows before failing) still
+// reports the committed counts in the failure audit event.
+func TestDropOrphan_RowsPartialFailureAuditsCommittedCounts(t *testing.T) {
+	fx := newAdminFx(t)
+	fx.store.states["old"] = models.CorpusState{Corpus: "old", Version: 1}
+	fx.store.rowsErr = errors.New("progress delete failed")
+	require.Error(t, fx.svc.DropOrphanCorpus(fx.ctx, "old"))
+	evs := fx.sink.byAction(AuditCorpusDropped)
+	require.Len(t, evs, 1)
+	assert.Equal(t, "failure", evs[0].Outcome)
+	assert.Equal(t, int64(3), evs[0].Metadata["outboxRows"])
+	assert.Equal(t, int64(2), evs[0].Metadata["progressRows"])
+}
+
 // A retry after a complete drop finds no state: 404, nothing touched, and
 // the refusal audited.
 func TestDropOrphan_RetryAfterCompleteDropIsNotFound(t *testing.T) {

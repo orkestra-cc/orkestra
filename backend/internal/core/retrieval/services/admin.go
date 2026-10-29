@@ -493,10 +493,12 @@ func (a *AdminService) dropOrphan(ctx context.Context, st *models.CorpusState, c
 		}
 	}
 	outbox, progress, err := a.store.DeleteCorpusRows(ctx, st.Corpus)
+	// Record the counts before the error check: a partial failure (outbox
+	// rows deleted, progress delete failed) still committed those deletes.
+	meta["outboxRows"], meta["progressRows"] = outbox, progress
 	if err != nil {
 		return fmt.Errorf("retrieval admin: delete corpus rows: %w", err)
 	}
-	meta["outboxRows"], meta["progressRows"] = outbox, progress
 
 	err = a.store.DeleteCorpusState(ctx, st.Corpus, st.Version)
 	if !errors.Is(err, repository.ErrStateConflict) {
