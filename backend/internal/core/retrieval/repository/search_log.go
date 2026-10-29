@@ -31,6 +31,7 @@ func SearchLogIndexes() []module.IndexSpec {
 	return []module.IndexSpec{
 		{OrderedKeys: key("tenantId", "uuid"), Unique: true},
 		{OrderedKeys: key("tenantId", "userUuid", "createdAt")},
+		{OrderedKeys: key("tenantId", "createdAt", "uuid")}, // admin page: newest first (walked backwards)
 		{OrderedKeys: key("subjects")},
 		{OrderedKeys: key("createdAt")},
 		{OrderedKeys: key("userUuid")},

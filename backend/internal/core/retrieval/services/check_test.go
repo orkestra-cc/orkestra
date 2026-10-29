@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -107,5 +108,40 @@ func (c checker) Len(t *testing.T, v any, n int) {
 	t.Helper()
 	if l := reflect.ValueOf(v).Len(); l != n {
 		c.fail(t, "len = %d, want %d", l, n)
+	}
+}
+
+func (c checker) True(t *testing.T, v bool, msg ...any) {
+	t.Helper()
+	if !v {
+		c.fail(t, "want true %v", msg)
+	}
+}
+
+func (c checker) False(t *testing.T, v bool, msg ...any) {
+	t.Helper()
+	if v {
+		c.fail(t, "want false %v", msg)
+	}
+}
+
+func (c checker) Error(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		c.fail(t, "want an error")
+	}
+}
+
+func (c checker) ErrorIs(t *testing.T, err, target error) {
+	t.Helper()
+	if !errors.Is(err, target) {
+		c.fail(t, "error %v is not %v", err, target)
+	}
+}
+
+func (c checker) NotContains(t *testing.T, s, sub string) {
+	t.Helper()
+	if strings.Contains(s, sub) {
+		c.fail(t, "%q contains %q", s, sub)
 	}
 }

@@ -494,6 +494,50 @@ const LLMSIWCIDTokenInvalid = "llm.siwc_id_token_invalid"
 // an abandoned request never counts as a 5xx.
 const LLMRequestCanceled = "llm.request_canceled"
 
+// --- retrieval ---
+
+// RetrievalNotConfigured: the vector engine is not configured on this
+// installation. 503 (FeatureNotConfigured).
+const RetrievalNotConfigured = "retrieval.not_configured"
+
+// RetrievalUnavailable: the vector engine or the principal resolver is
+// down. 503.
+const RetrievalUnavailable = "retrieval.unavailable"
+
+// RetrievalCorpusNotFound: no corpus of that name is declared, or it has
+// no retrieval state. 404.
+const RetrievalCorpusNotFound = "retrieval.corpus_not_found"
+
+// RetrievalCorpusRegistered: the corpus is still registered, or another
+// replica re-registered it while a drop ran. 409.
+const RetrievalCorpusRegistered = "retrieval.corpus_registered"
+
+// RetrievalCorpusUnavailable: the module that owns the corpus is not
+// running. 503.
+const RetrievalCorpusUnavailable = "retrieval.corpus_unavailable"
+
+// RetrievalForbidden: the caller may not search or administer this
+// corpus. 403.
+const RetrievalForbidden = "retrieval.forbidden"
+
+// RetrievalInvalidFilter: the filter does not fit the corpus. 422.
+const RetrievalInvalidFilter = "retrieval.invalid_filter"
+
+// RetrievalInvalidRequest: the search request is malformed. 422.
+const RetrievalInvalidRequest = "retrieval.invalid_request"
+
+// RetrievalLocalityViolation: an inference endpoint breaks the corpus
+// locality rule. 409.
+const RetrievalLocalityViolation = "retrieval.locality_violation"
+
+// RetrievalVisibilityCheckFailed: the source visibility check could not
+// run. 503.
+const RetrievalVisibilityCheckFailed = "retrieval.visibility_check_failed"
+
+// RetrievalInternal: any other retrieval fault. The cause is logged by
+// the handler, never sent. 500.
+const RetrievalInternal = "retrieval.internal"
+
 // --- navigation ---
 
 // NavigationOverrideUnknownParent signals that a PATCH against the

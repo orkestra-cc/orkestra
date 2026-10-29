@@ -870,7 +870,11 @@ export const baseApi = createApi({
     'LLMMyModels',
     'LLMUsage',
     'LLMBudget',
-    'LLMAccount'
+    'LLMAccount',
+    // Retrieval — core retrieval module admin surface (ADR-0023)
+    'RetrievalCorpora',
+    'RetrievalTenantIndexing',
+    'RetrievalSearchLog'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -947,7 +951,11 @@ export const TENANT_SCOPED_TAGS = [
   'LLMMyModels',
   'LLMUsage',
   'LLMBudget',
-  'LLMAccount'
+  'LLMAccount',
+  // retrieval: the tenant's indexing progress and audited searches. The
+  // corpus report ('RetrievalCorpora') is installation-wide, so it is not here.
+  'RetrievalTenantIndexing',
+  'RetrievalSearchLog'
 ] as const;
 
 // Addon-owned tenant-scoped tags. An addon declares its RTK Query tags in its

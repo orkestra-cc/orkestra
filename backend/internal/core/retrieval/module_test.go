@@ -106,7 +106,7 @@ func TestModule_Declarations(t *testing.T) {
 		cols[4].Name != "retrieval_search_log" || repository.CollSearchLog != "retrieval_search_log" {
 		t.Fatalf("collections = %v", cols)
 	}
-	if p := module.PermissionsOf(m); len(p) != 0 {
+	if p := module.PermissionsOf(m); len(p) != 4 {
 		t.Fatalf("permissions = %v", p)
 	}
 	if c := module.ConfigSchemaOf(m); len(c) != 5 {
@@ -843,6 +843,7 @@ func TestCollections_DeclareSearchLog(t *testing.T) {
 	}{
 		{[]string{"tenantId", "uuid"}, true},
 		{[]string{"tenantId", "userUuid", "createdAt"}, false},
+		{[]string{"tenantId", "createdAt", "uuid"}, false},
 		{[]string{"subjects"}, false},
 		{[]string{"createdAt"}, false},
 		{[]string{"userUuid"}, false},
@@ -1279,5 +1280,24 @@ func TestModule_HotReloadsConfig(t *testing.T) {
 	reg.Register(m)
 	if !reg.SupportsHotReload("retrieval") {
 		t.Fatal("registry SupportsHotReload(retrieval) = false, want true")
+	}
+}
+
+func TestModule_Permissions(t *testing.T) {
+	want := map[string]bool{ // key -> System
+		"retrieval.corpus.read":     true,
+		"retrieval.corpus.admin":    true,
+		"retrieval.tenant.read":     false,
+		"retrieval.searchlog.admin": false,
+	}
+	got := map[string]bool{}
+	for _, p := range NewModule().Permissions() {
+		if p.Module != "retrieval" || p.Description == "" {
+			t.Errorf("%s: module %q, description %q", p.Key, p.Module, p.Description)
+		}
+		got[p.Key] = p.System
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("permissions = %v, want %v (retrieval.tenant.admin arrives with reconciliation, step 2)", got, want)
 	}
 }

@@ -18,9 +18,10 @@ Delivery step 1 is in progress. This release ships:
 - the engine contract and the Qdrant driver, with a conformance suite that any driver must pass;
 - [indexing](#indexing): the transactional outbox, the index worker, chunking and the per-corpus state;
 - [search](#searching-a-corpus): `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` on the registered service, the search log and its retention;
-- [erasure and data-subject rights](#erasure-and-data-subject-rights): confirmed deletion from the index and the search log, `DeleteBySubject`, tenant offboarding and the compliance export and erasure.
+- [erasure and data-subject rights](#erasure-and-data-subject-rights): confirmed deletion from the index and the search log, `DeleteBySubject`, tenant offboarding and the compliance export and erasure;
+- [administration](#administration): the `/admin/retrieval` console page, the search-log view, score diagnostics, orphan cleanup and the admin HTTP API.
 
-It adds **no route, permission or navigation item**: search has no generic HTTP route, a module calls it in process. It adds five [settings](#configuration), three for indexing and two for search. Data-subject erasure ([`DeleteBySubject`](#erasure-and-data-subject-rights), tenant offboarding, the GDPR export and erasure through compliance) is included; the admin page arrives in the next release.
+It adds four [permissions](#permissions-and-who-sees-what), five operator-host [HTTP routes](#http-api) and one navigation item (`/admin/retrieval`, see [Administration](#administration)). Search itself has no generic HTTP route: a module calls it in process. It adds five [settings](#configuration), three for indexing and two for search. Data-subject erasure ([`DeleteBySubject`](#erasure-and-data-subject-rights), tenant offboarding, the GDPR export and erasure through compliance) is included.
 
 ## Degraded mode
 
@@ -236,6 +237,62 @@ When a person, a record or a whole organization is erased, retrieval does two th
 - The audit log has `retrieval.erasure.recorded` (when an erasure is first recorded) and `retrieval.erasure.finalized` (when the deletion is confirmed). They carry the kind of erasure, never a name, query or source id.
 - Offboarding (purging) an organization records an erasure for the whole organization. If that step failed, the module records it itself within about a minute of starting and then every 10 minutes. The log line `retrieval: tenant purge erasure is not fully wired` at startup means the tenant module lacks the purge hook or the purged-organization listing, so offboarding is not forwarded.
 - A module that owns the data calls `DeleteBySubject(ctx, tenantID, "<owner>:<id>")` (for example `crm:42`) to erase a non-user subject in one organization. The owner must be a registered corpus owner, the subject is at most 256 bytes, and platform users (`user:`) are erased only through compliance.
+
+## Administration
+
+Operators manage retrieval from the **Retrieval** page of the admin console (`/admin/retrieval`, operator host only). It has three tabs, each shown only to a caller who holds its permission; a `?tab=` value the caller may not open falls back to the first tab they can.
+
+| Tab | What it shows | Needs |
+|---|---|---|
+| Corpora | The engine and every inference endpoint with their health, and each corpus with its owner, state, active generation, embedding profile, locality, outbox backlog, tenants done or building, and the erasure counts. Per corpus: **Diagnose**, and **Drop** for an orphan | `retrieval.corpus.read` (Diagnose and Drop need `retrieval.corpus.admin`) |
+| Indexing | The current organization's view per corpus: its state (as on the Corpora tab, without the reason), the initial build, the point count and the backlog, plus its pending erasures | `retrieval.tenant.read` |
+| Search log | A paged, filterable list of the organization's searches: who, when, corpus, query, filter, mode, outcome, hits and the sources and people the results named | `retrieval.searchlog.admin` |
+
+A corpus has one of four states: `uninitialized` (nothing indexed yet), `active`, `profile_changed` (the declaration changed the ingestion profile; indexing is paused) or `error`. An `error` corpus carries the reason, `locality` (an endpoint breaks the corpus locality rule), `endpoint_unknown`, `endpoint_kind` (not an embedding endpoint) or `unknown_state`, and is shown with a danger badge rather than hidden, so a broken corpus is visible. If it still has an active generation it keeps serving it and can still be diagnosed. An **orphan** is a corpus whose state exists but which no running module registers any more.
+
+**Diagnose** runs one real search as you, through the normal pipeline, and shows each returned hit with its dense, keyword, fused and rerank scores and its snippet. It sees only what your own principals allow, so it cannot be used to read data you could not search for; and it leaves an ordinary search-log row like any search. A numeric filter value beyond 2^53 is refused (`retrieval.invalid_filter`) because the browser and the API decode JSON numbers as doubles.
+
+**Drop** removes an orphan's collections, its outbox and progress rows and finally its state. It is refused while the corpus is registered. Drop an orphan only after every replica runs a version without that corpus. Search-log rows and erasure records are kept. Dropping an already dropped orphan answers "not found", and if another replica registered the corpus again meanwhile the drop answers "still registered".
+
+**Step-up.** Diagnose, Drop and the search-log read need a second factor completed in the session and a fresh step-up (5 minutes). The console opens the step-up prompt when needed; if you dismiss it the action does not run, and the search-log tab shows a prompt to retry.
+
+**The search log is audited.** It names who searched for what and whom the results described, so every read is recorded in the audit log (`retrieval.searchlog.read`, with the filters used and the number of rows returned, never the rows). Diagnose (`retrieval.diagnostics.run`) and Drop (`retrieval.corpus.dropped`) are audited too, whether they succeed or fail. The rule is the same for all three: a request from an organization that is not the operator's own is refused before anything is recorded, and so is a search-log request whose parameters are malformed; every other request is recorded once, and a failure carries a `reason`, the same error code the API answered with (for example `retrieval.forbidden` when Diagnose is refused the corpus permission, or `retrieval.corpus_registered` for a refused Drop). The admin view hides a log row until its erasure re-check has settled (normally seconds); a row whose confirmation failed stays invisible until the unchecked sweep removes it, about 20 minutes later.
+
+### Permissions and who sees what
+
+| Permission | Scope | Allows |
+|---|---|---|
+| `retrieval.corpus.read` | platform | The corpora report (no content, no scores) |
+| `retrieval.corpus.admin` | platform | Diagnostics and orphan drop |
+| `retrieval.tenant.read` | organization | The organization's indexing state |
+| `retrieval.searchlog.admin` | organization | The organization's search log |
+
+Seeded roles (`retrieval.tenant.admin`, for reconciliation, arrives in a later delivery step):
+
+| Permission | Development and test | Production |
+|---|---|---|
+| `retrieval.corpus.read` | super_admin, administrator, developer, manager, operator, guest | same |
+| `retrieval.corpus.admin` | super_admin, administrator, developer | super_admin, administrator |
+| `retrieval.tenant.read` | every role except org_billing | same |
+| `retrieval.searchlog.admin` | super_admin, administrator, developer, org_owner, org_admin | super_admin, administrator, org_owner, org_admin |
+
+In prose: platform administrators and super admins can do everything; a developer can look at corpora everywhere but cannot diagnose or read the search log in production; organization owners and admins can read their own organization's search log; every member of an organization can see its indexing state.
+
+The navigation entry is shown to platform administrators only. An organization owner or admin without a platform role does not see it and opens `/admin/retrieval?tab=search-log` directly: the page itself gates by permission.
+
+### HTTP API
+
+All routes are on the operator host, require an internal-organization context (another kind of organization gets `403`) and are listed in the generated API reference under the tag "Retrieval Admin". Errors carry the `retrieval.*` codes.
+
+| Route | Permission | Extra gate | Error codes |
+|---|---|---|---|
+| `GET /v1/admin/retrieval/corpora` | `retrieval.corpus.read` | | `retrieval.forbidden`, `retrieval.unavailable` |
+| `POST /v1/admin/retrieval/corpora/{corpus}/diagnostics` | `retrieval.corpus.admin` | second factor, step-up | `retrieval.corpus_not_found`, `retrieval.corpus_unavailable`, `retrieval.not_configured`, `retrieval.unavailable`, `retrieval.visibility_check_failed`, `retrieval.forbidden`, `retrieval.locality_violation`, `retrieval.invalid_filter`, `retrieval.invalid_request` (the query is whitespace-only or over 2000 characters) |
+| `DELETE /v1/admin/retrieval/corpora/{corpus}` | `retrieval.corpus.admin` | second factor, step-up | `204`; `retrieval.corpus_not_found`, `retrieval.corpus_registered`, `retrieval.not_configured`, `retrieval.unavailable`, `retrieval.forbidden` |
+| `GET /v1/admin/retrieval/tenant/indexing` | `retrieval.tenant.read` | | `retrieval.forbidden`, `retrieval.unavailable` |
+| `GET /v1/admin/retrieval/search-log` | `retrieval.searchlog.admin` | second factor, step-up | `retrieval.invalid_request` (only `since` after `until`), `retrieval.forbidden`, `retrieval.unavailable` |
+
+The search-log query takes `userUuid`, `since` and `until` (RFC 3339, both inclusive), `limit` (1 to 200, default 50) and `offset` (0 to 10000, default 0), newest first, and answers `items`, `total`, `limit` and `offset`; each item carries `filter` (decoded) and `filterText` (the stored JSON, verbatim), both present or both absent. Display `filterText`: re-serializing `filter` in a client that reads JSON numbers as doubles can change an integer beyond 2^53. The diagnostics body takes `query`, an optional `filter`, `mode` and `limit` (1 to 100, default 10). A parameter or body that breaks the published schema (a malformed uuid or time, `limit` or `offset` out of range, a bad corpus name, a diagnostics `mode`, a `query` outside 1 to 8000 characters, or a `limit` out of range) is refused first with the generic `422` validation error of the API, not a `retrieval.*` code. Without a database the routes answer `503 retrieval.unavailable`.
 
 ## Configuration
 

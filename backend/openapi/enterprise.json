@@ -8095,6 +8095,616 @@
         ],
         "type": "object"
       },
+      "RetrievalBacklog": {
+        "additionalProperties": false,
+        "properties": {
+          "oldestAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "pending": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending"
+        ],
+        "type": "object"
+      },
+      "RetrievalCorporaReport": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RetrievalCorporaReport.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "corpora": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalCorpusStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "engine": {
+            "$ref": "#/components/schemas/RetrievalEngineStatus"
+          },
+          "erasures": {
+            "$ref": "#/components/schemas/RetrievalErasureCounts"
+          },
+          "inference": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalInferenceStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "engine",
+          "inference",
+          "corpora",
+          "erasures"
+        ],
+        "type": "object"
+      },
+      "RetrievalCorpusStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "activeGeneration": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "collection": {
+            "type": "string"
+          },
+          "embedEndpoint": {
+            "type": "string"
+          },
+          "embeddingProfile": {
+            "type": "string"
+          },
+          "ingestionProfile": {
+            "type": "string"
+          },
+          "locality": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "outbox": {
+            "$ref": "#/components/schemas/RetrievalBacklog"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "ownerRunning": {
+            "type": "boolean"
+          },
+          "reason": {
+            "enum": [
+              "locality",
+              "endpoint_unknown",
+              "endpoint_kind",
+              "unknown_state"
+            ],
+            "type": "string"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "rerankEnabled": {
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "uninitialized",
+              "active",
+              "profile_changed",
+              "error"
+            ],
+            "type": "string"
+          },
+          "tenantsBuilding": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tenantsDone": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "ownerRunning",
+          "registered",
+          "rerankEnabled",
+          "state",
+          "activeGeneration",
+          "outbox",
+          "tenantsDone",
+          "tenantsBuilding"
+        ],
+        "type": "object"
+      },
+      "RetrievalDiagnosticHit": {
+        "additionalProperties": false,
+        "properties": {
+          "chunkId": {
+            "type": "string"
+          },
+          "dense": {
+            "format": "float",
+            "type": "number"
+          },
+          "fused": {
+            "format": "float",
+            "type": "number"
+          },
+          "keyword": {
+            "format": "float",
+            "type": "number"
+          },
+          "rank": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rerank": {
+            "format": "float",
+            "type": "number"
+          },
+          "score": {
+            "format": "float",
+            "type": "number"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceId",
+          "chunkId",
+          "rank",
+          "score",
+          "fused",
+          "snippet"
+        ],
+        "type": "object"
+      },
+      "RetrievalDiagnosticsReport": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RetrievalDiagnosticsReport.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "collection": {
+            "type": "string"
+          },
+          "corpus": {
+            "type": "string"
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalDiagnosticHit"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "principals": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus",
+          "collection",
+          "profile",
+          "principals",
+          "degraded",
+          "hits"
+        ],
+        "type": "object"
+      },
+      "RetrievalDiagnosticsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RetrievalDiagnosticsRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "filter": {
+            "$ref": "#/components/schemas/RetrievalFilter"
+          },
+          "limit": {
+            "default": 10,
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "hybrid",
+              "dense",
+              "keyword"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "RetrievalEngineStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "ok",
+              "not_configured",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "RetrievalErasureCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "fencing": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pending": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "fencing"
+        ],
+        "type": "object"
+      },
+      "RetrievalFilter": {
+        "additionalProperties": false,
+        "properties": {
+          "and": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalFilter"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "field": {
+            "type": "string"
+          },
+          "not": {
+            "$ref": "#/components/schemas/RetrievalFilter"
+          },
+          "op": {
+            "type": "string"
+          },
+          "or": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalFilter"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "value": {},
+          "values": {
+            "items": {},
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RetrievalInferenceStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "embed",
+              "rerank"
+            ],
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "not_configured",
+              "unavailable",
+              "mismatch",
+              "wrong_kind"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "kind",
+          "status"
+        ],
+        "type": "object"
+      },
+      "RetrievalSearchLogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "corpus": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "errorKind": {
+            "type": "string"
+          },
+          "filter": {},
+          "filterText": {
+            "description": "The stored canonical filter JSON, verbatim; present exactly when filter is. Display this text: re-serializing filter in a client that parses JSON numbers as doubles can change integers beyond 2^53.",
+            "type": "string"
+          },
+          "hitCount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "degraded",
+              "error"
+            ],
+            "type": "string"
+          },
+          "principals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "type": "string"
+          },
+          "returnedSourceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "subjects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "userUuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "userUuid",
+          "corpus",
+          "query",
+          "mode",
+          "principals",
+          "returnedSourceIds",
+          "subjects",
+          "hitCount",
+          "degraded",
+          "outcome",
+          "durationMs"
+        ],
+        "type": "object"
+      },
+      "RetrievalSearchLogPage": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RetrievalSearchLogPage.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalSearchLogEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "RetrievalTenantCorpus": {
+        "additionalProperties": false,
+        "properties": {
+          "corpus": {
+            "type": "string"
+          },
+          "initialBuild": {
+            "enum": [
+              "pending",
+              "building",
+              "done"
+            ],
+            "type": "string"
+          },
+          "outbox": {
+            "$ref": "#/components/schemas/RetrievalBacklog"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "ownerRunning": {
+            "type": "boolean"
+          },
+          "points": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "uninitialized",
+              "active",
+              "profile_changed",
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus",
+          "owner",
+          "ownerRunning",
+          "state",
+          "initialBuild",
+          "outbox"
+        ],
+        "type": "object"
+      },
+      "RetrievalTenantIndexingReport": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RetrievalTenantIndexingReport.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "corpora": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalTenantCorpus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "engine": {
+            "$ref": "#/components/schemas/RetrievalEngineStatus"
+          },
+          "erasuresPending": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "engine",
+          "corpora",
+          "erasuresPending"
+        ],
+        "type": "object"
+      },
       "Role": {
         "additionalProperties": false,
         "properties": {
@@ -14713,6 +15323,284 @@
         "summary": "Start or replace a module diagnostic override",
         "tags": [
           "Observability"
+        ]
+      }
+    },
+    "/v1/admin/retrieval/corpora": {
+      "get": {
+        "operationId": "admin-retrieval-corpora-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalCorporaReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "List corpora with their state, engine and inference health (never content or scores)",
+        "tags": [
+          "Retrieval Admin"
+        ]
+      }
+    },
+    "/v1/admin/retrieval/corpora/{corpus}": {
+      "delete": {
+        "operationId": "admin-retrieval-corpora-drop",
+        "parameters": [
+          {
+            "description": "Corpus name",
+            "in": "path",
+            "name": "corpus",
+            "required": true,
+            "schema": {
+              "description": "Corpus name",
+              "pattern": "^[a-z][a-z0-9_]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Drop the state and collections of an unregistered corpus (audited)",
+        "tags": [
+          "Retrieval Admin"
+        ]
+      }
+    },
+    "/v1/admin/retrieval/corpora/{corpus}/diagnostics": {
+      "post": {
+        "operationId": "admin-retrieval-corpora-diagnostics",
+        "parameters": [
+          {
+            "description": "Corpus name",
+            "in": "path",
+            "name": "corpus",
+            "required": true,
+            "schema": {
+              "description": "Corpus name",
+              "pattern": "^[a-z][a-z0-9_]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalDiagnosticsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalDiagnosticsReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Run one search and report per-stage scores (audited)",
+        "tags": [
+          "Retrieval Admin"
+        ]
+      }
+    },
+    "/v1/admin/retrieval/search-log": {
+      "get": {
+        "operationId": "admin-retrieval-search-log-list",
+        "parameters": [
+          {
+            "description": "Only searches by this user",
+            "explode": false,
+            "in": "query",
+            "name": "userUuid",
+            "schema": {
+              "description": "Only searches by this user",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only searches at or after this time (RFC 3339)",
+            "explode": false,
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "description": "Only searches at or after this time (RFC 3339)",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only searches at or before this time (RFC 3339)",
+            "explode": false,
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "description": "Only searches at or before this time (RFC 3339)",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "format": "int64",
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalSearchLogPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Page through the organization's audited searches (audited)",
+        "tags": [
+          "Retrieval Admin"
+        ]
+      }
+    },
+    "/v1/admin/retrieval/tenant/indexing": {
+      "get": {
+        "operationId": "admin-retrieval-tenant-indexing-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalTenantIndexingReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Indexing state and backlog of the current organization",
+        "tags": [
+          "Retrieval Admin"
         ]
       }
     },
