@@ -15,6 +15,12 @@ func TestRetrievalPolicies(t *testing.T) {
 	}{
 		{"administrator reads corpora", "production", mfa(Principal{UserUUID: "u", SystemRole: "administrator"}), "retrieval.corpus.read", true, "retrieval.corpus_read.platform_roles"},
 		{"prod developer reads corpora", "production", Principal{UserUUID: "u", SystemRole: "developer"}, "retrieval.corpus.read", true, ""},
+		{"manager reads corpora", "production", Principal{UserUUID: "u", SystemRole: "manager"}, "retrieval.corpus.read", true, "retrieval.corpus_read.platform_roles"},
+		{"manager cannot administer corpora", "production", Principal{UserUUID: "u", SystemRole: "manager"}, "retrieval.corpus.admin", false, ""},
+		{"operator reads corpora", "production", Principal{UserUUID: "u", SystemRole: "operator"}, "retrieval.corpus.read", true, "retrieval.corpus_read.platform_roles"},
+		{"operator cannot administer corpora", "production", Principal{UserUUID: "u", SystemRole: "operator"}, "retrieval.corpus.admin", false, ""},
+		{"guest reads corpora", "production", Principal{UserUUID: "u", SystemRole: "guest"}, "retrieval.corpus.read", true, "retrieval.corpus_read.platform_roles"},
+		{"guest cannot administer corpora", "production", Principal{UserUUID: "u", SystemRole: "guest"}, "retrieval.corpus.admin", false, ""},
 		{"administrator administers corpora", "production", mfa(Principal{UserUUID: "u", SystemRole: "administrator"}), "retrieval.corpus.admin", true, "retrieval.corpus_admin.platform_admins"},
 		{"administrator without MFA is refused", "production", Principal{UserUUID: "u", SystemRole: "administrator"}, "retrieval.corpus.admin", false, ""},
 		{"prod developer cannot administer", "production", Principal{UserUUID: "u", SystemRole: "developer"}, "retrieval.corpus.admin", false, ""},

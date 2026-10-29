@@ -11,7 +11,10 @@
 // abac.cedar's require_mfa_for_admin_suffix forbids it to a
 // super_admin/administrator without an enrolled second factor, and the
 // authz production filter (D9) never grants a developer an ".admin" key.
-// Reads use "read" so a production developer still sees corpus health.
+// Reads use "read" so a production developer still sees corpus health. The
+// read permit names every system role the seeding matrix grants the key
+// (super_admin, administrator, developer, manager, operator, guest), so
+// Cedar enforcement agrees with the seeded readers.
 //
 // The organization indexing read key (retrieval.tenant.read) is
 // suffix-covered by tenant_roles.cedar and platform.cedar
@@ -31,7 +34,10 @@ permit (
     principal has system_role &&
     (principal.system_role == "super_admin" ||
      principal.system_role == "administrator" ||
-     principal.system_role == "developer")
+     principal.system_role == "developer" ||
+     principal.system_role == "manager" ||
+     principal.system_role == "operator" ||
+     principal.system_role == "guest")
 };
 
 @id("retrieval.corpus_admin.platform_admins")
