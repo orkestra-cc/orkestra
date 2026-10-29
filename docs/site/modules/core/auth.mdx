@@ -14,6 +14,7 @@ Every way a caller proves who it is: email/password (argon2id), OAuth 2.1, MFA, 
 - **Tokens and sessions** — RS256 access + refresh JWTs from one key pair, refresh rotation with family replay detection, and a Redis-backed revocation set so logout kills an access token instantly rather than waiting out its TTL.
 - **MFA** — TOTP with backup codes, WebAuthn passkeys, the step-up gate (`RequireStepUp`) that catastrophic actions sit behind, and the [enrolment proof gate](/architecture/authentication-flow#enrolment-proof-gate) (`RequireEnrolmentProof`) that every factor creation or replacement sits behind. Removing or replacing a factor moves the user's **MFA epoch**, which ends the MFA authority of every token they hold — the caller's own included — on its next request; see [Removing or replacing a factor](/architecture/authentication-flow#removing-or-replacing-a-factor).
 - **Device trust** — per-surface trusted-device grants that let a known device skip the second factor.
+- **PIN sign-in** — an opt-in, deliberately weak username + PIN method for field devices, bound to enrolled devices, that never counts as MFA. See [below](#pin-sign-in).
 - **Service accounts** — OAuth2 client-credentials machine identities ([ADR-0014](/adrs/service-accounts-client-credentials)). See [below](#service-accounts).
 - **RBAC middleware** — `RequirePermission` / `RequireAudience` / `RequireStepUp`, satisfying the SDK's `RoleMiddleware` seam, plus `RequireEnrolmentProof` on the separate additive `module.EnrolmentProofGate` sub-interface. The permission *decisions* belong to [authz](/modules/core/authz); auth only enforces them at the route.
 
@@ -288,6 +289,22 @@ plain **401**. Closing it would change what a legitimately locked-out
 user is told (429 with `Retry-After` → a bare 401), so it is left to a
 deliberate contract decision rather than papered over.
 
+## PIN sign-in
+
+A weak, opt-in method for field staff who sign in on shared or personal tablets with a username and a short numeric PIN — no email, no password. It exists on both surfaces, each with its own toggle, and is **off** until an administrator turns it on.
+
+**Who can hold a PIN.** A user with a unique username (the PIN route's identifier — usernames carry no unique index, so a username shared by two live users of the tier cannot get a PIN, and a sign-in that matches two is refused) who holds `auth.pin_login`. Privileged roles never can: `super_admin`, `administrator`, any user with an `org_owner`/`org_admin` membership, and any role the MFA policy requires a factor for — the built-in list is applied even when MFA enforcement is off. Service accounts never can.
+
+**The credential.** An argon2id hash on the user row (`pinHash`), written only by the auth module. A new PIN has exactly `pinLength` digits and is not a repeated digit or a run (`11111`, `12345`, `98765`); a PIN set at another length keeps working. An administrator sets or removes it (`user.update` + step-up, and the same target-tier guard as every user update: no reaching a role above your own); the user can change or remove their own with step-up, and never from a PIN session. Every set, change or removal signs out that user's PIN sessions and no other.
+
+**Devices.** With `pinRequiresTrustedDevice` on (the default), a PIN is accepted only alongside the secret of a device enrolled for that user. A device enrolls by redeeming a one-time code (`XXXX-XXXX`, 15 minutes, single use) that an administrator mints for the user, or that the user mints from a fresh strong session; the device gets a random secret once and the server keeps only its SHA-256. This registry (`operator_pin_devices` / `client_pin_devices`) is deliberately separate from device trust: a trust grant lets a password login skip the second factor, and a tablet enrolled for a PIN must never do that.
+
+**Sign-in and lockout.** `POST /v1/auth/{tier}/login/pin` with `username`, `pin`, `deviceId`, `deviceSecret`. Wrong PINs and wrong device secrets count on the shared source-address scope and on a per-username PIN scope (the account pair of [Lockout](#lockout)), plus a durable PIN lock on the user row separate from the password lock — so PIN guesses never lock the password, and vice versa. A wrong device secret costs a dummy verification and never reveals whether the PIN was right. **Ten consecutive failures remove the PIN**; an administrator sets a new one. The PIN being right is the only case that can answer more than the generic 401: a user who has since lost `auth.pin_login`, or moved to a privileged role, gets `403 auth.pin_not_allowed`.
+
+**The session.** `amr: ["pin"]`, no `last_otp_at`, its own access lifetime and idle timeout (`pinAccessTokenTTL`, `pinRefreshTokenTTL`, default 12 h — a shift). The refresh row records the method, and every rotation re-asserts the marker and the lifetimes, so a PIN session never turns into a password-looking one by refreshing. A PIN session never satisfies MFA or step-up, never counts as the "recent sign-in" that lets a user without a factor enroll one, cannot manage any credential, and Cedar forbids it every `delete`/`admin`/`manage` and `system.*` action.
+
+The public `GET /v1/auth/{tier}/policy` slice carries `pinLoginEnabled`, `pinLength` and `pinRequiresTrustedDevice` so an app knows whether to show the keypad. Because existing PINs may differ from `pinLength`, a keypad must not auto-submit at that length. In the console, the PIN is managed from the user profile (operator users), from the members tab of a client (client users) and from **Security → PIN** for the user's own.
+
 ## Service accounts
 
 A machine caller — an integration, a CI job, a fork's own backend — authenticates with the OAuth2 **client-credentials** grant. Adopted in [ADR-0014](/adrs/service-accounts-client-credentials); operator console at `/admin/service-accounts`.
@@ -483,6 +500,7 @@ Three things an operator should know about it:
 |---|---|---|
 | `auth.self` | — | Edit your own password and sessions |
 | `auth.mfa.self` | — | Enroll, verify, and remove your own MFA factors |
+| `auth.pin_login` | — | Hold a PIN and sign in with username + PIN. Granted to the `operator` platform role by name (its suffix grants nothing by itself) |
 | `system.users.mfa_reset` | ✅ | Reset another user's MFA factors |
 | `system.users.password_reset` | ✅ | Trigger a password-reset email for another user |
 | `system.users.email_verify_resend` | ✅ | Resend another user's email-verification mail |
@@ -494,9 +512,11 @@ Keys in the **system set** are granted by the `super_admin` / `administrator` / 
 
 ## Config
 
-auth is by far the largest configuration surface in the base — 65 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
+auth is by far the largest configuration surface in the base — 73 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
 
 The **Login & Sessions** group's `sessionAbsoluteTTL` is the admin-facing field behind the absolute cap — see [Session lifetime](#session-lifetime) above for what it does and enforces.
+
+The same group holds the six [PIN sign-in](#pin-sign-in) fields: `pinLoginEnabledAdmin` / `pinLoginEnabledClient` (default off), `pinLength` (4–8, default 5), `pinRequiresTrustedDevice` (default on), `pinAccessTokenTTL` (1m–24h, default 15m) and `pinRefreshTokenTTL` (15m–7d, default 12h). A malformed toggle or an out-of-range value is refused at save with a 422. The PIN never counts towards the rule that keeps a surface with at least one working sign-in method.
 
 :::note Where the routes are
 This page names the surfaces, not all ~90 of the module's operations. The generated per-endpoint reference — request/response schemas included — is under [API Reference](/api), grouped by tag: Authentication, MFA, WebAuthn, Auth - Device Trust, Service Accounts, Mobile, and Self-Service.

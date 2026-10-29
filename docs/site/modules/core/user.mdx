@@ -69,6 +69,10 @@ Two seams let a module reach the user pages without the user module knowing it:
 
 Deletes are soft — `DeletedAt` is stamped, the row stays. But the unique email index still matches soft-deleted rows, so a plain soft delete would permanently block that address from re-registering. `SoftDeleteAndAliasEmail` is the escape: it stamps `deletedAt` *and* atomically rewrites the address to an orphan alias, preserving the original on `originalEmail` for audit. That frees the unique index so the same human can sign up again from scratch.
 
+
+## PIN credential
+
+The user row stores the hash of an optional PIN for [PIN sign-in](/modules/core/auth#pin-sign-in) — argon2id, never serialized, written only by the auth module through `iface.PINCredentialStore`. The PIN is not part of user creation or update. The username is the PIN sign-in identifier and is matched exactly; because usernames are not unique in this module, a username shared by two live users of a tier cannot get a PIN and never signs in with one. Installs that stored the old reversible 4-digit `pin` field convert it once with the migration binary `cmd/migrations/0035_user_legacy_pin_hash` (`MONGO_URI`, `MONGO_DATABASE`, `OAUTH_TOKEN_ENCRYPTION_KEY`; `--dry-run` first).
 ## GDPR
 
 Registers an `iface.PIIProducer` for the subject `user`. Export returns the profile projection plus the user's per-module preferences (`preferences`, keyed by module); erasure deletes the preference rows in both modes. The profile export — never the password hash or PIN, which are server secrets rather than portable personal data. Erasure **anonymizes** by default: the UUID survives so foreign references stay valid, the email is aliased and the profile blanked, producing the tombstone the [compliance](/modules/core/compliance) retention job later hard-deletes.

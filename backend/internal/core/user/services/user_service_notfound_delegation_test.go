@@ -62,6 +62,13 @@ func (notFoundRepo) SetMFAGraceStartedAt(context.Context, string, time.Time) err
 func (notFoundRepo) BumpMFAEpoch(context.Context, string) (int, error) {
 	return 0, repository.ErrUserNotFound
 }
+func (notFoundRepo) GetForPINAuth(context.Context, string) (*iface.User, error) {
+	return nil, repository.ErrUserNotFound
+}
+func (notFoundRepo) SetPINHash(context.Context, string, string) error {
+	return repository.ErrUserNotFound
+}
+func (notFoundRepo) ClearPIN(context.Context, string) error { return repository.ErrUserNotFound }
 
 // graceStampRepo answers the LOOKUP with a live user so the
 // "StartMFAGraceIfUnset (stamp)" row reaches that method's second repository
@@ -111,6 +118,9 @@ func TestDelegationsTranslateRepositoryNotFound(t *testing.T) {
 		{"StartMFAGraceIfUnset (stamp)", func() error { return graceSvc.StartMFAGraceIfUnset(ctx, "u-1") }},
 		{"ResetMFAGrace", func() error { return svc.ResetMFAGrace(ctx, "u-1") }},
 		{"BumpMFAEpoch", func() error { _, err := svc.BumpMFAEpoch(ctx, "u-1"); return err }},
+		{"GetUserForPINAuth", func() error { _, err := svc.GetUserForPINAuth(ctx, "mario"); return err }},
+		{"SetPINHash", func() error { return svc.SetPINHash(ctx, "u-1", "argon2id$hash") }},
+		{"ClearPIN", func() error { return svc.ClearPIN(ctx, "u-1") }},
 	}
 
 	for _, tc := range cases {
@@ -141,6 +151,7 @@ func (boomRepo) RemoveOAuthLink(context.Context, string, iface.OAuthProvider, st
 }
 func (boomRepo) UpdatePasswordHash(context.Context, string, string) error     { return errRepoBoom }
 func (boomRepo) SetPasswordHashIfUnset(context.Context, string, string) error { return errRepoBoom }
+func (boomRepo) SetPINHash(context.Context, string, string) error             { return errRepoBoom }
 
 func TestDelegationsLeaveOtherErrorsAlone(t *testing.T) {
 	svc := &userService{userRepo: boomRepo{newFakeUserRepo()}}
@@ -152,6 +163,7 @@ func TestDelegationsLeaveOtherErrorsAlone(t *testing.T) {
 		"UpdatePasswordHash":      func() error { return svc.UpdatePasswordHash(ctx, "u-1", "argon2id$hash") },
 		"SetPasswordHashIfUnset":  func() error { return svc.SetPasswordHashIfUnset(ctx, "u-1", "argon2id$hash") },
 		"StartMFAGraceIfUnset":    func() error { return svc.StartMFAGraceIfUnset(ctx, "u-1") },
+		"SetPINHash":              func() error { return svc.SetPINHash(ctx, "u-1", "argon2id$hash") },
 	}
 	for name, call := range cases {
 		t.Run(name, func(t *testing.T) {

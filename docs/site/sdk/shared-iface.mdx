@@ -15,6 +15,7 @@ A representative slice, not the full list — read the package for the rest.
 | --- | --- | --- |
 | `UserProvider` | `user` | auth, and every module that needs a user record |
 | `OperatorUserProvider` / `ClientUserProvider` | `user` | tier-specific lookups |
+| `PINCredentialStore` | `user` (additive, by type assertion on the tier's provider) | auth (PIN sign-in: hashed credential, exact-username lookup, failure counters) |
 | `SessionTerminator` | `user` | any module that must revoke a principal's sessions |
 | `TenantIDLister` | `tenant` | `retrieval` (initial index build) |
 | `TenantPurgeHooks` | `tenant` | `retrieval` (tenant offboarding) |
