@@ -522,6 +522,10 @@ type LoginTokenContext struct {
 	RiskFactors  []string
 	TrustLevel   string
 	MFACompleted bool
+	// AccessTTL / RefreshTTL override the configured lifetimes for this
+	// session when positive. Only the PIN method sets them.
+	AccessTTL  time.Duration
+	RefreshTTL time.Duration
 }
 
 // Login authenticates a user by email/password and returns a token pair.
@@ -2023,6 +2027,9 @@ func loginMethodFromAMR(amr []string) string {
 		if method == "oauth" {
 			return "oauth"
 		}
+		if method == authModels.AMRPIN {
+			return authModels.LoginMethodPIN
+		}
 	}
 	return "password"
 }
@@ -2118,7 +2125,9 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		// exported IssueLoginTokens(External) seam and the setup
 		// wizard's initial-admin mint — every one of them lands here, so
 		// auth_time is stamped once, here.
-		AuthTime: now.Unix(),
+		AuthTime:   now.Unix(),
+		AccessTTL:  in.AccessTTL,
+		RefreshTTL: in.RefreshTTL,
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
@@ -2135,6 +2144,16 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 	if s.refreshTokenRepo == nil {
 		return nil, stderrors.New("refresh token persistence is unavailable")
 	}
+	refreshTTL := s.jwtService.RefreshTokenTTL()
+	if in.RefreshTTL > 0 {
+		refreshTTL = in.RefreshTTL
+	}
+	// Only the PIN method is recorded on the row: a rotation needs it to
+	// re-assert amr ["pin"] and the PIN lifetimes (see RefreshTokenDoc).
+	rowLoginMethod := ""
+	if loginMethod == authModels.LoginMethodPIN {
+		rowLoginMethod = authModels.LoginMethodPIN
+	}
 	if err := s.refreshTokenRepo.CreateRefreshToken(ctx, &authModels.RefreshTokenDoc{
 		UUID:         authModels.GenerateUUIDv7(),
 		UserUUID:     user.UUID,
@@ -2148,12 +2167,13 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		RiskScore:    riskScore,
 		RiskFactors:  append([]string(nil), in.RiskFactors...),
 		IssuedAt:     now,
-		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
+		ExpiresAt:    now.Add(refreshTTL),
 		LastActivity: now,
 		IsRevoked:    false,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		FamilyID:     familyID,
+		LoginMethod:  rowLoginMethod,
 	}); err != nil {
 		return nil, fmt.Errorf("persist refresh token: %w", err)
 	}
@@ -2177,14 +2197,19 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 	// Update the last login timestamp.
 	_ = s.userService.UpdateUserLastLogin(ctx, user.UUID)
 
+	expiresIn := int64(s.jwtService.AccessTokenTTL(ctx).Seconds())
+	if in.AccessTTL > 0 {
+		expiresIn = pair.ExpiresIn
+	}
 	return &authModels.TokenResponse{
-		AccessToken:  pair.AccessToken,
-		RefreshToken: pair.RefreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
-		SessionID:    in.SessionID,
-		DeviceID:     deviceID,
-		User:         s.buildUserResponse(ctx, user),
+		AccessToken:      pair.AccessToken,
+		RefreshToken:     pair.RefreshToken,
+		TokenType:        "Bearer",
+		ExpiresIn:        expiresIn,
+		RefreshExpiresIn: int64(refreshTTL.Seconds()),
+		SessionID:        in.SessionID,
+		DeviceID:         deviceID,
+		User:             s.buildUserResponse(ctx, user),
 	}, nil
 }
 

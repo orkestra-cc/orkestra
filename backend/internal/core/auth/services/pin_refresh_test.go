@@ -1,0 +1,105 @@
+package services
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+)
+
+// seedPINRefresh seeds a refresh row exactly as a PIN sign-in writes it.
+func seedPINRefresh(t *testing.T, e *orchestrationEnv, user *iface.User, loginMethod string) string {
+	t.Helper()
+	token, err := e.jwt.GenerateEnhancedRefreshToken(user,
+		&authModels.DeviceInfo{DeviceID: "tab-1"},
+		&authModels.SecurityContext{SessionID: "sess-pin", AuthTime: time.Now().Add(-time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := utils.HashRefreshToken(token)
+	e.refresh.seedRefreshDoc(hash, &authModels.RefreshTokenDoc{
+		UUID: uuid.NewString(), UserUUID: user.UUID, Token: hash, SessionUUID: "sess-pin",
+		DeviceID: "tab-1", FamilyID: "fam-pin", LoginMethod: loginMethod,
+		ExpiresAt: time.Now().Add(time.Hour), IssuedAt: time.Now(), CreatedAt: time.Now(),
+	})
+	return token
+}
+
+func pinRefreshEnv(t *testing.T) (*orchestrationEnv, *iface.User) {
+	t.Helper()
+	env := newOrchestrationEnv(t)
+	env.auth.(*authService).SetPolicy(NewAuthPolicyServiceForTest(map[string]string{
+		"pinAccessTokenTTL": "5m", "pinRefreshTokenTTL": "8h",
+	}))
+	user := &iface.User{UUID: "u-pin-refresh", Email: "pin@example.com", Role: "operator", IsActive: true}
+	env.users.seed(user)
+	return env, user
+}
+
+// The refresh JWT carries no amr, so without the row's LoginMethod a
+// refreshed PIN session would come back looking like a password session.
+func TestRefresh_PINSessionStaysAPINSession(t *testing.T) {
+	env, user := pinRefreshEnv(t)
+	token := seedPINRefresh(t, env, user, authModels.LoginMethodPIN)
+
+	resp, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), token, nil)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	claims, err := env.jwt.ValidateAccessToken(resp.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims.AMR) != 1 || claims.AMR[0] != authModels.AMRPIN || claims.LastOTPAt != 0 {
+		t.Fatalf("refreshed amr=%v last_otp_at=%d, want [pin] and 0", claims.AMR, claims.LastOTPAt)
+	}
+	if resp.ExpiresIn != 300 || resp.RefreshExpiresIn != int64((8*time.Hour).Seconds()) {
+		t.Fatalf("expiresIn=%d refreshExpiresIn=%d, want the PIN lifetimes", resp.ExpiresIn, resp.RefreshExpiresIn)
+	}
+	next := env.refresh.byHash[utils.HashRefreshToken(resp.RefreshToken)]
+	if next == nil || next.LoginMethod != authModels.LoginMethodPIN {
+		t.Fatalf("rotated row lost the PIN login method: %+v", next)
+	}
+	if d := time.Until(next.ExpiresAt); d < 8*time.Hour-time.Minute || d > 8*time.Hour {
+		t.Fatalf("rotated row expires in %v, want the 8h PIN idle timeout", d)
+	}
+	rc, err := env.jwt.ValidateRefreshToken(resp.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Until(time.Unix(rc.ExpiresAt, 0)); d > 8*time.Hour+time.Minute {
+		t.Fatalf("refresh JWT outlives the PIN idle timeout: %v", d)
+	}
+
+	// The non-rotating bootstrap mint re-asserts the marker too.
+	again := seedPINRefresh(t, env, user, authModels.LoginMethodPIN)
+	boot, err := env.auth.MintAccessTokenFromRefresh(context.Background(), again, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc, _ := env.jwt.ValidateAccessToken(boot.AccessToken)
+	if len(bc.AMR) != 1 || bc.AMR[0] != authModels.AMRPIN || boot.ExpiresIn != 300 {
+		t.Fatalf("bootstrap amr=%v expiresIn=%d", bc.AMR, boot.ExpiresIn)
+	}
+}
+
+func TestRefresh_NonPINSessionUnchanged(t *testing.T) {
+	env, user := pinRefreshEnv(t)
+	token := seedPINRefresh(t, env, user, "")
+	resp, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), token, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, _ := env.jwt.ValidateAccessToken(resp.AccessToken)
+	if authModels.HasPINAMR(claims.AMR) || resp.ExpiresIn != int64((15*time.Minute).Seconds()) {
+		t.Fatalf("a non-PIN rotation changed: amr=%v expiresIn=%d", claims.AMR, resp.ExpiresIn)
+	}
+	next := env.refresh.byHash[utils.HashRefreshToken(resp.RefreshToken)]
+	if next.LoginMethod != "" || time.Until(next.ExpiresAt) < 6*24*time.Hour {
+		t.Fatalf("non-PIN row: loginMethod=%q expires in %v", next.LoginMethod, time.Until(next.ExpiresAt))
+	}
+}

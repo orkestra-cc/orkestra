@@ -126,6 +126,33 @@ const AuthLoginMethodLockout = "auth.login_method_lockout"
 // existence oracle, which is the defect (M-7) the counters close.
 const AuthTooManyAttempts = "auth.too_many_attempts"
 
+// AuthPINLoginDisabled signals that the PIN method is switched off for the surface the request came in on (auth keys pinLoginEnabled{Admin,Client}, default off), or the deployment cannot store PINs. 403 on the PIN routes.
+const AuthPINLoginDisabled = "auth.pin_login_disabled"
+
+// AuthPINInvalid signals that a new PIN is not exactly auth.pinLength digits. 422.
+const AuthPINInvalid = "auth.pin_invalid"
+
+// AuthPINTooWeak signals that a new PIN is a repeated digit or an ascending/descending run (1111, 12345, 98765). 422.
+const AuthPINTooWeak = "auth.pin_too_weak"
+
+// AuthPINUsernameRequired signals that the target user has no username, which is the PIN sign-in identifier. 409.
+const AuthPINUsernameRequired = "auth.pin_username_required"
+
+// AuthPINUsernameNotUnique signals that another live user of the same tier carries the target's username, so a username + PIN sign-in could not tell them apart. 409.
+const AuthPINUsernameNotUnique = "auth.pin_username_not_unique"
+
+// AuthPINNotAllowed signals that the user may not hold or use a PIN: a privileged role (super_admin, administrator, or any role MFA is required for), a service principal, or no auth.pin_login permission. 409 on the management routes, 403 at sign-in after a correct PIN.
+const AuthPINNotAllowed = "auth.pin_not_allowed"
+
+// AuthPINNotSet signals that the operation needs an existing PIN (device enrollment code, removal) and the user has none. 409.
+const AuthPINNotSet = "auth.pin_not_set"
+
+// AuthPINDeviceNotFound signals that the user has no registered PIN device with that id. 404.
+const AuthPINDeviceNotFound = "auth.pin_device_not_found"
+
+// AuthPINSessionForbidden signals that a session that began with a PIN tried to manage a credential (its own PIN, a device enrollment code). A PIN never vouches for a credential change. 403.
+const AuthPINSessionForbidden = "auth.pin_session_forbidden"
+
 // The four codes below all ride on a 401, and the reason they exist is
 // the same for each: a 401 that carries NO top-level code is the one
 // 401 shape the operator console does not read as a verdict. Its error

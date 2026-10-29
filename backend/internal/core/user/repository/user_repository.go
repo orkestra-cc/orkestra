@@ -1176,6 +1176,7 @@ func (r *mongoUserRepository) GetForPINAuth(ctx context.Context, username string
 		"username":  username,
 		"deletedAt": bson.M{"$exists": false},
 	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
 	cur, err := r.collection.Find(ctx, filter, options.Find().SetLimit(2))
 	if err != nil {
 		return nil, fmt.Errorf("find user for pin auth: %w", err)
@@ -1196,6 +1197,7 @@ func (r *mongoUserRepository) GetForPINAuth(ctx context.Context, username string
 
 // CountByUsername counts live users carrying exactly this username.
 func (r *mongoUserRepository) CountByUsername(ctx context.Context, username string) (int64, error) {
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
 	n, err := r.collection.CountDocuments(ctx, bson.M{
 		"username":  username,
 		"deletedAt": bson.M{"$exists": false},
@@ -1217,6 +1219,7 @@ func (r *mongoUserRepository) SetPINHash(ctx context.Context, userUUID, hash str
 		"$set":   bson.M{"pinHash": hash, "pinUpdatedAt": now, "updatedAt": now},
 		"$unset": bson.M{"pinFailedCount": "", "pinLockedUntil": ""},
 	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("set pin hash: %w", err)
@@ -1237,6 +1240,7 @@ func (r *mongoUserRepository) ClearPIN(ctx context.Context, userUUID string) err
 		"$set":   bson.M{"updatedAt": time.Now()},
 		"$unset": bson.M{"pinHash": "", "pinUpdatedAt": "", "pinFailedCount": "", "pinLockedUntil": ""},
 	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("clear pin: %w", err)
@@ -1262,6 +1266,7 @@ func (r *mongoUserRepository) RecordFailedPIN(ctx context.Context, userUUID stri
 		"$inc": bson.M{"pinFailedCount": 1},
 		"$set": set,
 	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
 	if _, err := r.collection.UpdateOne(ctx, filter, update); err != nil {
 		return fmt.Errorf("record failed pin: %w", err)
 	}
@@ -1278,6 +1283,7 @@ func (r *mongoUserRepository) ClearFailedPINs(ctx context.Context, userUUID stri
 		"$set":   bson.M{"updatedAt": time.Now()},
 		"$unset": bson.M{"pinFailedCount": "", "pinLockedUntil": ""},
 	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
 	if _, err := r.collection.UpdateOne(ctx, filter, update); err != nil {
 		return fmt.Errorf("clear failed pins: %w", err)
 	}

@@ -91,6 +91,14 @@ type AuthModule struct {
 	clientMFAHandler      *handlers.MFAHandler
 	clientWebAuthnHandler *handlers.WebAuthnHandler
 
+	// PIN sign-in, one handler per tier: public
+	// sign-in + device enrollment, the caller's own PIN, and the admin
+	// routes on another user's PIN (operator users under /v1/admin/users,
+	// client users under /v1/admin/client-users, both on the operator
+	// host).
+	operatorPINHandler *handlers.PINHandler
+	clientPINHandler   *handlers.PINHandler
+
 	// serviceAccountService owns the service-account lifecycle (Task
 	// 6/7: create/list/get/update accounts, issue/revoke credentials,
 	// Grant the client-credentials token exchange) and serviceTokenHandler
@@ -173,6 +181,11 @@ func (m *AuthModule) Permissions() []iface.PermissionSpec {
 	return []iface.PermissionSpec{
 		{Key: "auth.self", Module: "auth", Description: "Edit your own password and sessions"},
 		{Key: "auth.mfa.self", Module: "auth", Description: "Enroll, verify, and remove your own MFA factors"},
+		// PIN sign-in. Checked by the PIN service at
+		// sign-in and whenever a PIN is set, not by a route gate. Granted to
+		// the operator platform role by name in SeedSystemRoles; never to a
+		// privileged role in effect, because the PIN service refuses those.
+		{Key: "auth.pin_login", Module: "auth", Description: "May hold a PIN and sign in with username + PIN"},
 		// System: true on the four admin-user-credential keys so they
 		// land in the authz `systemPermissionSet` and the
 		// `super_admin` / `administrator` / `developer` shortcuts grant
@@ -209,7 +222,7 @@ func (m *AuthModule) NavItems() []module.NavItemSpec {
 
 // ConfigGroups gives the admin settings page a sectioned rail instead of one
 // flat list. auth is by far the largest configuration surface in the base —
-// 63 fields — and the four OAuth providers are declared as children of the
+// 73 fields — and the four OAuth providers are declared as children of the
 // single "OAuth Providers" node rather than as siblings of it, which is what
 // the old flat Group labels made them look like.
 func (m *AuthModule) ConfigGroups() []module.ConfigGroup {
@@ -498,6 +511,42 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 			Type:        module.FieldDuration, Default: "30m",
 			Pattern: "^[0-9]+(s|m|h|d)$",
 		},
+		// PIN sign-in. A weak, opt-in method for field
+		// staff: off on both surfaces until an administrator turns it on.
+		// It never counts towards the login-method invariant above — a PIN
+		// session cannot administer anything, so it cannot carry a surface.
+		{
+			Key: "pinLoginEnabledAdmin", Label: "Allow PIN sign-in on operator console", Group: "login",
+			Description: "When on, users holding the auth.pin_login permission and a PIN set by an administrator can sign in with username + PIN (POST /v1/auth/operator/login/pin). A PIN session never counts as MFA or step-up, cannot change credentials, and is refused for privileged roles. Default off.",
+			Type:        module.FieldBool, Default: "false",
+		},
+		{
+			Key: "pinLoginEnabledClient", Label: "Allow PIN sign-in on client app", Group: "login",
+			Description: "The client-surface twin of the operator toggle (POST /v1/auth/client/login/pin). Default off.",
+			Type:        module.FieldBool, Default: "false",
+		},
+		{
+			Key: "pinLength", Label: "PIN length (digits)", Group: "login",
+			Description: "Number of digits a new PIN must have, 4–8. Existing PINs keep working at the length they were set with. Default 5.",
+			Type:        module.FieldInt, Default: "5",
+		},
+		{
+			Key: "pinRequiresTrustedDevice", Label: "PIN sign-in only from enrolled devices", Group: "login",
+			Description: "When on, a PIN is accepted only from a device enrolled for that user with a one-time code issued by an administrator or by the user from a stronger session. Turning it off makes the PIN usable from any device and leaves only the lockout between an attacker and a 4–8 digit secret. Default on.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "pinAccessTokenTTL", Label: "PIN session access token lifetime", Group: "login",
+			Description: "Go duration string — access-token lifetime of a session started with a PIN. Range 1m–24h. Default 15m.",
+			Type:        module.FieldDuration, Default: "15m",
+			Pattern: "^[0-9]+(s|m|h|d)$",
+		},
+		{
+			Key: "pinRefreshTokenTTL", Label: "PIN session idle timeout", Group: "login",
+			Description: "Go duration string — how long a PIN session survives without activity before the user must enter the PIN again. Range 15m–7d. Default 12h (one shift).",
+			Type:        module.FieldDuration, Default: "12h",
+			Pattern: "^[0-9]+(s|m|h|d)$",
+		},
 		// ADR-0017 D1 — absolute session cap. One field for both audience
 		// tiers: the operator console and the client surface share one
 		// value, following the loginEnabledAdmin/loginEnabledClient
@@ -784,6 +833,10 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"userUuid": 1, "deviceId": 1}},
 			{Keys: map[string]int{"trustedUntil": 1}, ExpireAt: true},
 		}},
+		// PIN device registry: one row per (user,
+		// device), so a re-enrollment replaces the secret.
+		{Name: models.OperatorPINDevicesCollection, Indexes: pinDeviceIndexes()},
+		{Name: models.ClientPINDevicesCollection, Indexes: pinDeviceIndexes()},
 
 		// ADR-0003 PR-D D-8: operator-tier and client-tier auth
 		// collections are the only canonical storage. Each pair below
@@ -1296,6 +1349,22 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// are applied in RegisterRoutes.
 	m.operatorSelfUserAuthHandler = handlers.NewSelfUserAuthHandler(opBundle.authService, opBundle.mfaSvc)
 
+	// PIN sign-in. The enrollment codes share the
+	// module's Redis adapter; the permission check uses the authz
+	// evaluator when it is registered and fails closed otherwise.
+	pinCodes := services.NewRedisPINEnrollmentCodeStore(atomicRedis)
+	var pinAuthz services.PINPermissionChecker
+	if az, ok := module.GetTyped[iface.AuthzProvider](deps.Services, module.ServiceAuthzProvider); ok {
+		pinAuthz = az
+	} else {
+		logger.Warn("auth: no authz provider registered; PIN sign-in refuses every user (auth.pin_login cannot be evaluated)")
+	}
+	operatorPINDevices := repository.NewOperatorPINDeviceRepository(deps.DB)
+	operatorPIN := buildPINService(opBundle, operatorUser, operatorPINDevices, pinCodes, passwordSvc, authPolicy, attemptCounter, pinAuthz, logger)
+	m.operatorPINHandler = handlers.NewPINHandler(operatorPIN, cfg.Auth.Cookie.Name, operatorCookieDomain, cfg.Auth.Cookie.Secure)
+	m.operatorAdminUserAuthHandler.SetPINService(operatorPIN)
+	m.operatorSelfUserAuthHandler.SetPINService(operatorPIN)
+
 	// Service-audience JWT service (Task 8). Mirrors the operatorJWT
 	// construction above verbatim — same key pair, same environment, same
 	// TTLs — only the audience claim differs (aud="service" instead of
@@ -1382,6 +1451,9 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clientCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
+	clientPINDevices := repository.NewClientPINDeviceRepository(deps.DB)
+	clientPIN := buildPINService(clBundle, clientUser, clientPINDevices, pinCodes, passwordSvc, authPolicy, attemptCounter, pinAuthz, logger)
+	m.clientPINHandler = handlers.NewPINHandler(clientPIN, cfg.Auth.Cookie.Name, clientCookieDomain, cfg.Auth.Cookie.Secure)
 
 	m.clientAuthHandler = handlers.NewAuthHandler(
 		clBundle.authService,
@@ -1576,20 +1648,28 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// row. The registry tolerates missing producers — a deployment
 	// without compliance just skips registration silently.
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
-		reg.Register(services.NewPIIProducer(
+		opProducer := services.NewPIIProducer(
 			services.PIIProducerKeyOperator,
 			opBundle.refreshTokenRepo, opBundle.authSessionRepo, opBundle.emailTokenRepo, opBundle.mfaFactorRepo,
 			securityEventSvc, deviceTrustRepo,
 			models.OperatorRefreshTokensCollection, models.OperatorSessionsCollection,
 			models.OperatorEmailTokensCollection, models.OperatorMFAFactorsCollection,
-		))
-		reg.Register(services.NewPIIProducer(
+		)
+		if aware, ok := opProducer.(services.PINDeviceAware); ok {
+			aware.SetPINDevices(operatorPINDevices, models.OperatorPINDevicesCollection)
+		}
+		reg.Register(opProducer)
+		clProducer := services.NewPIIProducer(
 			services.PIIProducerKeyClient,
 			clBundle.refreshTokenRepo, clBundle.authSessionRepo, clBundle.emailTokenRepo, clBundle.mfaFactorRepo,
 			securityEventSvc, deviceTrustRepo,
 			models.ClientRefreshTokensCollection, models.ClientSessionsCollection,
 			models.ClientEmailTokensCollection, models.ClientMFAFactorsCollection,
-		))
+		)
+		if aware, ok := clProducer.(services.PINDeviceAware); ok {
+			aware.SetPINDevices(clientPINDevices, models.ClientPINDevicesCollection)
+		}
+		reg.Register(clProducer)
 	}
 
 	// Maintenance wiring (ADR-0017 D7). A Redis adapter that cannot
@@ -2012,6 +2092,25 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.deviceTrustHandler.RegisterRoutes(api, handlers.OperatorMount)
 	})
 
+	// PIN sign-in on the operator surface, plus the
+	// admin routes for BOTH tiers' users (admins act from the operator
+	// console, as for the client-user MFA reset).
+	m.registerPINRoutes(ri.Operator.PublicAPI, ri.Operator.ProtectedRouter, ri.Operator.AuthMW, ri.APIConfig,
+		m.operatorPINHandler, handlers.OperatorMount, operatorEnrolmentGate)
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.read"))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorPINHandler.RegisterAdminReadRoutes(api, handlers.AdminPINOperatorUsers)
+		m.clientPINHandler.RegisterAdminReadRoutes(api, handlers.AdminPINClientUsers)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.update"))
+		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorPINHandler.RegisterAdminManageRoutes(api, handlers.AdminPINOperatorUsers)
+		m.clientPINHandler.RegisterAdminManageRoutes(api, handlers.AdminPINClientUsers)
+	})
+
 	// ADR-0003 PR-D D-5: client-tier auth paths under
 	// /v1/auth/client/... — mounted on the client host mux. Each
 	// client-bound handler reads/writes through client_* collections
@@ -2083,4 +2182,6 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		api := humachi.New(r, ri.APIConfig)
 		m.deviceTrustHandler.RegisterRoutes(api, handlers.ClientMount)
 	})
+	m.registerPINRoutes(ri.Client.PublicAPI, ri.Client.ProtectedRouter, ri.Client.AuthMW, ri.APIConfig,
+		m.clientPINHandler, handlers.ClientMount, clientEnrolmentGate)
 }

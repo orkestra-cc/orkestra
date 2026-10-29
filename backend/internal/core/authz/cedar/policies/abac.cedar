@@ -122,3 +122,33 @@ forbid (
     context has env && context.env == "production" &&
     context has ip_bucket && context.ip_bucket == "public"
 };
+
+// A PIN session (principal.amr contains "pin") is a
+// sign-in with a 4–8 digit secret. Whatever the role table says, it never
+// reaches a destructive or administrative action, nor a platform-reserved
+// system.* one. Defence in depth: the auth module already refuses PIN for
+// privileged roles and every credential change from a PIN session. The
+// marker survives refreshes (the auth module re-stamps it from the
+// refresh row), so the forbid cannot be shed by refreshing.
+@id("abac.pin_session_no_destructive")
+forbid (
+    principal,
+    action,
+    resource
+) when {
+    principal has amr && principal.amr.contains("pin") &&
+    context has action_suffix &&
+    (context.action_suffix == "delete" ||
+     context.action_suffix == "admin" ||
+     context.action_suffix == "manage")
+};
+
+@id("abac.pin_session_no_system")
+forbid (
+    principal,
+    action,
+    resource
+) when {
+    principal has amr && principal.amr.contains("pin") &&
+    context has action_module && context.action_module == "system"
+};

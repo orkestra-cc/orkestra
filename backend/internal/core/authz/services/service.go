@@ -979,8 +979,11 @@ func (s *Service) SeedSystemRoles(ctx context.Context) error {
 	}
 
 	// Operator: read-only + self-service update permissions
+	// auth.pin_login has a neutral suffix, so it is
+	// granted by name: field staff on the operator role sign in with a PIN
+	// by default, and an administrator revokes it per user through roles.
 	operator := filter(allKeys, func(p string) bool {
-		return strings.HasSuffix(p, ".read") || strings.HasSuffix(p, ".self")
+		return p == "auth.pin_login" || strings.HasSuffix(p, ".read") || strings.HasSuffix(p, ".self")
 	})
 
 	// Manager: read + create + update (no admin, no delete)

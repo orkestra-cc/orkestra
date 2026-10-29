@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
 )
 
@@ -173,4 +174,15 @@ func requestHost(ctx context.Context) string {
 // deployment ever hits it, so it must not be read as the default.
 func refreshCookieMaxAge(jwt services.JWTService) int {
 	return int(jwt.RefreshTokenTTL().Seconds())
+}
+
+// refreshCookieMaxAgeFor is refreshCookieMaxAge for a rotation response:
+// a PIN session's refresh row carries its own idle timeout
+// (auth.pinRefreshTokenTTL), reported in RefreshExpiresIn, and the cookie
+// must expire with it rather than with JWT_REFRESH_TOKEN_EXPIRY.
+func refreshCookieMaxAgeFor(jwt services.JWTService, tokens *models.TokenResponse) int {
+	if tokens != nil && tokens.RefreshExpiresIn > 0 {
+		return int(tokens.RefreshExpiresIn)
+	}
+	return refreshCookieMaxAge(jwt)
 }

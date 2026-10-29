@@ -133,6 +133,36 @@ func (s *jwtService) AccessTokenTTL(ctx context.Context) time.Duration {
 	return s.accessTokenLifetime(ctx)
 }
 
+// accessLifetimeFor applies a SecurityContext.AccessTTL override (the PIN
+// method's own lifetime) when present, clamped into the same bounds as
+// every access token: above MaxAccessTokenTTL a token would outlive its
+// revocation entry. Without an override it is accessTokenLifetime.
+func (s *jwtService) accessLifetimeFor(securityCtx *models.SecurityContext) time.Duration {
+	if securityCtx != nil && securityCtx.AccessTTL > 0 {
+		return clampDuration(securityCtx.AccessTTL, MinAccessTokenTTL, MaxAccessTokenTTL)
+	}
+	return s.accessTokenLifetime(context.Background())
+}
+
+// refreshLifetimeFor applies a SecurityContext.RefreshTTL override when
+// present, clamped into the PIN idle-timeout bounds — the only caller.
+func (s *jwtService) refreshLifetimeFor(securityCtx *models.SecurityContext) time.Duration {
+	if securityCtx != nil && securityCtx.RefreshTTL > 0 {
+		return clampDuration(securityCtx.RefreshTTL, MinPINRefreshTokenTTL, MaxPINRefreshTokenTTL)
+	}
+	return s.refreshExpiry
+}
+
+func clampDuration(d, min, max time.Duration) time.Duration {
+	if d < min {
+		return min
+	}
+	if d > max {
+		return max
+	}
+	return d
+}
+
 func (s *jwtService) RefreshTokenTTL() time.Duration { return s.refreshExpiry }
 
 // NewJWTService builds a JWT issuer/validator with an environment-stamped
@@ -285,7 +315,7 @@ func (s *jwtService) GenerateEnhancedAccessToken(
 		return "", ErrJWTKeysNotLoaded
 	}
 	now := time.Now()
-	expiresAt := now.Add(s.accessTokenLifetime(context.Background()))
+	expiresAt := now.Add(s.accessLifetimeFor(securityCtx))
 
 	primaryProvider := s.getPrimaryOAuthProvider(user)
 
@@ -430,7 +460,7 @@ func (s *jwtService) GenerateEnhancedRefreshToken(
 		return "", ErrJWTKeysNotLoaded
 	}
 	now := time.Now()
-	expiresAt := now.Add(s.refreshExpiry)
+	expiresAt := now.Add(s.refreshLifetimeFor(securityCtx))
 
 	claims := &models.JWTClaims{
 		UserUUID:  user.UUID,
@@ -489,7 +519,7 @@ func (s *jwtService) GenerateTokenPair(
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    int64(s.accessTokenLifetime(context.Background()).Seconds()),
+		ExpiresIn:    int64(s.accessLifetimeFor(securityCtx).Seconds()),
 		SessionID:    securityCtx.SessionID,
 		DeviceID:     deviceInfo.DeviceID,
 		Scope:        []string{"profile", "email", "api"},

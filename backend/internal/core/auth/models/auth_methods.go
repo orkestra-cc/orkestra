@@ -36,6 +36,10 @@ type AuthMethodsView struct {
 
 	MFAFactors     []MFAFactorView     `json:"mfaFactors"`
 	OAuthProviders []OAuthProviderView `json:"oauthProviders"`
+
+	// PIN is the PIN sign-in method's state. Nil
+	// when the auth module has no PIN service wired.
+	PIN *PINMethodView `json:"pin,omitempty"`
 }
 
 // MFAFactorView is one row in AuthMethodsView.MFAFactors. The shape

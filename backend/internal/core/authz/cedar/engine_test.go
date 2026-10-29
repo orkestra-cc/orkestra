@@ -984,3 +984,41 @@ func TestABACUserAdminFromPublicIPInProd(t *testing.T) {
 		t.Fatalf("outside production the IP forbid is inert: %+v", d)
 	}
 }
+
+// TestPINLoginPermitForOperatorAtGlobalScope mirrors the SeedSystemRoles
+// grant of auth.pin_login to operator.
+func TestPINLoginPermitForOperatorAtGlobalScope(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.IsAuthorized(Principal{UserUUID: "u", SystemRole: "operator"}, "auth.pin_login", Resource{})
+	if !d.Allowed || d.MatchedPolicy != "platform.operator.global_pin_login" {
+		t.Fatalf("operator at global scope: %+v", d)
+	}
+	g := e.IsAuthorized(Principal{UserUUID: "u", SystemRole: "guest"}, "auth.pin_login", Resource{})
+	if g.Allowed {
+		t.Fatalf("guest must not hold auth.pin_login: %+v", g)
+	}
+}
+
+// TestABACPINSessionForbids: a PIN session never reaches a destructive,
+// administrative or system action, even for a role the table would allow.
+func TestABACPINSessionForbids(t *testing.T) {
+	e := newTestEngine(t, "development")
+	pin := Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true, AMR: []string{"pin"}}
+	for action, policy := range map[string]string{
+		"user.delete":                  "abac.pin_session_no_destructive",
+		"auth.service_accounts.manage": "abac.pin_session_no_destructive",
+		"system.users.read":            "abac.pin_session_no_system",
+	} {
+		d := e.IsAuthorized(pin, action, Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"})
+		if d.Allowed || d.MatchedPolicy != policy {
+			t.Fatalf("%s: %+v, want forbidden by %s", action, d, policy)
+		}
+	}
+	if d := e.IsAuthorized(pin, "user.read", Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"}); !d.Allowed {
+		t.Fatalf("a PIN session may still read: %+v", d)
+	}
+	pwd := Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true, AMR: []string{"pwd", "otp"}}
+	if d := e.IsAuthorized(pwd, "user.delete", Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"}); !d.Allowed {
+		t.Fatalf("the forbid must not touch a non-PIN session: %+v", d)
+	}
+}

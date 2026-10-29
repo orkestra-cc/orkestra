@@ -1420,7 +1420,10 @@ func (m *AuthMiddleware) RequireEnrolmentProof(maxAge time.Duration) func(http.H
 				m.sendStepUpRequired(w, r, maxAge)
 				return
 			}
-			if claims.AuthTime > 0 && time.Since(time.Unix(claims.AuthTime, 0)) <= maxAge {
+			// A PIN session's auth_time is a sign-in with a weak secret:
+			// it never vouches for adding a factor.
+			// The caller re-authenticates with a real credential instead.
+			if claims.AuthTime > 0 && time.Since(time.Unix(claims.AuthTime, 0)) <= maxAge && !models.HasPINAMR(claims.AMR) {
 				next.ServeHTTP(w, r)
 				return
 			}
