@@ -202,4 +202,11 @@ func TestModule_AdminAuditReachesTheLateSink(t *testing.T) {
 	if evs[0].Outcome != "failure" {
 		t.Errorf("outcome = %q, want failure", evs[0].Outcome)
 	}
+	// The event is about the caller's own tenant's log, read from the ctx.
+	if evs[0].ResourceID != "t1" || evs[0].TenantID != "t1" {
+		t.Errorf("resource/tenant = %q/%q, want t1/t1", evs[0].ResourceID, evs[0].TenantID)
+	}
+	if evs[0].Metadata["reason"] != "retrieval.internal" {
+		t.Errorf("reason = %v, want retrieval.internal", evs[0].Metadata["reason"])
+	}
 }

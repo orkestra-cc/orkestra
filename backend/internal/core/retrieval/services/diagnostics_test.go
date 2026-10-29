@@ -101,7 +101,7 @@ func TestDiagnose_RefillAlsoRequestsDiagnostics(t *testing.T) {
 // step 7, and the rerank score is reported for the head only.
 func TestDiagnose_KeepsFusedScoreThroughRerank(t *testing.T) {
 	fx := rerankFixture(t)
-	fx.spec.Rerank.TopK = 2 // RerankK = max(TopK 2, Limit 3) = 3; Limit 1 gives n = 2
+	fx.spec.Rerank.TopK = 2 // Limit 1: RerankK = max(TopK 2, Limit 1) = 2, so the head (n) is the top 2 of the 3 candidates
 	fx.engine.results = [][]engine.Candidate{{
 		cand("s1", 1, 0, searchText1),
 		cand("s2", 1, 1, searchText2),

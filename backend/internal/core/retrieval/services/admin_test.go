@@ -501,7 +501,13 @@ func TestDropOrphan_RefusesRegistered(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCorpusRegistered)
 	assert.Empty(t, fx.log.calls)
 	assert.Equal(t, 0, fx.store.getCalls)
-	assert.Empty(t, fx.sink.events)
+	// Past the operator check, so the refusal is audited with its reason.
+	require.Len(t, fx.sink.events, 1)
+	ev := fx.sink.events[0]
+	assert.Equal(t, AuditCorpusDropped, ev.Action)
+	assert.Equal(t, "failure", ev.Outcome)
+	assert.Equal(t, "crm", ev.ResourceID)
+	assert.Equal(t, map[string]any{"reason": "retrieval.corpus_registered"}, ev.Metadata)
 }
 
 func TestDropOrphan_UnknownCorpus(t *testing.T) {
@@ -509,7 +515,28 @@ func TestDropOrphan_UnknownCorpus(t *testing.T) {
 	err := fx.svc.DropOrphanCorpus(fx.ctx, "nope")
 	assert.ErrorIs(t, err, ErrCorpusNotFound)
 	assert.Empty(t, fx.log.calls)
-	assert.Empty(t, fx.sink.events)
+	require.Len(t, fx.sink.events, 1)
+	assert.Equal(t, "failure", fx.sink.events[0].Outcome)
+	assert.Equal(t, map[string]any{"reason": "retrieval.corpus_not_found"}, fx.sink.events[0].Metadata)
+}
+
+func TestDropOrphan_StateReadFailureIsAudited(t *testing.T) {
+	fx := newAdminFx(t)
+	fx.svc.store = stateGetFails{fx.store}
+	err := fx.svc.DropOrphanCorpus(fx.ctx, "old")
+	require.Error(t, err)
+	assert.Empty(t, fx.log.calls)
+	evs := fx.sink.byAction(AuditCorpusDropped)
+	require.Len(t, evs, 1)
+	assert.Equal(t, "failure", evs[0].Outcome)
+	assert.Equal(t, "retrieval.internal", evs[0].Metadata["reason"])
+	assert.NotContains(t, fmt.Sprint(evs[0].Metadata), "mongo")
+}
+
+type stateGetFails struct{ *adminStoreFake }
+
+func (stateGetFails) CorpusState(context.Context, string) (*models.CorpusState, error) {
+	return nil, errors.New("mongo: dial tcp 10.0.0.3:27017")
 }
 
 func TestDropOrphan_DropsEveryGeneration(t *testing.T) {
@@ -585,7 +612,8 @@ func TestDropOrphan_RowsFailureKeepsState(t *testing.T) {
 	assert.Equal(t, "retrieval.internal", fx.sink.byAction(AuditCorpusDropped)[0].Metadata["reason"])
 }
 
-// A retry after a complete drop finds no state: 404, nothing emitted.
+// A retry after a complete drop finds no state: 404, nothing touched, and
+// the refusal audited.
 func TestDropOrphan_RetryAfterCompleteDropIsNotFound(t *testing.T) {
 	fx := newAdminFx(t)
 	fx.store.states["old"] = models.CorpusState{Corpus: "old", Version: 1}
@@ -593,7 +621,8 @@ func TestDropOrphan_RetryAfterCompleteDropIsNotFound(t *testing.T) {
 	fx.log.calls, fx.sink.events = nil, nil
 	assert.ErrorIs(t, fx.svc.DropOrphanCorpus(fx.ctx, "old"), ErrCorpusNotFound)
 	assert.Empty(t, fx.log.calls)
-	assert.Empty(t, fx.sink.events)
+	require.Len(t, fx.sink.events, 1)
+	assert.Equal(t, "retrieval.corpus_not_found", fx.sink.events[0].Metadata["reason"])
 }
 
 // The row disappears between the read and the compare-and-delete (a
@@ -677,7 +706,54 @@ func TestDiagnose_FailureIsAuditedAndReturned(t *testing.T) {
 	evs := fx.sink.byAction(AuditDiagnosticsRun)
 	require.Len(t, evs, 1)
 	assert.Equal(t, "failure", evs[0].Outcome)
-	assert.Equal(t, map[string]any{"mode": "hybrid", "limit": 10, "queryRunes": 1, "hits": 0, "degraded": false}, evs[0].Metadata)
+	assert.Equal(t, map[string]any{
+		"mode": "hybrid", "limit": 10, "queryRunes": 1, "hits": 0, "degraded": false, "reason": "retrieval.forbidden",
+	}, evs[0].Metadata)
+}
+
+// Every pipeline refusal is audited with the code the handler answers.
+func TestDiagnose_FailureReasonIsTheResponseCode(t *testing.T) {
+	for err, want := range map[error]string{
+		iface.ErrRetrievalUnknownCorpus:                        "retrieval.corpus_not_found",
+		iface.ErrRetrievalInvalidFilter:                        "retrieval.invalid_filter",
+		iface.ErrRetrievalLocality:                             "retrieval.locality_violation",
+		iface.ErrRetrievalCorpusUnavailable:                    "retrieval.corpus_unavailable",
+		fmt.Errorf("x: %w", iface.ErrRetrievalVisibilityCheck): "retrieval.visibility_check_failed",
+		errors.New("qdrant: boom"):                             "retrieval.internal",
+	} {
+		fx := newAdminFx(t, adminSpec("crm", "crm"))
+		fx.rt.diagnose = func(iface.RetrievalSearchRequest) (*DiagnosticResult, error) { return nil, err }
+		_, got := fx.svc.Diagnose(fx.ctx, "crm", models.RetrievalDiagnosticsRequest{Query: "q"})
+		require.ErrorIs(t, got, err)
+		evs := fx.sink.byAction(AuditDiagnosticsRun)
+		require.Len(t, evs, 1)
+		assert.Equal(t, want, evs[0].Metadata["reason"], "error %v", err)
+	}
+}
+
+// A non-internal tenant is refused before the pipeline runs and before any
+// audit event, like the drop and the search-log read.
+func TestDiagnose_RequiresInternalTenant(t *testing.T) {
+	fx := newAdminFx(t, adminSpec("crm", "crm"))
+	called := false
+	fx.rt.diagnose = func(iface.RetrievalSearchRequest) (*DiagnosticResult, error) {
+		called = true
+		return &DiagnosticResult{}, nil
+	}
+	_, err := fx.svc.Diagnose(ctxauth.WithTenantKind(fx.ctx, "external"), "crm", models.RetrievalDiagnosticsRequest{Query: "q"})
+	assert.ErrorIs(t, err, iface.ErrRetrievalForbidden)
+	assert.False(t, called, "the pipeline must not run")
+	assert.Empty(t, fx.sink.events)
+}
+
+// A nil relay would audit into nothing; it is a wiring bug caught at Init.
+func TestNewAdminService_NilAuditPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewAdminService with a nil Audit did not panic")
+		}
+	}()
+	NewAdminService(AdminDeps{})
 }
 
 // ---- AuditRelay.EmitOutcome ----
@@ -840,6 +916,7 @@ func TestSearchLog_StoreErrorIsAuditedAsFailure(t *testing.T) {
 	require.Len(t, evs, 1)
 	assert.Equal(t, "failure", evs[0].Outcome)
 	assert.Equal(t, 0, evs[0].Metadata["returned"])
+	assert.Equal(t, "retrieval.internal", evs[0].Metadata["reason"])
 }
 
 func TestAdminSearchLog_FilterKeepsLargeIntegersExact(t *testing.T) {

@@ -71,7 +71,7 @@ type AdminDeps struct {
 	Store    AdminStoreAPI
 	Profiles iface.LLMInferenceProfiles // nil: every inference row reports not_configured
 	Modules  module.ModuleStatusReader  // nil: every owner reports not running
-	Audit    *AuditRelay                // nil: no audit
+	Audit    *AuditRelay                // required: the module's shared relay; nil panics
 	Logger   *slog.Logger
 }
 
@@ -87,9 +87,12 @@ type AdminService struct {
 	log      *slog.Logger
 }
 
+// NewAdminService builds the admin service. A nil Audit is a wiring bug: a
+// private relay would drop every admin event because no sink can reach it,
+// so it panics at Init instead of auditing into nothing.
 func NewAdminService(d AdminDeps) *AdminService {
 	if d.Audit == nil {
-		d.Audit = NewAuditRelay()
+		panic("retrieval admin: NewAdminService needs the module's audit relay; admin actions would not be audited")
 	}
 	if d.Logger == nil {
 		d.Logger = slog.Default()
@@ -373,9 +376,14 @@ func (a *AdminService) countPoints(ctx context.Context, eng engine.Engine, colle
 }
 
 // Diagnose runs a search for the caller through the normal pipeline and
-// reports the per-stage scores. The audit event carries the shape of the
+// reports the per-stage scores. A non-internal tenant is refused first and
+// not audited; every other outcome, including a refusal by the pipeline, is
+// audited once (failure with its reason). The event carries the shape of the
 // request, never the query text or the filter values.
 func (a *AdminService) Diagnose(ctx context.Context, corpus string, in models.RetrievalDiagnosticsRequest) (*models.RetrievalDiagnosticsReport, error) {
+	if err := requireOperator(ctx); err != nil {
+		return nil, err
+	}
 	res, err := a.rt.Diagnose(ctx, iface.RetrievalSearchRequest{
 		Corpus: corpus, Query: in.Query, Filter: in.Filter, Mode: in.Mode, Limit: in.Limit,
 	})
@@ -383,12 +391,13 @@ func (a *AdminService) Diagnose(ctx context.Context, corpus string, in models.Re
 		"mode": string(effectiveMode(in.Mode)), "limit": effectiveLimit(in.Limit),
 		"queryRunes": utf8.RuneCountInString(in.Query), "hits": 0, "degraded": false,
 	}
+	if err == nil {
+		meta["hits"], meta["degraded"] = len(res.Result.Hits), res.Result.Degraded
+	}
+	a.emitResult(ctx, AuditDiagnosticsRun, auditResourceCorpus, corpus, meta, err)
 	if err != nil {
-		a.audit.EmitOutcome(ctx, AuditDiagnosticsRun, auditResourceCorpus, corpus, "failure", meta)
 		return nil, err
 	}
-	meta["hits"], meta["degraded"] = len(res.Result.Hits), res.Result.Degraded
-	a.audit.EmitOutcome(ctx, AuditDiagnosticsRun, auditResourceCorpus, corpus, "success", meta)
 
 	rep := &models.RetrievalDiagnosticsReport{
 		Corpus: corpus, Collection: res.Collection, Profile: res.Profile,
@@ -429,11 +438,19 @@ func effectiveLimit(l int) int {
 // module registers any more: its engine collections, its outbox and
 // tenant-progress rows and, last, its state row. Search-log rows and erasure
 // tombstones are untouched. It refuses a registered corpus. Dropping a corpus
-// whose state is already gone is ErrCorpusNotFound.
+// whose state is already gone is ErrCorpusNotFound. A non-internal tenant is
+// refused first and not audited; every other outcome is audited once.
 func (a *AdminService) DropOrphanCorpus(ctx context.Context, corpus string) error {
 	if err := requireOperator(ctx); err != nil {
 		return err
 	}
+	meta := map[string]any{}
+	err := a.dropOrphanCorpus(ctx, corpus, meta)
+	a.emitResult(ctx, AuditCorpusDropped, auditResourceCorpus, corpus, meta, err)
+	return err
+}
+
+func (a *AdminService) dropOrphanCorpus(ctx context.Context, corpus string, meta map[string]any) error {
 	if _, ok := a.rt.Corpus(corpus); ok {
 		return ErrCorpusRegistered
 	}
@@ -444,17 +461,9 @@ func (a *AdminService) DropOrphanCorpus(ctx context.Context, corpus string) erro
 	if st == nil {
 		return ErrCorpusNotFound
 	}
-
 	collections := a.orphanCollections(st)
-	meta := map[string]any{"collections": collections}
-	err = a.dropOrphan(ctx, st, collections, meta)
-	if err != nil {
-		meta["reason"] = AuditReason(err)
-		a.audit.EmitOutcome(ctx, AuditCorpusDropped, auditResourceCorpus, corpus, "failure", meta)
-		return err
-	}
-	a.audit.EmitOutcome(ctx, AuditCorpusDropped, auditResourceCorpus, corpus, "success", meta)
-	return nil
+	meta["collections"] = collections
+	return a.dropOrphan(ctx, st, collections, meta)
 }
 
 // orphanCollections lists the collections the corpus may own: generations 1
@@ -509,28 +518,54 @@ func (a *AdminService) dropOrphan(ctx context.Context, st *models.CorpusState, c
 	}
 }
 
-// AuditReason is the error code the admin handler answers a failed action
-// with, so the audit trail and the response agree. It is exported only so
-// handlers' TestAuditReasonAgreesWithMapError can pin it against mapError:
-// change the two together.
+// errorCodes is the one table from a retrieval error to the code the admin
+// handler answers with, in match order: handlers.mapError switches on
+// AuditReason, so an audit event's reason and the response cannot disagree.
+var errorCodes = []struct {
+	err  error
+	code string
+}{
+	{iface.ErrRetrievalNotConfigured, errcode.RetrievalNotConfigured},
+	{iface.ErrRetrievalUnavailable, errcode.RetrievalUnavailable},
+	{iface.ErrRetrievalUnknownCorpus, errcode.RetrievalCorpusNotFound},
+	{ErrCorpusNotFound, errcode.RetrievalCorpusNotFound},
+	{ErrCorpusRegistered, errcode.RetrievalCorpusRegistered},
+	{iface.ErrRetrievalCorpusUnavailable, errcode.RetrievalCorpusUnavailable},
+	{iface.ErrRetrievalForbidden, errcode.RetrievalForbidden},
+	{iface.ErrRetrievalInvalidFilter, errcode.RetrievalInvalidFilter},
+	{iface.ErrRetrievalInvalidRequest, errcode.RetrievalInvalidRequest},
+	{iface.ErrRetrievalLocality, errcode.RetrievalLocalityViolation},
+	{iface.ErrRetrievalVisibilityCheck, errcode.RetrievalVisibilityCheckFailed},
+}
+
+// AuditReason is the error code of err: the reason a failed admin action is
+// audited with and the code handlers.mapError answers it with. An error the
+// table does not name is retrieval.internal.
 func AuditReason(err error) string {
-	switch {
-	case errors.Is(err, iface.ErrRetrievalNotConfigured):
-		return errcode.RetrievalNotConfigured
-	case errors.Is(err, iface.ErrRetrievalUnavailable):
-		return errcode.RetrievalUnavailable
-	case errors.Is(err, ErrCorpusRegistered):
-		return errcode.RetrievalCorpusRegistered
-	case errors.Is(err, ErrCorpusNotFound):
-		return errcode.RetrievalCorpusNotFound
-	default:
-		return errcode.RetrievalInternal
+	for _, e := range errorCodes {
+		if errors.Is(err, e.err) {
+			return e.code
+		}
 	}
+	return errcode.RetrievalInternal
+}
+
+// emitResult audits one admin action past the operator check: success, or
+// failure with reason = AuditReason(err).
+func (a *AdminService) emitResult(ctx context.Context, action, resourceType, resourceID string, meta map[string]any, err error) {
+	if err != nil {
+		meta["reason"] = AuditReason(err)
+		a.audit.EmitOutcome(ctx, action, resourceType, resourceID, "failure", meta)
+		return
+	}
+	a.audit.EmitOutcome(ctx, action, resourceType, resourceID, "success", meta)
 }
 
 // SearchLog is one page of the calling tenant's audited searches, newest
-// first. Every call that reaches the store is itself audited, with the shape
-// of the request and the number of rows returned, never a row's content.
+// first. A non-internal tenant and a malformed request (limit, offset, since
+// after until) are refused before any data access and not audited; every
+// call that reaches the store is audited once, with the shape of the request
+// and the number of rows returned (reason on failure), never a row's content.
 func (a *AdminService) SearchLog(ctx context.Context, q models.SearchLogQuery) (*models.RetrievalSearchLogPage, error) {
 	if err := requireOperator(ctx); err != nil {
 		return nil, err
@@ -554,11 +589,12 @@ func (a *AdminService) SearchLog(ctx context.Context, q models.SearchLogQuery) (
 	}
 	rows, total, err := a.store.SearchLog(ctx, q)
 	if err != nil {
-		a.audit.EmitOutcome(ctx, AuditSearchLogRead, auditResourceSearchLog, tenant, "failure", meta)
-		return nil, fmt.Errorf("retrieval admin: search log: %w", err)
+		err = fmt.Errorf("retrieval admin: search log: %w", err)
+		a.emitResult(ctx, AuditSearchLogRead, auditResourceSearchLog, tenant, meta, err)
+		return nil, err
 	}
 	meta["returned"] = len(rows)
-	a.audit.EmitOutcome(ctx, AuditSearchLogRead, auditResourceSearchLog, tenant, "success", meta)
+	a.emitResult(ctx, AuditSearchLogRead, auditResourceSearchLog, tenant, meta, nil)
 
 	page := &models.RetrievalSearchLogPage{
 		Items: make([]models.RetrievalSearchLogEntry, 0, len(rows)), Total: total, Limit: q.Limit, Offset: q.Offset,

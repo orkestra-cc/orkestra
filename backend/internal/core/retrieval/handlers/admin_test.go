@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -287,8 +288,9 @@ func TestHandlers_NilServiceIs503(t *testing.T) {
 }
 
 // services.AuditReason is what an audit event records as the reason of a
-// failed action; the handler answers the same sentinels with mapError. For
-// every sentinel AuditReason names, the two must agree, so the trail never
+// failed action; mapError answers with the code it returns. For every
+// sentinel the table names, the reason and the code the handler answers on
+// both audited routes (drop and diagnostics) must agree, so the trail never
 // says something the caller was not told. Add a row here with each case.
 func TestAuditReasonAgreesWithMapError(t *testing.T) {
 	cases := []struct {
@@ -296,20 +298,31 @@ func TestAuditReasonAgreesWithMapError(t *testing.T) {
 		want string
 	}{
 		{iface.ErrRetrievalNotConfigured, errcode.RetrievalNotConfigured},
-		{iface.ErrRetrievalUnavailable, errcode.RetrievalUnavailable},
-		{services.ErrCorpusRegistered, errcode.RetrievalCorpusRegistered},
+		{fmt.Errorf("wrap: %w", iface.ErrRetrievalUnavailable), errcode.RetrievalUnavailable},
+		{iface.ErrRetrievalUnknownCorpus, errcode.RetrievalCorpusNotFound},
 		{services.ErrCorpusNotFound, errcode.RetrievalCorpusNotFound},
+		{services.ErrCorpusRegistered, errcode.RetrievalCorpusRegistered},
+		{iface.ErrRetrievalCorpusUnavailable, errcode.RetrievalCorpusUnavailable},
+		{iface.ErrRetrievalForbidden, errcode.RetrievalForbidden},
+		{iface.ErrRetrievalInvalidFilter, errcode.RetrievalInvalidFilter},
+		{iface.ErrRetrievalInvalidRequest, errcode.RetrievalInvalidRequest},
+		{iface.ErrRetrievalLocality, errcode.RetrievalLocalityViolation},
+		{iface.ErrRetrievalVisibilityCheck, errcode.RetrievalVisibilityCheckFailed},
 		{errors.New("anything else"), errcode.RetrievalInternal},
 	}
 	for _, c := range cases {
 		if got := services.AuditReason(c.err); got != c.want {
 			t.Errorf("AuditReason(%v) = %q, want %q", c.err, got, c.want)
 		}
-		f := &fakeAdmin{err: c.err}
-		hh, _ := newAPI(t, f)
-		rec := do(hh, http.MethodDelete, "/v1/admin/retrieval/corpora/crm", "")
-		if got := errCode(t, rec); got != c.want {
-			t.Errorf("handler code for %v = %q, AuditReason says %q", c.err, got, c.want)
+		for _, r := range []struct{ method, path, body string }{
+			{http.MethodDelete, "/v1/admin/retrieval/corpora/crm", ""},
+			{http.MethodPost, "/v1/admin/retrieval/corpora/crm/diagnostics", `{"query":"x"}`},
+		} {
+			hh, _ := newAPI(t, &fakeAdmin{err: c.err})
+			rec := do(hh, r.method, r.path, r.body)
+			if got := errCode(t, rec); got != c.want {
+				t.Errorf("%s %s: handler code for %v = %q, AuditReason says %q", r.method, r.path, c.err, got, c.want)
+			}
 		}
 	}
 }

@@ -18,6 +18,7 @@ func TestRetrievalPolicies(t *testing.T) {
 		{"administrator administers corpora", "production", mfa(Principal{UserUUID: "u", SystemRole: "administrator"}), "retrieval.corpus.admin", true, "retrieval.corpus_admin.platform_admins"},
 		{"administrator without MFA is refused", "production", Principal{UserUUID: "u", SystemRole: "administrator"}, "retrieval.corpus.admin", false, ""},
 		{"prod developer cannot administer", "production", Principal{UserUUID: "u", SystemRole: "developer"}, "retrieval.corpus.admin", false, ""},
+		{"org_owner reads the search log", "production", Principal{UserUUID: "u", TenantRoles: []string{"org_owner"}}, "retrieval.searchlog.admin", true, "retrieval.searchlog_admin.org_admins"},
 		{"org_admin reads the search log", "production", Principal{UserUUID: "u", TenantRoles: []string{"org_admin"}}, "retrieval.searchlog.admin", true, "retrieval.searchlog_admin.org_admins"},
 		{"org_member cannot read the search log", "production", Principal{UserUUID: "u", TenantRoles: []string{"org_member"}}, "retrieval.searchlog.admin", false, ""},
 		{"org_viewer cannot read the search log", "production", Principal{UserUUID: "u", TenantRoles: []string{"org_viewer"}}, "retrieval.searchlog.admin", false, ""},

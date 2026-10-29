@@ -4,49 +4,47 @@
 package handlers
 
 import (
-	"errors"
-
 	"github.com/orkestra/backend/internal/core/retrieval/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // mapError turns a retrieval service error into the client-facing
-// *errcode.Error. The details are fixed sentences: the wrapped error text
-// is never sent, so the handler logs the cause and the caller gets only
-// the code and its sentence.
+// *errcode.Error. The code comes from services.AuditReason, the one table
+// the audit trail also records, so the two cannot drift; this switch only
+// picks the status and the sentence. The details are fixed sentences: the
+// wrapped error text is never sent, so the handler logs the cause and the
+// caller gets only the code and its sentence.
 func mapError(err error) error {
-	switch {
-	case errors.Is(err, iface.ErrRetrievalNotConfigured):
-		return errcode.FeatureNotConfigured(errcode.RetrievalNotConfigured,
+	switch code := services.AuditReason(err); code {
+	case errcode.RetrievalNotConfigured:
+		return errcode.FeatureNotConfigured(code,
 			"The vector engine is not configured on this installation.")
-	case errors.Is(err, iface.ErrRetrievalUnavailable):
-		return errcode.ServiceUnavailable(errcode.RetrievalUnavailable,
+	case errcode.RetrievalUnavailable:
+		return errcode.ServiceUnavailable(code,
 			"The vector engine is unavailable. Try again shortly.")
-	case errors.Is(err, iface.ErrRetrievalUnknownCorpus),
-		errors.Is(err, services.ErrCorpusNotFound):
-		return errcode.NotFound(errcode.RetrievalCorpusNotFound,
+	case errcode.RetrievalCorpusNotFound:
+		return errcode.NotFound(code,
 			"No retrieval state exists for this corpus.")
-	case errors.Is(err, services.ErrCorpusRegistered):
-		return errcode.Conflict(errcode.RetrievalCorpusRegistered,
+	case errcode.RetrievalCorpusRegistered:
+		return errcode.Conflict(code,
 			"The corpus is still registered. Unregister it before dropping its state.")
-	case errors.Is(err, iface.ErrRetrievalCorpusUnavailable):
-		return errcode.ServiceUnavailable(errcode.RetrievalCorpusUnavailable,
+	case errcode.RetrievalCorpusUnavailable:
+		return errcode.ServiceUnavailable(code,
 			"The module that owns this corpus is not running.")
-	case errors.Is(err, iface.ErrRetrievalForbidden):
-		return errcode.Forbidden(errcode.RetrievalForbidden,
+	case errcode.RetrievalForbidden:
+		return errcode.Forbidden(code,
 			"You may not access this corpus.")
-	case errors.Is(err, iface.ErrRetrievalInvalidFilter):
-		return errcode.UnprocessableEntity(errcode.RetrievalInvalidFilter,
+	case errcode.RetrievalInvalidFilter:
+		return errcode.UnprocessableEntity(code,
 			"The filter does not fit this corpus.")
-	case errors.Is(err, iface.ErrRetrievalInvalidRequest):
-		return errcode.UnprocessableEntity(errcode.RetrievalInvalidRequest,
+	case errcode.RetrievalInvalidRequest:
+		return errcode.UnprocessableEntity(code,
 			"The search request is not valid.")
-	case errors.Is(err, iface.ErrRetrievalLocality):
-		return errcode.Conflict(errcode.RetrievalLocalityViolation,
+	case errcode.RetrievalLocalityViolation:
+		return errcode.Conflict(code,
 			"An inference endpoint breaks the locality rule of this corpus.")
-	case errors.Is(err, iface.ErrRetrievalVisibilityCheck):
-		return errcode.ServiceUnavailable(errcode.RetrievalVisibilityCheckFailed,
+	case errcode.RetrievalVisibilityCheckFailed:
+		return errcode.ServiceUnavailable(code,
 			"The source visibility check could not run. Try again shortly.")
 	default:
 		return errcode.Internal(errcode.RetrievalInternal,
