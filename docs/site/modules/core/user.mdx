@@ -30,6 +30,7 @@ Every admin route is gated by one per-action `user.*` key, evaluated at **global
 | `user.update` | — | `send-password-reset` (mails an expiring link to an existing user; nothing changes until redeemed) | — |
 | `user.delete` | `DELETE /v1/users/{id}` | `DELETE …/{id}` | **5 min** |
 | `user.avatar.self` | `/v1/me/avatar/presign-upload`, `/v1/me/avatar/commit`, `/v1/me/avatar/source` — on **both** tiers | | — |
+| `user.self` | `GET /v1/me/preferences`, `GET`/`PUT /v1/me/preferences/{module}`, `GET /v1/me/profile-sections` — on **both** tiers | | — |
 
 **Who holds what.** At global scope a platform role conveys its seeded permission set ([authz rule 2b](/modules/core/authz#how-a-decision-is-made)): `super_admin` and `administrator` everything; `manager` read, create and update — so a manager runs the operators without being a platform administrator; `operator` and `guest` read only. `system.users.admin` is no longer a gate on this surface. If your deployment enforces Cedar for `system.users.admin` (`CEDAR_ENFORCE_ACTIONS`), list `user.read`, `user.create`, `user.update` and `user.delete` instead: the same restrictions follow them — no user management from a public IP in production, and a second factor for the roles that can write users.
 
@@ -43,7 +44,7 @@ Every admin route is gated by one per-action `user.*` key, evaluated at **global
 | `user.create` | Create and invite users |
 | `user.update` | Update user profiles, roles and status; send a password reset |
 | `user.delete` | Delete users |
-| `user.self` | Edit your own profile (reserved; no route today) |
+| `user.self` | Read and save your own per-module preferences; discover your profile sections |
 | `user.avatar.self` | Manage your own avatar |
 
 ## Guards worth knowing
@@ -57,10 +58,17 @@ These refuse the request rather than trusting the caller, and each returns a dis
 - **Revoking access ends sessions.** Deactivating, soft-deleting, **or changing a user's system role** calls `iface.SessionTerminator` — refresh tokens revoked, session docs flipped, every `sid` pushed into the Redis revocation set. Before this existed a "disabled" account kept working for the full refresh-token lifetime. On the deactivate and delete paths the call is deliberately best-effort and silent: the state change is already persisted, and failing the operator's request would report a deactivation that did in fact happen.
 - **A role change propagates.** Changing a system role also retires that user's cached permission verdicts, so the next decision uses the new role rather than one held for the cache's TTL. Neither the cache retirement nor the session termination can *refuse* the change — refusing a demotion would leave the old role in force indefinitely instead of for a minute — so what did not happen is recorded in the audit row (`cache_invalidated`, `sessions_terminated`) instead. The equivalent client-tier patch needs no cache retirement (a client user's role never enters permission evaluation) and marks that fact explicitly rather than leaving it implied.
 
+## Profile sections and per-module preferences
+
+Two seams let a module reach the user pages without the user module knowing it:
+
+- **Profile sections** (`module.HasProfileSections`). A module declares the sections it contributes — key `<module>.<name>`, a label key in its own i18n namespace, an optional permission, the surfaces (`self`: the user's own profile and settings; `admin`: an administrator's view of a user). The admin SPA renders contributions through its slot system (slot ids `user.profile.sections`, `user.adminProfile.sections`, `user.settings.sections`); `GET /v1/me/profile-sections` and `GET /v1/users/{id}/profile-sections` list the same catalog for other clients, filtered to enabled modules and to the sections whose permission the caller holds at global scope.
+- **Per-user preferences** (`module.HasUserPreferences`). A module declares preference fields in the `ConfigField` vocabulary of its admin config (string, bool, int, duration, enum, stringList; no secrets, no record lists). The user module keeps one `user_preferences` document per user and module and serves `GET /v1/me/preferences` (every enabled module with a schema, values with defaults filled), `GET /v1/me/preferences/{module}` and `PUT /v1/me/preferences/{module}` (PUT semantics; every key must be declared and every value valid — `422 user.preferences.invalid` lists every problem; `404 user.preferences.module_unknown` when the module declares nothing or is disabled). The settings page renders every declared schema with the generic config form, so a module ships no settings component. Preferences are personal: there is no admin route to read or write another user's.
+
 ## Soft delete and the email alias
 
 Deletes are soft — `DeletedAt` is stamped, the row stays. But the unique email index still matches soft-deleted rows, so a plain soft delete would permanently block that address from re-registering. `SoftDeleteAndAliasEmail` is the escape: it stamps `deletedAt` *and* atomically rewrites the address to an orphan alias, preserving the original on `originalEmail` for audit. That frees the unique index so the same human can sign up again from scratch.
 
 ## GDPR
 
-Registers an `iface.PIIProducer` for the subject `user`. Export returns the profile projection — never the password hash or PIN, which are server secrets rather than portable personal data. Erasure **anonymizes** by default: the UUID survives so foreign references stay valid, the email is aliased and the profile blanked, producing the tombstone the [compliance](/modules/core/compliance) retention job later hard-deletes.
+Registers an `iface.PIIProducer` for the subject `user`. Export returns the profile projection plus the user's per-module preferences (`preferences`, keyed by module); erasure deletes the preference rows in both modes. The profile export — never the password hash or PIN, which are server secrets rather than portable personal data. Erasure **anonymizes** by default: the UUID survives so foreign references stay valid, the email is aliased and the profile blanked, producing the tombstone the [compliance](/modules/core/compliance) retention job later hard-deletes.

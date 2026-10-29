@@ -73,6 +73,8 @@ Implement only what you need. A pure service provider with no HTTP surface imple
 | `HasNavItems` | `NavItems() []NavItemSpec` | Sidebar entries for the [navigation](/modules/core/navigation) aggregator |
 | `HasNotificationTemplates` | `NotificationTemplates() []NotificationTemplateSpec` | Default email templates |
 | `HasCapabilities` | `Capabilities() []Capability` | Entitlement-gated capabilities |
+| `HasProfileSections` | `ProfileSections() []ProfileSectionSpec` | Sections the module contributes to the user profile pages (key `<module>.<name>`, label key in the module's i18n namespace, optional permission, surfaces `self`/`admin`). The SPA renders them through its slot system; the backend lists them at `/v1/me/profile-sections` and `/v1/users/{id}/profile-sections` |
+| `HasUserPreferences` | `UserPreferenceFields() []ConfigField` | Per-user preference fields, in the same vocabulary as `ConfigSchema` (no `secret`, no `recordList`). The [user](/modules/core/user) module stores one document per user and module and serves them at `/v1/me/preferences/{module}`; the settings page renders the declared fields with the generic config form |
 | `HasDisplayInfo` | `DisplayName()`, `Description()` | Human-readable labels for the admin UI |
 | `HasDefaultEnabled` | `Enabled() bool` | Whether a fresh install starts with this module on |
 | `HasInfraContainers` | `InfraContainers() []InfraContainerSpec` | Docker containers the registry starts before `Start` and stops after `Stop` |
