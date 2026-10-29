@@ -1055,7 +1055,8 @@
       "toastResendFailed": "Resend failed: {{error}}",
       "toastPasswordResetSent": "Password-reset email sent",
       "toastSendFailed": "Send failed: {{error}}",
-      "errorUnknown": "unknown error"
+      "errorUnknown": "unknown error",
+      "actionManagePin": "Manage PIN"
     },
     "attachMember": {
       "title": "Attach Member",
@@ -1280,7 +1281,8 @@
       "sessions": "Sessions",
       "devices": "Trusted devices",
       "backupCodes": "Backup codes",
-      "ai": "AI accounts"
+      "ai": "AI accounts",
+      "pin": "PIN"
     },
     "stats": {
       "mfaTitle": "Two-factor",
@@ -1526,6 +1528,9 @@
         "userAccount": "Billed to your plan",
         "userAccountSubtitle": "Tokens on your linked ChatGPT account"
       }
+    },
+    "pinTab": {
+      "intro": "Your PIN signs you in on field devices with your username. Manage it here; changes need a recent strong sign-in."
     }
   },
   "operatorProfile": {
@@ -3866,6 +3871,81 @@
     "retryFailed": "Retry failed",
     "errors": {
       "generic": "The operation failed."
+    }
+  },
+  "pinMethod": {
+    "title": "PIN sign-in",
+    "cardTitle": "PIN sign-in",
+    "badgeSet": "Set",
+    "badgeNotSet": "Not set",
+    "badgeLocked": "Locked",
+    "updatedAt": "Last changed {{date}}.",
+    "notSetAdmin": "This user has no PIN. Set one to let them sign in on a field device with username and PIN.",
+    "notSetSelf": "You have no PIN. Set one to sign in on a field device with your username and PIN.",
+    "lockedUntil": "Locked after too many wrong attempts until {{when}}.",
+    "weakNote": "A PIN is a weak sign-in method: it never counts as two-factor authentication, and a PIN session cannot change credentials.",
+    "setButton": "Set PIN",
+    "replaceButton": "Change PIN",
+    "codeButton": "Device enrollment code",
+    "removeButton": "Remove PIN",
+    "cancel": "Cancel",
+    "unavailable": "PIN sign-in is switched off on this surface. A PIN can be prepared now and will work once an administrator turns the method on.",
+    "loadError": "Could not load the PIN state.",
+    "retry": "Retry",
+    "toastSet": "PIN set. Open PIN sessions were signed out.",
+    "toastReplaced": "PIN changed. Open PIN sessions were signed out.",
+    "toastRemoved": "PIN and enrolled devices removed.",
+    "toastDeviceRevoked": "Device revoked. Its PIN sessions were signed out.",
+    "clientModalTitle": "PIN sign-in — {{email}}",
+    "setModal": {
+      "titleSet": "Set PIN",
+      "titleReplace": "Change PIN",
+      "intro": "Choose {{count}} digits. Avoid repeated digits and sequences such as 12345.",
+      "labelPin": "New PIN",
+      "labelConfirm": "Repeat the PIN",
+      "replaceNote": "Changing the PIN signs out every session opened with the old one. Enrolled devices stay enrolled.",
+      "submit": "Save PIN",
+      "errorRequired": "Enter the PIN.",
+      "errorDigits": "Use digits only.",
+      "errorLength": "The PIN must be exactly {{count}} digits.",
+      "errorMismatch": "The two PINs do not match."
+    },
+    "codeModal": {
+      "title": "Device enrollment code",
+      "intro": "Type this code in the app on the device, together with the username. It works once and is not shown again.",
+      "expires": "Valid until {{when}}.",
+      "done": "Done"
+    },
+    "removeModal": {
+      "title": "Remove PIN?",
+      "body": "The PIN and every enrolled device are removed, and open PIN sessions are signed out. Other sign-in methods are not affected.",
+      "submit": "Remove"
+    },
+    "devices": {
+      "heading": "Enrolled devices",
+      "introRequired": "The PIN works only on these devices. Enroll a device with a one-time code.",
+      "introOptional": "Device binding is off on this surface: the PIN works on any device. Enrolled devices are still listed.",
+      "empty": "No device enrolled.",
+      "colDevice": "Device",
+      "colPlatform": "Platform",
+      "colVia": "Enrolled by",
+      "colEnrolled": "Enrolled",
+      "colLastUsed": "Last used",
+      "revoke": "Revoke",
+      "viaAdmin": "Administrator",
+      "viaSelf": "User"
+    },
+    "errors": {
+      "auth_pin_invalid": "The PIN must be exactly the configured number of digits.",
+      "auth_pin_too_weak": "Choose a PIN that is not a repeated digit or a sequence.",
+      "auth_pin_username_required": "The user needs a username first: it is the PIN sign-in identifier.",
+      "auth_pin_username_not_unique": "Another user has the same username. Give this user a unique username first.",
+      "auth_pin_not_allowed": "This user cannot have a PIN: privileged roles, service accounts and users without the PIN sign-in permission use stronger methods.",
+      "auth_pin_not_set": "There is no PIN yet.",
+      "auth_pin_session_forbidden": "You signed in with a PIN. Sign in with your password or another strong method to manage your PIN.",
+      "auth_pin_device_not_found": "That device is no longer enrolled.",
+      "user_target_tier_forbidden": "You cannot change the PIN of a user whose role is higher than yours.",
+      "unknown": "The PIN operation failed."
     }
   },
   "adminRetrieval": {

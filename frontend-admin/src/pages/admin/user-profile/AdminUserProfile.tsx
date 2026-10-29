@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import AdminUserActions from './AdminUserActions';
 import AdminUserMetrics from './AdminUserMetrics';
 import AdminAuthMethodsCard from './AdminAuthMethodsCard';
+import AdminPinCard from './AdminPinCard';
 import { useSlotContributions } from 'modules/useSlotContributions';
 import ContributedProfileSections from 'pages/user/ContributedProfileSections';
 import {
@@ -58,6 +59,7 @@ const AdminUserProfile: React.FC = () => {
         <Col lg={8}>
           <AdminProfileIntro user={user} />
           <AdminAuthMethodsCard user={user} />
+          <AdminPinCard user={user} />
           <ContributedProfileSections<UserProfileSectionProps>
             contributions={sections}
             sectionProps={{ userId: user.id, user, viewer: 'admin' }}

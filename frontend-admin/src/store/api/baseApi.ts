@@ -838,6 +838,8 @@ export const baseApi = createApi({
     'SelfAuthMethods',
     'Sessions',
     'TrustedDevices',
+    // PIN sign-in (own and admin views)
+    'Pin',
     // Tenant + authz tags
     'Org',
     'Membership',
