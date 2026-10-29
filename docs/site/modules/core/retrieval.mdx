@@ -287,12 +287,12 @@ All routes are on the operator host, require an internal-organization context (a
 | Route | Permission | Extra gate | Error codes |
 |---|---|---|---|
 | `GET /v1/admin/retrieval/corpora` | `retrieval.corpus.read` | | `retrieval.forbidden`, `retrieval.unavailable` |
-| `POST /v1/admin/retrieval/corpora/{corpus}/diagnostics` | `retrieval.corpus.admin` | second factor, step-up | `retrieval.corpus_not_found`, `retrieval.corpus_unavailable`, `retrieval.not_configured`, `retrieval.unavailable`, `retrieval.visibility_check_failed`, `retrieval.forbidden`, `retrieval.locality_violation`, `retrieval.invalid_filter`, `retrieval.invalid_request` |
+| `POST /v1/admin/retrieval/corpora/{corpus}/diagnostics` | `retrieval.corpus.admin` | second factor, step-up | `retrieval.corpus_not_found`, `retrieval.corpus_unavailable`, `retrieval.not_configured`, `retrieval.unavailable`, `retrieval.visibility_check_failed`, `retrieval.forbidden`, `retrieval.locality_violation`, `retrieval.invalid_filter`, `retrieval.invalid_request` (the query is whitespace-only or over 2000 characters) |
 | `DELETE /v1/admin/retrieval/corpora/{corpus}` | `retrieval.corpus.admin` | second factor, step-up | `204`; `retrieval.corpus_not_found`, `retrieval.corpus_registered`, `retrieval.not_configured`, `retrieval.unavailable`, `retrieval.forbidden` |
 | `GET /v1/admin/retrieval/tenant/indexing` | `retrieval.tenant.read` | | `retrieval.forbidden`, `retrieval.unavailable` |
-| `GET /v1/admin/retrieval/search-log` | `retrieval.searchlog.admin` | second factor, step-up | `retrieval.invalid_request`, `retrieval.forbidden`, `retrieval.unavailable` |
+| `GET /v1/admin/retrieval/search-log` | `retrieval.searchlog.admin` | second factor, step-up | `retrieval.invalid_request` (only `since` after `until`), `retrieval.forbidden`, `retrieval.unavailable` |
 
-The search-log query takes `userUuid`, `since` and `until` (RFC 3339), `limit` (1 to 200, default 50) and `offset` (0 to 10000, default 0), newest first, and answers `items`, `total`, `limit` and `offset`. The diagnostics body takes `query`, an optional `filter`, `mode` and `limit` (1 to 100, default 10). Without a database the routes answer `503 retrieval.unavailable`.
+The search-log query takes `userUuid`, `since` and `until` (RFC 3339), `limit` (1 to 200, default 50) and `offset` (0 to 10000, default 0), newest first, and answers `items`, `total`, `limit` and `offset`. The diagnostics body takes `query`, an optional `filter`, `mode` and `limit` (1 to 100, default 10). A parameter or body that breaks the published schema (a malformed uuid or time, `limit` or `offset` out of range, a bad corpus name, a diagnostics `mode`, `query` length or `limit` out of range) is refused first with the generic `422` validation error of the API, not a `retrieval.*` code. Without a database the routes answer `503 retrieval.unavailable`.
 
 ## Configuration
 
