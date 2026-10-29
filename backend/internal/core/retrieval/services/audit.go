@@ -14,6 +14,8 @@ import (
 const (
 	AuditErasureRecorded  = "retrieval.erasure.recorded"
 	AuditErasureFinalized = "retrieval.erasure.finalized"
+	AuditDiagnosticsRun   = "retrieval.diagnostics.run"
+	AuditCorpusDropped    = "retrieval.corpus.dropped"
 )
 
 // AuditRelay forwards retrieval audit events to the sink compliance publishes
@@ -45,6 +47,12 @@ func (a *AuditRelay) current() iface.AuditSink {
 // Emit records a successful action of the user in ctx (admin actions): tenant,
 // tenant kind, actor, email and client IP are read from ctx.
 func (a *AuditRelay) Emit(ctx context.Context, action, resourceType, resourceID string, meta map[string]any) {
+	a.EmitOutcome(ctx, action, resourceType, resourceID, "success", meta)
+}
+
+// EmitOutcome records an action of the user in ctx with an explicit outcome
+// ("success" or "failure"); Emit is EmitOutcome with "success".
+func (a *AuditRelay) EmitOutcome(ctx context.Context, action, resourceType, resourceID, outcome string, meta map[string]any) {
 	sink := a.current()
 	if sink == nil {
 		return
@@ -55,7 +63,7 @@ func (a *AuditRelay) Emit(ctx context.Context, action, resourceType, resourceID 
 	ip, _ := ctxauth.GetClientIP(ctx)
 	sink.Emit(ctx, iface.AuditEvent{
 		TenantID: tenantID, TenantKind: tenantKind(ctx), ActorUserID: actor, ActorEmail: email, ActorType: "user",
-		Action: action, ResourceType: resourceType, ResourceID: resourceID, Outcome: "success", IPAddress: ip, Metadata: meta,
+		Action: action, ResourceType: resourceType, ResourceID: resourceID, Outcome: outcome, IPAddress: ip, Metadata: meta,
 	})
 }
 
