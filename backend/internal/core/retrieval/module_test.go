@@ -843,6 +843,7 @@ func TestCollections_DeclareSearchLog(t *testing.T) {
 	}{
 		{[]string{"tenantId", "uuid"}, true},
 		{[]string{"tenantId", "userUuid", "createdAt"}, false},
+		{[]string{"tenantId", "createdAt", "uuid"}, false},
 		{[]string{"subjects"}, false},
 		{[]string{"createdAt"}, false},
 		{[]string{"userUuid"}, false},
