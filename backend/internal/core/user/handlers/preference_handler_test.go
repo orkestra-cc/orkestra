@@ -154,7 +154,8 @@ func TestPreferenceHandler_ProfileSectionsFilterByModuleStateAndPermission(t *te
 	}
 	// With the permission the gated section appears.
 	h2 := NewPreferenceHandler(&fakePrefService{}, reg, enabled, fakeAuthz{allowed: map[string]bool{"people.update": true}})
-	admin, _ = h2.ProfileSectionsForUser(userCtx("u-1"), &ProfileSectionsForUserRequest{ID: "t-1"})
+	tenantCtx := context.WithValue(userCtx("u-1"), ctxauth.KeyTenantID, "tenant-1")
+	admin, _ = h2.ProfileSectionsForUser(tenantCtx, &ProfileSectionsForUserRequest{ID: "t-1"})
 	if len(admin.Body.Sections) != 2 {
 		t.Errorf("admin with people.update = %+v", admin.Body.Sections)
 	}
@@ -175,7 +176,8 @@ func TestPreferenceHandler_ProfileSectionsFilterByModuleStateAndPermission(t *te
 // The section permission is checked in the request tenant, the scope the
 // SPA's slot registry and the module's own routes use; at global scope a
 // platform role conveys every `.self` key, so a global check listed a
-// section the module then refused with 403.
+// section the module then refused with 403. With no tenant a gated section
+// is dropped rather than checked globally.
 func TestPreferenceHandler_ProfileSectionPermissionIsTenantScoped(t *testing.T) {
 	reg := module.NewUserPreferenceRegistry()
 	if err := reg.RegisterSections("people", []module.ProfileSectionSpec{
@@ -198,7 +200,7 @@ func TestPreferenceHandler_ProfileSectionPermissionIsTenantScoped(t *testing.T) 
 	}{
 		{"member tenant", inTenant("tenant-1"), 1},
 		{"tenant without the key", inTenant("tenant-2"), 0},
-		{"no tenant resolved: global scope", userCtx("u-1"), 1},
+		{"no tenant resolved: gated section dropped", userCtx("u-1"), 0},
 	} {
 		got, err := h.MyProfileSections(tc.ctx, nil)
 		if err != nil {

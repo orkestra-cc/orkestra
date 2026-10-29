@@ -51,10 +51,13 @@ func (s *Service) ActiveRoleIDs(ctx context.Context, userUUID, tenantID string) 
 	return out, nil
 }
 
-// boundRoleNames returns the sorted, deduplicated names of the active roles
-// bound to userUUID in tenantID (system roles and roles of that tenant), the
-// tenant_roles a Cedar principal carries when the check is about a user other
-// than the caller. Same filters and error policy as ActiveRoleIDs.
+// boundRoleNames returns the sorted, deduplicated names of the active
+// catalog roles (tenantId "") bound to userUUID in tenantID: the tenant_roles
+// a Cedar principal carries when the check is not about the caller in the
+// request tenant. Catalog roles only, because those are the only names a
+// membership carries and the only ones the policies name: a tenant's custom
+// role may be called "org_owner" (role names are unique per tenant only) and
+// must not fire the org_owner permit. Same error policy as ActiveRoleIDs.
 func (s *Service) boundRoleNames(ctx context.Context, userUUID, tenantID string) ([]string, error) {
 	bindings, err := s.repo.ListActiveBindingsForUser(ctx, userUUID, tenantID)
 	if err != nil {
@@ -70,7 +73,7 @@ func (s *Service) boundRoleNames(ctx context.Context, userUUID, tenantID string)
 			}
 			return nil, err
 		}
-		if !role.IsActive || (role.TenantID != "" && role.TenantID != tenantID) {
+		if !role.IsActive || role.TenantID != "" {
 			continue
 		}
 		if _, dup := seen[role.Name]; dup {

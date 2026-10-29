@@ -64,15 +64,40 @@ func TestShadowEvaluate_ThirdPartyUsesTheTargetsRoles(t *testing.T) {
 	}
 }
 
-func TestShadowEvaluate_ThirdPartyIgnoresBindingsOfOtherTenants(t *testing.T) {
+// Only catalog roles count: a tenant's custom role may carry a catalog name
+// (names are unique per tenant only) and must not fire that name's permit.
+func TestBoundRoleNames_CatalogRolesOnly(t *testing.T) {
 	svc, repo := newThirdPartySvc(t)
-	repo.seedRole("role-other", "custom_lead", false, []string{"people.self"}, "tenant-2")
-	repo.seedBinding("b-owner-2", "target", "tenant-2", "role-owner")
-	repo.seedBinding("b-other", "target", "tenant-1", "role-other") // role of another tenant
+	repo.seedRole("role-fake-owner", "org_owner", false, []string{"people.read"}, "tenant-1")
+	repo.seedBinding("b-fake", "target", "tenant-1", "role-fake-owner")
+	repo.seedBinding("b-owner-2", "target", "tenant-2", "role-owner") // another tenant
 
 	got, err := svc.boundRoleNames(callerCtx(), "target", "tenant-1")
 	if err != nil || len(got) != 0 {
 		t.Fatalf("roles = %v, %v; want none", got, err)
+	}
+	decision, ok := svc.shadowEvaluate(callerCtx(), "target", "tenant-1", "people.delete", false)
+	if !ok || decision.Allowed {
+		t.Fatalf("a custom role named org_owner fired the owner permit: ok=%v reasons=%v", ok, decision.Reasons)
+	}
+}
+
+// The request roles belong to the request tenant: a check about the caller
+// in another tenant takes the caller's bindings there, and keeps the session.
+func TestShadowEvaluate_CallerInAnotherTenantUsesBindings(t *testing.T) {
+	svc, repo := newThirdPartySvc(t)
+	repo.seedBinding("b-viewer", "caller", "tenant-2", "role-viewer")
+	looked := 0
+	svc.SetSessionRiskLookup(func(context.Context, string) (float64, error) {
+		looked++
+		return 0, nil
+	})
+	decision, ok := svc.shadowEvaluate(callerCtx(), "caller", "tenant-2", "people.self", false)
+	if !ok || decision.Allowed {
+		t.Fatalf("the request tenant's org_owner leaked into tenant-2: ok=%v reasons=%v", ok, decision.Reasons)
+	}
+	if looked != 1 {
+		t.Fatalf("a check about the caller keeps the session signals (risk lookups=%d)", looked)
 	}
 }
 

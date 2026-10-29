@@ -489,18 +489,23 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 	// second half of H-5 (the first half is system_actions.cedar's
 	// forbid, which only reaches keys whose module prefix is "system").
 	//
-	// The request's tenant roles and session signals (amr, MFA, risk, IP)
-	// describe the CALLER. A check about another user — a module asking
-	// whether the user it is about to link holds a key in this tenant —
-	// must not borrow them: that user's tenant roles come from their own
+	// The request's tenant roles describe the CALLER in the REQUEST tenant,
+	// and its session signals (amr, MFA, risk, IP) describe the caller's
+	// session. A check about another user — a module asking whether the
+	// user it is about to link holds a key in this tenant — must not
+	// borrow either: that user's tenant roles come from their own
 	// bindings, and the session attributes are left unset, since that user
-	// has no session in this request. A context without a caller (jobs,
+	// has no session in this request. A check about the caller in another
+	// tenant takes the bound roles too (the request roles are the request
+	// tenant's) but keeps the session. A context without a caller (jobs,
 	// tests) keeps the request-bound behaviour.
 	caller, _ := ctxauth.GetUserUUID(ctx)
 	aboutCaller := caller == "" || caller == userUUID
+	reqTenant, _ := ctxauth.GetTenantID(ctx)
+	requestRoles := caller == "" || (caller == userUUID && reqTenant == tenantID)
 	var tenantRoles []string
 	if tenantID != "" {
-		if aboutCaller {
+		if requestRoles {
 			tenantRoles, _ = ctxauth.GetTenantRoles(ctx)
 		} else {
 			names, err := s.boundRoleNames(ctx, userUUID, tenantID)
