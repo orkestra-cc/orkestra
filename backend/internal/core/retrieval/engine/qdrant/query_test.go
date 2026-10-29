@@ -390,7 +390,15 @@ func TestQuery_DropsOutOfScopeCandidates(t *testing.T) {
 				}
 				okJSON(w, `{"result":{"points":`+outOfScopeResult+`}}`)
 			})
-			d := mustNew(t, Config{URL: srv.URL, Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+			// Drop the time attribute: the leak check below is a substring
+			// match over the whole line, and nanoseconds can contain digits.
+			opts := &slog.HandlerOptions{ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				if len(groups) == 0 && a.Key == slog.TimeKey {
+					return slog.Attr{}
+				}
+				return a
+			}}
+			d := mustNew(t, Config{URL: srv.URL, Logger: slog.New(slog.NewJSONHandler(&logs, opts))})
 			q := baseQuery()
 			q.Diagnostics = diagnostics
 			got, err := d.Query(t.Context(), "c", q)
