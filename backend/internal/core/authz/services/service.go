@@ -488,9 +488,30 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 	// permit came to fire on a platform action. Spec §4.5 D24, the
 	// second half of H-5 (the first half is system_actions.cedar's
 	// forbid, which only reaches keys whose module prefix is "system").
+	//
+	// The request's tenant roles and session signals (amr, MFA, risk, IP)
+	// describe the CALLER. A check about another user — a module asking
+	// whether the user it is about to link holds a key in this tenant —
+	// must not borrow them: that user's tenant roles come from their own
+	// bindings, and the session attributes are left unset, since that user
+	// has no session in this request. A context without a caller (jobs,
+	// tests) keeps the request-bound behaviour.
+	caller, _ := ctxauth.GetUserUUID(ctx)
+	aboutCaller := caller == "" || caller == userUUID
 	var tenantRoles []string
 	if tenantID != "" {
-		tenantRoles, _ = ctxauth.GetTenantRoles(ctx)
+		if aboutCaller {
+			tenantRoles, _ = ctxauth.GetTenantRoles(ctx)
+		} else {
+			names, err := s.boundRoleNames(ctx, userUUID, tenantID)
+			if err != nil {
+				s.logger.Warn("cedar: target user roles unavailable",
+					slog.String("permission", permission),
+					slog.String("error", err.Error()))
+				return cedar.Decision{}, false
+			}
+			tenantRoles = names
+		}
 	}
 	tenantKind := ctxauth.TenantKindFromContext(ctx)
 	if tenantKind == "" {
@@ -518,16 +539,21 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 	// doesn't need to import auth/models. On routes without a resolved
 	// session (service-to-service, AI sidecar internal endpoints) both
 	// helpers return zero values and the engine stamps mfa_enrolled=false.
-	amr, _ := middleware.GetAMR(ctx)
-	mfaEnrolled := middleware.IsMFAEnrolled(ctx)
-	clientIP, _ := ctxauth.GetClientIP(ctx)
+	var amr []string
+	var mfaEnrolled bool
+	var clientIP string
+	if aboutCaller {
+		amr, _ = middleware.GetAMR(ctx)
+		mfaEnrolled = middleware.IsMFAEnrolled(ctx)
+		clientIP, _ = ctxauth.GetClientIP(ctx)
+	}
 	// Risk signals: pull the session's most recent score via the lookup
 	// callback (wired post-InitAll) and derive the level locally. Score
 	// is in [0.0, 1.0]; the engine multiplies by 100 when stamping the
 	// Long attribute. A lookup error degrades gracefully to zero risk.
 	var riskScore float64
 	var riskLevel string
-	if s.lookupSessionRisk != nil {
+	if s.lookupSessionRisk != nil && aboutCaller {
 		if sid, ok := middleware.GetSessionID(ctx); ok {
 			if score, err := s.lookupSessionRisk(ctx, sid); err == nil {
 				riskScore = score
