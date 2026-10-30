@@ -282,3 +282,32 @@ func readBounded(r io.Reader, max int) (body []byte, tooLarge bool, err error) {
 	}
 	return b, false, nil
 }
+
+// isTransientSendFailure reports whether err proves the message never reached
+// the provider's queue AND is expected to clear on its own — the contract of
+// iface.FailureTransient. Ambiguous outcomes stay non-transient on purpose: a
+// timeout, a broken read or an HTTP 500 can follow a request the provider
+// already accepted, and retrying those risks delivering the message twice.
+func isTransientSendFailure(err error) bool {
+	if errors.Is(err, ErrOptoutLookupUnavailable) || errors.Is(err, ErrUnsubscribeTokenUnavailable) || errors.Is(err, ErrSenderConfigUnavailable) {
+		return true
+	}
+	var se *SendError
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch {
+	case se.HTTP > 0:
+		switch se.HTTP {
+		case 429, 502, 503, 504:
+			return true
+		}
+		return false
+	case se.Code > 0:
+		// SMTP 4xx is the protocol's own "try again later".
+		return se.Code >= 400 && se.Code < 500
+	default:
+		// The connection was never established: nothing was written.
+		return se.Kind == "dial"
+	}
+}
