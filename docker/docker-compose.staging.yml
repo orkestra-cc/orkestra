@@ -85,6 +85,7 @@ services:
       # Refresh-cookie name — the only cookie set in the browser (the access
       # token lives in SPA memory, so there is no access-token cookie).
       COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
+      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-orkestra_did}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Set
       # OPERATOR_COOKIE_DOMAIN to console.<env>.orkestra.cc and
       # CLIENT_COOKIE_DOMAIN to api.<env>.orkestra.cc. An empty value mints
