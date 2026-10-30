@@ -478,8 +478,34 @@ check "retrieval logs of a seed carry its profile" "yes" \
 ret_run logs_cli retrieval backend; rc=$?
 check "retrieval logs refuse a service outside the catalog" "1/no" "$rc/$(has "$ret_log" ' logs ')"
 
+# retrieval bench runs the Go benchmark in the backend container (dev/staging)
+# against the overlay. The stubs are redefined inside the wrapper subshell
+# because ret_run's own retrieval_init_env would otherwise win.
+ret_bench() {
+    retrieval_project_active() { return 0; }
+    retrieval_bench "$@"
+}
+ret_bench_prod() {
+    retrieval_init_env() { ENV=production; ENV_FILE="$RET_ENV_FILE"; }
+    retrieval_project_active() { return 0; }
+    retrieval_bench "$@"
+}
+ret_bench_inactive() {
+    retrieval_project_active() { return 1; }
+    retrieval_bench "$@"
+}
+ret_run ret_bench_prod; rc=$?
+check "retrieval bench refuses production" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' exec ')" = no ] && printf yes || printf no)"
+ret_run ret_bench_inactive; rc=$?
+check "retrieval bench needs the overlay" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' exec ')" = no ] && grep -q 'retrieval up' "$ret_out" && printf yes || printf no)"
+ret_run ret_bench -k 5; rc=$?
+check "retrieval bench runs in the backend container" "0/yes" \
+    "$rc/$(has "$ret_log" 'compose .* -f .*docker-compose.retrieval.yml .* exec -T backend go run ./cmd/retrieval-bench -fixture internal/core/retrieval/bench/testdata/smoke-it-en.jsonl -k 5$')"
+
 rm -f "$ret_env_file" "$ret_log" "$ret_out" "$ret_env_log"
-unset -f ret_run ret_stack_files has
+unset -f ret_run ret_stack_files has ret_bench ret_bench_prod ret_bench_inactive
 
 
 # --- env-validate.sh: same-site host pairings (spec §8 follow-up #16) ---

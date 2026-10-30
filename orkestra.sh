@@ -2125,6 +2125,19 @@ retrieval_info() {
         ""
 }
 
+# Benchmark (ADR-0023 D14): runs backend/cmd/retrieval-bench inside the backend
+# container, which has the Go toolchain in development and staging and reaches
+# Qdrant and TEI on retrieval-net. Extra flags follow the default fixture, so
+# a later -fixture overrides it.
+retrieval_bench() {
+    retrieval_init_env
+    [ "$ENV" != "production" ] || die "The benchmark does not run in production (no Go toolchain in the image)."
+    retrieval_project_active || die "Start the overlay first: ./orkestra.sh retrieval up"
+    stack_compose_files
+    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" exec -T backend \
+        go run ./cmd/retrieval-bench -fixture internal/core/retrieval/bench/testdata/smoke-it-en.jsonl "$@"
+}
+
 # Logs through the merged stack and this project only. view_logs would parse
 # the overlay alone (invalid: partial backend) and fall back to a host-wide
 # label match, which on a shared host can read another stack's qdrant.
@@ -2507,6 +2520,7 @@ ${c_bold}RETRIEVAL${c_reset} ${c_muted}(Qdrant + TEI inference for the retrieval
   ${c_accent}retrieval down${c_reset}                    Remove containers (volumes kept), unwire the backend
   ${c_accent}retrieval status${c_reset}                  Containers + memory usage (sizing)
   ${c_accent}retrieval info${c_reset}                    Internal URLs, backend variables, opt-out, offline seeding
+  ${c_accent}retrieval bench${c_reset} [flags]           Benchmark keyword/dense/hybrid/rerank in the backend container (dev/staging)
   ${c_accent}retrieval logs${c_reset} <svc> [flags]      View logs for a retrieval service (seeds included)
 
 ${c_bold}LOG FLAGS${c_reset}
@@ -2654,6 +2668,7 @@ cli_dispatch() {
                     retrieval_init_env
                     retrieval_info
                     ;;
+                bench) retrieval_bench "$@" ;;
                 logs)
                     local service=${1:-}
                     [ -n "$service" ] && shift
@@ -2663,7 +2678,7 @@ cli_dispatch() {
                     logs_cli "retrieval" "$service" "$@"
                     ;;
                 "") die "Missing subcommand. Try --help." ;;
-                *) die "Unknown retrieval subcommand: $subcmd. Valid: up | down | status | info | logs" ;;
+                *) die "Unknown retrieval subcommand: $subcmd. Valid: up | down | status | info | bench | logs" ;;
             esac
             ;;
 

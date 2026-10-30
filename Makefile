@@ -10,7 +10,7 @@
 #   2. CI parity (further down) — single source of truth for "what is a
 #      passing build." Both `make ci` and GitHub Actions invoke these.
 
-.PHONY: help up down status logs
+.PHONY: help up down status logs retrieval-bench
 .PHONY: mongo-shell redis-cli
 .PHONY: backend-build backend-test backend-deps backend-clean
 .PHONY: frontend-admin-build frontend-admin-test frontend-admin-deps
@@ -44,6 +44,9 @@ help:
 	@echo "  make frontend-admin-*    - build / test / preview / type-check / deps / clean"
 	@echo "  make frontend-client-*   - build / typecheck / clean"
 	@echo ""
+	@echo "Retrieval benchmark (needs ./orkestra.sh retrieval up on dev/staging):"
+	@echo "  make retrieval-bench     - Benchmark keyword/dense/hybrid/rerank (RETRIEVAL_BENCH_ARGS=\"-k 5\")"
+	@echo ""
 	@echo "Database shells (require infra running):"
 	@echo "  make mongo-shell         - mongosh into orkestra-mongodb"
 	@echo "  make redis-cli           - redis-cli into orkestra-redis"
@@ -74,6 +77,13 @@ logs:
 	  exit 1; \
 	fi
 	@./orkestra.sh logs $(SVC) -f
+
+# Retrieval benchmark (ADR-0023 D14). Needs the retrieval overlay
+# (./orkestra.sh retrieval up) on a development or staging stack; it runs
+# inside the backend container. Pass flags with RETRIEVAL_BENCH_ARGS, e.g.
+# RETRIEVAL_BENCH_ARGS="-json /tmp/retrieval-bench.json".
+retrieval-bench:
+	@./orkestra.sh retrieval bench $(RETRIEVAL_BENCH_ARGS)
 
 # Database access (requires infra running) -------------------------------
 
