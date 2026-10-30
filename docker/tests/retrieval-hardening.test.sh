@@ -27,6 +27,7 @@ EOT
 dc() { env -u QDRANT_URL -u QDRANT_API_KEY -u QDRANT_COLLECTION_PREFIX \
   -u RETRIEVAL_INFERENCE_ENDPOINTS -u RETRIEVAL_INFERENCE_API_KEY \
   -u QDRANT_MEM_LIMIT -u TEI_EMBED_MEM_LIMIT -u TEI_RERANK_MEM_LIMIT \
+  -u RETRIEVAL_SEED_TIMEOUT \
   docker compose "$@"; }
 
 serving="tei-embed tei-rerank"
@@ -61,6 +62,15 @@ for app in docker-compose.dev.yml docker-compose.staging.yml docker-compose.prod
     [ "$(s "$svc" '.labels["orkestra.stack"]')" = "orkestra-development" ] || bad "$app $svc lacks the orkestra.stack label"
     [ -n "$(s "$svc" .mem_limit)" ] || bad "$app $svc has no mem_limit"
     [ "$(s "$svc" .container_name)" != "" ] || bad "$app $svc has no container_name"
+  done
+
+  # Health windows: the seeds' start_period is RETRIEVAL_SEED_TIMEOUT (default
+  # 1800 s, the default `up --wait` bound of orkestra.sh); serving stays 300 s.
+  for svc in $seeds; do
+    [ "$(s "$svc" .healthcheck.start_period)" = "30m0s" ] || bad "$app $svc start_period = '$(s "$svc" .healthcheck.start_period)' (want 30m0s)"
+  done
+  for svc in $serving; do
+    [ "$(s "$svc" .healthcheck.start_period)" = "5m0s" ] || bad "$app $svc start_period = '$(s "$svc" .healthcheck.start_period)' (want 5m0s)"
   done
 
   # Networks: engine and inference on retrieval-net only; seeds on egress only.
@@ -149,6 +159,24 @@ for f in docker-compose.dev.yml docker-compose.staging.yml docker-compose.prod.y
   [ "$(jq -r '.RETRIEVAL_INFERENCE_ENDPOINTS' <<<"$b")" = "[]" ] || bad "$f does not pass RETRIEVAL_INFERENCE_ENDPOINTS from .env"
 done
 rm -f "$ext_env"
+
+# RETRIEVAL_SEED_TIMEOUT widens the seeds' health window together with the
+# orkestra.sh wait, from docker/.env or from the shell (which wins, as in
+# orkestra.sh); the serving containers keep theirs.
+seed_windows() {
+  jq -r '[.services["tei-embed-seed","tei-rerank-seed","tei-embed","tei-rerank"].healthcheck.start_period]|join(" ")'
+}
+timeout_env=$(mktemp)
+{ cat "$env_file"; echo "RETRIEVAL_SEED_TIMEOUT=3600"; } > "$timeout_env"
+got=$(dc --env-file "$timeout_env" -f docker-compose.infra.yml -f docker-compose.dev.yml -f docker-compose.retrieval.yml \
+  --profile retrieval-seed config --format json 2>/dev/null | seed_windows)
+[ "$got" = "1h0m0s 1h0m0s 5m0s 5m0s" ] || bad "RETRIEVAL_SEED_TIMEOUT=3600 in .env renders start_period '$got'"
+got=$(env -u QDRANT_URL -u QDRANT_API_KEY -u QDRANT_COLLECTION_PREFIX -u RETRIEVAL_INFERENCE_ENDPOINTS \
+  -u RETRIEVAL_INFERENCE_API_KEY RETRIEVAL_SEED_TIMEOUT=5400 \
+  docker compose --env-file "$timeout_env" -f docker-compose.infra.yml -f docker-compose.dev.yml -f docker-compose.retrieval.yml \
+  --profile retrieval-seed config --format json 2>/dev/null | seed_windows)
+[ "$got" = "1h30m0s 1h30m0s 5m0s 5m0s" ] || bad "shell RETRIEVAL_SEED_TIMEOUT=5400 renders start_period '$got'"
+rm -f "$timeout_env"
 
 # Fail-closed: the overlay refuses to render without either key.
 for key in QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY; do

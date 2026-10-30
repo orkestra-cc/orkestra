@@ -1629,6 +1629,8 @@ stack_compose_files() {
         esac
         shift 2
     done
+    # In auto mode retrieval_project_active does this itself.
+    [ "$ret" != yes ] || retrieval_export_seed_timeout
     STACK_COMPOSE_FILES=(-f "$INFRA_COMPOSE" -f "$COMPOSE_FILE")
     if [ "$obs" = yes ] || { [ "$obs" = auto ] && observability_project_active; }; then
         STACK_COMPOSE_FILES+=(-f "$OBSERVABILITY_COMPOSE")
@@ -1905,11 +1907,29 @@ retrieval_setting() {
     printf '%s' "$line"
 }
 
+# The overlay renders RETRIEVAL_SEED_TIMEOUT into the seeds' healthcheck
+# start_period, and retrieval_seed uses it as the `up --wait` bound: both must
+# see the same value. Resolve it once (shell, then the active .env line,
+# default 1800), validate it and export it, so Compose gets exactly what this
+# script resolved. Runs before every Compose call that includes the overlay:
+# an invalid value would make that render fail, and a failed render reads as
+# "retrieval inactive" to a deploy, which would silently unwire the backend.
+retrieval_export_seed_timeout() {
+    local timeout
+    timeout=$(retrieval_setting RETRIEVAL_SEED_TIMEOUT)
+    : "${timeout:=1800}"
+    if ! [[ "$timeout" =~ ^[1-9][0-9]*$ ]]; then
+        die "RETRIEVAL_SEED_TIMEOUT must be a whole number of seconds (it sizes the seed healthcheck); nothing was changed."
+    fi
+    export RETRIEVAL_SEED_TIMEOUT="$timeout"
+}
+
 # Validate the explicit ownership lists against the merged infra + app +
 # retrieval graph, seeds included. The overlay refuses to render without its
 # two keys (${…:?}), so this is also where a missing key stops every action.
 retrieval_list_services() {
     local services volumes expected key missing=""
+    retrieval_export_seed_timeout
     if ! services=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
         --env-file "$ENV_FILE" --profile retrieval-seed config --services); then
         for key in QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY; do
@@ -1939,6 +1959,7 @@ retrieval_list_services() {
 # (keys emptied): the backend then deploys without it.
 retrieval_project_active() {
     local container_ids
+    retrieval_export_seed_timeout
     container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
         --env-file "$ENV_FILE" ps -a -q "${RET_SERVICES[@]}" 2> /dev/null) || return 1
     [ -n "$container_ids" ]
@@ -1957,11 +1978,8 @@ retrieval_seed() {
         p_warn "RETRIEVAL_SKIP_SEED=true — no download; the ${COMPOSE_PROJECT_NAME}_tei-weights volume must already hold the weights."
         return 0
     fi
-    timeout=$(retrieval_setting RETRIEVAL_SEED_TIMEOUT)
-    : "${timeout:=1800}"
-    if ! [[ "$timeout" =~ ^[1-9][0-9]*$ ]]; then
-        die "RETRIEVAL_SEED_TIMEOUT must be a whole number of seconds; nothing was started."
-    fi
+    retrieval_export_seed_timeout
+    timeout=$RETRIEVAL_SEED_TIMEOUT
 
     p_step "Seeding the model weights (first run downloads ~4.5 GB; waits up to ${timeout}s)"
     saved_int=$(trap -p INT)

@@ -234,7 +234,8 @@ unset RETRIEVAL_SKIP_SEED RETRIEVAL_SEED_TIMEOUT QDRANT_API_KEY RETRIEVAL_INFERE
 ret_env_file="$(mktemp)"
 ret_log="$(mktemp)"
 ret_out="$(mktemp)"
-export RET_ENV_FILE="$ret_env_file" RET_LOG="$ret_log"
+ret_env_log="$(mktemp)"
+export RET_ENV_FILE="$ret_env_file" RET_LOG="$ret_log" RET_ENV_LOG="$ret_env_log"
 printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
 
 # ret_run <cmd...> — runs cmd in a subshell against a stubbed Docker that logs
@@ -242,6 +243,7 @@ printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFEREN
 # Output goes to $ret_out; returns the subshell's status.
 ret_run() {
     : > "$RET_LOG"
+    : > "$RET_ENV_LOG"
     (
         check_docker_running() { :; }
         retrieval_check_file() { :; }
@@ -263,6 +265,8 @@ ret_run() {
         docker() {
             local IFS=' '
             printf '%s\n' "$*" >> "$RET_LOG"
+            # What Compose would interpolate: the exported value only.
+            printenv RETRIEVAL_SEED_TIMEOUT >> "$RET_ENV_LOG" || echo unset >> "$RET_ENV_LOG"
             if [ -n "${RET_FAIL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$RET_FAIL"; then
                 return 1
             fi
@@ -323,7 +327,8 @@ ret_serve_line="$(grep -nE 'compose .* up -d --wait .* qdrant tei-embed tei-rera
 check "retrieval up succeeds" "0" "$rc"
 check "retrieval up seeds before serving" "yes" \
     "$([ -n "$ret_seed_line" ] && [ -n "$ret_serve_line" ] && [ "$ret_seed_line" -lt "$ret_serve_line" ] && printf yes || printf no)"
-check "retrieval up waits with the default seed timeout" "yes" "$(has "$ret_log" 'up -d --wait --wait-timeout 1800 tei-embed-seed tei-rerank-seed$')"
+check "retrieval up waits with the default seed timeout, exported to Compose" "yes/1800" \
+    "$(has "$ret_log" 'up -d --wait --wait-timeout 1800 tei-embed-seed tei-rerank-seed$')/$(sort -u "$ret_env_log" | tr '\n' ' ' | sed 's/ $//')"
 check "retrieval up removes the seed containers" "yes" "$(has "$ret_log" 'compose .* --profile retrieval-seed rm -sf tei-embed-seed tei-rerank-seed$')"
 check "retrieval up applies its backend override" "yes" "$(has "$ret_log" 'compose .* -f .*docker-compose.retrieval.yml .* up -d --no-deps backend$')"
 check "retrieval up and info print no key value" "no/no" \
@@ -342,8 +347,19 @@ printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFEREN
 ret_run retrieval_up
 check "a commented RETRIEVAL_SKIP_SEED is ignored" "yes" "$(has "$ret_log" ' up .*tei-embed-seed')"
 check "RETRIEVAL_SEED_TIMEOUT from docker/.env bounds the seed wait" "yes" "$(has "$ret_log" 'up -d --wait --wait-timeout 60 tei-embed-seed tei-rerank-seed$')"
+# The overlay renders the same variable into the seeds' healthcheck
+# start_period, so every Compose call must see the value resolved here.
+check "every Compose call sees the .env seed timeout exported" "60" "$(sort -u "$ret_env_log" | tr '\n' ' ' | sed 's/ $//')"
+RETRIEVAL_SEED_TIMEOUT=120 ret_run retrieval_up
+check "the shell seed timeout wins and is what Compose sees" "yes/120" \
+    "$(has "$ret_log" 'up -d --wait --wait-timeout 120 tei-embed-seed tei-rerank-seed$')/$(sort -u "$ret_env_log" | tr '\n' ' ' | sed 's/ $//')"
 RETRIEVAL_SEED_TIMEOUT=soon ret_run retrieval_up; rc=$?
-check "an invalid RETRIEVAL_SEED_TIMEOUT is refused before seeding" "1/no" "$rc/$(has "$ret_log" ' up ')"
+check "an invalid RETRIEVAL_SEED_TIMEOUT is refused before any Compose call" "1/0/yes" \
+    "$rc/$(wc -l < "$ret_log" | tr -d ' ')/$(has "$ret_out" 'RETRIEVAL_SEED_TIMEOUT must be a whole number')"
+# A deploy probes the overlay through stack_compose_files: an invalid value
+# must stop it rather than fail the render and silently unwire the backend.
+RETRIEVAL_SEED_TIMEOUT=soon ret_run stack_compose_files; rc=$?
+check "an invalid seed timeout stops the overlay probe a deploy uses" "1/no" "$rc/$(has "$ret_log" 'docker-compose.retrieval.yml')"
 printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
 
 RET_FAIL='up -d --wait .* tei-embed-seed' ret_run retrieval_up; rc=$?
@@ -389,6 +405,7 @@ check "retrieval status prints no key value" "no" "$(has "$ret_out" '(qdrant|inf
 # or --with names it, unless --without names it.
 ret_stack_files() {
     (
+        ENV_FILE=/x/.env
         INFRA_COMPOSE=/x/docker-compose.infra.yml
         COMPOSE_FILE=/x/docker-compose.dev.yml
         OBSERVABILITY_COMPOSE=/x/docker-compose.observability.yml
@@ -461,7 +478,7 @@ check "retrieval logs of a seed carry its profile" "yes" \
 ret_run logs_cli retrieval backend; rc=$?
 check "retrieval logs refuse a service outside the catalog" "1/no" "$rc/$(has "$ret_log" ' logs ')"
 
-rm -f "$ret_env_file" "$ret_log" "$ret_out"
+rm -f "$ret_env_file" "$ret_log" "$ret_out" "$ret_env_log"
 unset -f ret_run ret_stack_files has
 
 

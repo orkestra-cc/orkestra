@@ -60,14 +60,16 @@ x-tei-common: &tei-common
     start_period: 300s
 
 # YAML merge is shallow, so the seeds restate the whole healthcheck. A cold
-# download is up to ~4.5 GB, hence the long start_period (RETRIEVAL_SEED_TIMEOUT
-# defaults to the same 1800 s).
+# download is up to ~4.5 GB, hence the long start_period. It is the same
+# RETRIEVAL_SEED_TIMEOUT (seconds, default 1800) that bounds orkestra.sh's
+# `up --wait`: a seed must not turn unhealthy while the wait still allows a
+# slow link to finish, so raising the timeout widens both together.
 x-tei-seed-healthcheck: &tei-seed-healthcheck
   test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/health"]
   interval: 15s
   timeout: 5s
   retries: 5
-  start_period: 1800s
+  start_period: ${RETRIEVAL_SEED_TIMEOUT:-1800}s
 
 # --payload-limit: the contract allows 32 inputs of 64 KiB per batch and JSON
 # escaping can expand them up to 6x; the TEI default (2 MB) would answer 413.
