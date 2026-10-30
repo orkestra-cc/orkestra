@@ -20,27 +20,31 @@ Each per-tier provider also implements the additive `iface.InitialPasswordSetter
 
 ## Routes
 
-| Surface | Paths | Gate |
-|---|---|---|
-| Operator user admin | `/v1/users`, `/v1/users/count`, `/v1/users/by-email`, `/v1/users/role/...` | `system.users.admin` |
-| Tier-2 client user admin | `/v1/admin/client-users` and below — list, create, invite, resend, password reset, update, soft-delete | `system.users.admin` |
-| Self-service avatar | `/v1/me/avatar/presign-upload`, `/v1/me/avatar/commit`, `/v1/me/avatar/source` | `user.avatar.self`, on **both** tiers |
+Every admin route is gated by one per-action `user.*` key, evaluated at **global scope** (`RequireSystemPermission`: users are platform rows, so a tenant membership never counts, and no `X-Tenant-ID` is needed). The same keys gate both tiers — a user admin is a user admin whichever collection the row lives in.
 
-**Hard mutations sit behind a step-up.** Updating or deleting a user (operator or client tier) requires an MFA proof fresher than 5 minutes, so a long-lived admin session cannot destructively mutate platform state hours after the last verification. Reads and soft mutations — create, invite, resend, send-password-reset — stay on the plain permission gate.
+| Gate | Operator tier | Tier-2 client admin (`/v1/admin/client-users…`) | Step-up |
+|---|---|---|---|
+| `user.read` | every `GET` under `/v1/users` | list, get | — |
+| `user.create` | `POST /v1/users` | create, invite, `invite/resend`, `resend-verification` | — |
+| `user.update` | `PUT /v1/users/{id}` | `PATCH …/{id}` | **5 min** |
+| `user.update` | — | `send-password-reset` (mails an expiring link to an existing user; nothing changes until redeemed) | — |
+| `user.delete` | `DELETE /v1/users/{id}` | `DELETE …/{id}` | **5 min** |
+| `user.avatar.self` | `/v1/me/avatar/presign-upload`, `/v1/me/avatar/commit`, `/v1/me/avatar/source` — on **both** tiers | | — |
+
+**Who holds what.** At global scope a platform role conveys its seeded permission set ([authz rule 2b](/modules/core/authz#how-a-decision-is-made)): `super_admin` and `administrator` everything; `manager` read, create and update — so a manager runs the operators without being a platform administrator; `operator` and `guest` read only. `system.users.admin` is no longer a gate on this surface. If your deployment enforces Cedar for `system.users.admin` (`CEDAR_ENFORCE_ACTIONS`), list `user.read`, `user.create`, `user.update` and `user.delete` instead: the same restrictions follow them — no user management from a public IP in production, and a second factor for the roles that can write users.
+
+**Hard mutations sit behind a step-up.** Updating or deleting a user (operator or client tier) requires an MFA proof fresher than 5 minutes, so a long-lived admin session cannot destructively mutate platform state hours after the last verification. Reads, creates and the mail triggers stay on the plain permission gate.
 
 ## Permissions
 
 | Key | Grants |
 |---|---|
-| `user.read` | List users |
-| `user.update` | Update user profiles |
+| `user.read` | List and read users |
+| `user.create` | Create and invite users |
+| `user.update` | Update user profiles, roles and status; send a password reset |
 | `user.delete` | Delete users |
-| `user.self` | Edit your own profile |
+| `user.self` | Edit your own profile (reserved; no route today) |
 | `user.avatar.self` | Manage your own avatar |
-
-:::note A known wrinkle
-The admin HTTP routes are currently gated on **`system.users.admin`** (contributed by authz), not on the `user.*` keys above. So `user.read` / `update` / `delete` are granted to managers and operators through the system-role matrix but are not yet the enforcing gate on those endpoints. Only the avatar routes are wired to their own key. Moving the remaining routes to per-route `RequirePermission` is open work.
-:::
 
 ## Guards worth knowing
 
@@ -48,6 +52,7 @@ These refuse the request rather than trusting the caller, and each returns a dis
 
 - **Last administrator** — no delete, deactivation, or role demotion may leave zero live, active platform administrators (`user.last_admin_forbidden`). The quorum check counts active `super_admin` + `administrator` rows and is best-effort under concurrent edits. It is **operator-only**: a Tier-2 client user is never a platform administrator, so the quorum is not mirrored onto that tier.
 - **Self-delete** — an admin cannot delete their own account (`user.self_delete_forbidden`).
+- **Target tier** — nobody may update or delete a user whose *current* role sits above their own (`user.target_tier_forbidden`): a manager holding `user.update` still cannot rename, re-email, deactivate or delete an administrator. Equal tier passes. It runs on every update and delete on both tiers, profile-only patches included, so it costs one read of the target's row; when that row cannot be read the request is refused (`500 user.role_lookup_unavailable`) rather than written blind.
 - **Role escalation** — no one may assign a role above their own tier (`user.role_escalation_forbidden`). An administrator can assign administrator but never super_admin. It covers five endpoints: the operator create and update, and the client-user create, invite and patch. The caller's tier is read from the **database**, not from the token — reading the claim would let a demoted administrator keep minting administrators until their last token expired. A caller with no authenticated identity fails closed with a refusal; a caller whose row is absent or unreadable fails closed with `500 user.role_lookup_unavailable`, never a fallback to the claim.
 - **Revoking access ends sessions.** Deactivating, soft-deleting, **or changing a user's system role** calls `iface.SessionTerminator` — refresh tokens revoked, session docs flipped, every `sid` pushed into the Redis revocation set. Before this existed a "disabled" account kept working for the full refresh-token lifetime. On the deactivate and delete paths the call is deliberately best-effort and silent: the state change is already persisted, and failing the operator's request would report a deactivation that did in fact happen.
 - **A role change propagates.** Changing a system role also retires that user's cached permission verdicts, so the next decision uses the new role rather than one held for the cache's TTL. Neither the cache retirement nor the session termination can *refuse* the change — refusing a demotion would leave the old role in force indefinitely instead of for a minute — so what did not happen is recorded in the audit row (`cache_invalidated`, `sessions_terminated`) instead. The equivalent client-tier patch needs no cache retirement (a client user's role never enters permission evaluation) and marks that fact explicitly rather than leaving it implied.

@@ -277,7 +277,23 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 	actorUUID, actorEmail := actorFromCtx(ctx)
 	// Pre-change snapshot for lifecycle audit delta computation. Read
 	// failure is non-fatal; the patch flow surfaces its own 404 below.
-	previous, _ := h.clientUserService.GetUser(ctx, req.ID)
+	previous, previousErr := h.clientUserService.GetUser(ctx, req.ID)
+
+	// Target-tier guard on every patch (see guardTargetTier): the caller
+	// is an operator, the target a client user, and the same tier ladder
+	// applies to both enums. Fails closed on an unreadable target row —
+	// the second divergence described below used to let a lost pre-read
+	// through; the guard cannot run without the target's role, so it no
+	// longer does. The caller's resolved role feeds the role-escalation
+	// guard below.
+	attempted := "profile_update"
+	if req.Body.Role != "" {
+		attempted = "role_assignment"
+	}
+	callerRole, err := guardTargetTier(ctx, h, previous, previousErr, "client_user", "user.update.refused", req.ID, attempted, req.Body.Role)
+	if err != nil {
+		return nil, err
+	}
 
 	// D29 / M-17. Role guards, mirroring the operator-tier PATCH. This
 	// endpoint ran none at all, and its body accepts the whole platform
@@ -294,25 +310,12 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 	//     the platform without one; running the quorum here would refuse
 	//     legitimate demotions for a condition that cannot arise.
 	//
-	//  2. The target pre-read above stays `previous, _ :=`. The operator
-	//     PATCH refuses a role change whose pre-read failed with anything
-	//     other than ErrUserNotFound (500 user.role_lookup_unavailable),
-	//     because there a lost `previous` means the authz cache is not
-	//     retired and the old role's sessions are not ended. Neither
-	//     cascade exists on this tier, so that rationale does not carry.
-	//     The cost of not porting it is real but smaller and PRE-DATES
-	//     this change: a transient read failure lets the role change land
-	//     and then skips the `user.role.changed` audit row, which is
-	//     gated on `previous != nil` — the write happens, the SOC2 trail
-	//     misses it. Refusing the request is the wrong cure (it would
-	//     recreate M-13's shape); emitting the row with an unknown `from`
-	//     is the right one, and is on the follow-up list rather than in
-	//     this commit.
+	//  2. (Retired.) The target pre-read used to stay `previous, _ :=`
+	//     because no cache/session cascade exists on this tier. The
+	//     target-tier guard above now needs the target's current role on
+	//     every patch, so an unreadable pre-read refuses the request
+	//     (500 user.role_lookup_unavailable, audited) here too.
 	if req.Body.Role != "" {
-		callerRole, err := h.callerRole(ctx)
-		if err != nil {
-			return nil, err
-		}
 		// The target's current role, for the refusal metadata. Empty when
 		// the pre-read found nothing — the request then falls through to
 		// UpdateUser's clean 404.
@@ -372,10 +375,12 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 		Role:     req.Body.Role,
 		IsActive: req.Body.IsActive,
 	}
-	if _, err := h.clientUserService.UpdateUser(ctx, req.ID, input); err != nil {
+	if _, err := h.clientUserService.UpdateUser(expectTargetRole(ctx, previous), req.ID, input); err != nil {
 		switch {
 		case errors.Is(err, services.ErrUserNotFound):
 			return nil, huma.Error404NotFound("Client user not found", err)
+		case errors.Is(err, services.ErrTargetRoleChanged):
+			return nil, targetChangedError()
 		case errors.Is(err, services.ErrEmailNotUnique):
 			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case errors.Is(err, services.ErrInvalidInput):
@@ -512,9 +517,18 @@ type DeleteClientUserAdminResponse struct {
 // operator-tier soft deletes which preserve the email for audit.
 func (h *AdminClientUserHandler) DeleteClientUserAdmin(ctx context.Context, req *DeleteClientUserAdminRequest) (*DeleteClientUserAdminResponse, error) {
 	actorUUID, actorEmail := actorFromCtx(ctx)
-	if err := h.clientUserService.SoftDeleteAndAliasEmail(ctx, req.ID); err != nil {
+	// Target-tier guard: a caller never deletes a client user whose
+	// current role is above their own (see guardTargetTier).
+	previous, previousErr := h.clientUserService.GetUser(ctx, req.ID)
+	if _, err := guardTargetTier(ctx, h, previous, previousErr, "client_user", "user.delete.refused", req.ID, "delete", ""); err != nil {
+		return nil, err
+	}
+	if err := h.clientUserService.SoftDeleteAndAliasEmail(expectTargetRole(ctx, previous), req.ID); err != nil {
 		if errors.Is(err, services.ErrInvalidInput) {
 			return nil, huma.Error400BadRequest("Invalid user id", err)
+		}
+		if errors.Is(err, services.ErrTargetRoleChanged) {
+			return nil, targetChangedError()
 		}
 		return nil, huma.Error500InternalServerError("Failed to delete client user", err)
 	}

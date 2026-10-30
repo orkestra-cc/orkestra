@@ -860,3 +860,127 @@ func TestSystemActions_NonSystemActionsUnaffected(t *testing.T) {
 		t.Errorf("expected the org_owner permit among the reasons, got %v", d.Reasons)
 	}
 }
+
+// --- platform roles at global scope (evaluator rule 2b) -----------------
+
+// A platform manager holds read/create/update on the user keys when no
+// tenant is in scope, never delete, never a system.* action; inside a
+// tenant the system role conveys nothing (tenant_roles decide).
+func TestPlatformManagerGlobalScope(t *testing.T) {
+	e := newTestEngine(t, "production")
+	p := Principal{UserUUID: "u1", SystemRole: "manager", MFAEnrolled: true}
+	global := Resource{}
+	tenant := Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"}
+
+	for _, action := range []string{"user.read", "user.create", "user.update", "billing.invoice.create"} {
+		if d := e.IsAuthorized(p, action, global); !d.Allowed {
+			t.Errorf("manager at global scope should be allowed %s: %+v", action, d)
+		}
+		if d := e.IsAuthorized(p, action, tenant); d.Allowed {
+			t.Errorf("manager inside a tenant must NOT be allowed %s from the system role: %+v", action, d)
+		}
+	}
+	for _, action := range []string{"user.delete", "system.users.admin", "system.modules.admin", "billing.invoice.delete"} {
+		if d := e.IsAuthorized(p, action, global); d.Allowed {
+			t.Errorf("manager at global scope must NOT be allowed %s: %+v", action, d)
+		}
+	}
+}
+
+func TestPlatformOperatorAndGuestGlobalScope(t *testing.T) {
+	e := newTestEngine(t, "production")
+	global := Resource{}
+
+	op := Principal{UserUUID: "u1", SystemRole: "operator"}
+	for _, action := range []string{"user.read", "user.self", "user.avatar.self"} {
+		if d := e.IsAuthorized(op, action, global); !d.Allowed {
+			t.Errorf("operator at global scope should be allowed %s: %+v", action, d)
+		}
+	}
+	for _, action := range []string{"user.create", "user.update", "user.delete", "system.users.admin"} {
+		if d := e.IsAuthorized(op, action, global); d.Allowed {
+			t.Errorf("operator at global scope must NOT be allowed %s: %+v", action, d)
+		}
+	}
+
+	guest := Principal{UserUUID: "u2", SystemRole: "guest"}
+	if d := e.IsAuthorized(guest, "user.read", global); !d.Allowed {
+		t.Errorf("guest at global scope should read users: %+v", d)
+	}
+	for _, action := range []string{"user.self", "user.create", "user.update", "user.delete"} {
+		if d := e.IsAuthorized(guest, action, global); d.Allowed {
+			t.Errorf("guest at global scope must NOT be allowed %s: %+v", action, d)
+		}
+	}
+}
+
+// The explicit user.* permits agree with the matrix for every platform role.
+func TestUserKeysPerPlatformRole(t *testing.T) {
+	e := newTestEngine(t, "production")
+	global := Resource{}
+	want := map[string]map[string]bool{
+		"super_admin":   {"user.read": true, "user.create": true, "user.update": true, "user.delete": true},
+		"administrator": {"user.read": true, "user.create": true, "user.update": true, "user.delete": true},
+		"manager":       {"user.read": true, "user.create": true, "user.update": true, "user.delete": false},
+		"operator":      {"user.read": true, "user.create": false, "user.update": false, "user.delete": false},
+		"guest":         {"user.read": true, "user.create": false, "user.update": false, "user.delete": false},
+	}
+	for role, actions := range want {
+		p := Principal{UserUUID: "u-" + role, SystemRole: role, MFAEnrolled: true}
+		for action, allowed := range actions {
+			if d := e.IsAuthorized(p, action, global); d.Allowed != allowed {
+				t.Errorf("%s / %s at global scope = %v, want %v: %+v", role, action, d.Allowed, allowed, d)
+			}
+		}
+	}
+}
+
+// --- user-admin keys keep the system.users.admin restrictions ----------
+
+// The user.* keys replaced system.users.admin on the user routes; a
+// deployment enforcing them must keep the MFA and public-IP forbids that
+// gate had.
+func TestABACUserAdminRequiresMFA(t *testing.T) {
+	e := newTestEngine(t, "development")
+	global := Resource{}
+	for _, role := range []string{"super_admin", "administrator", "manager"} {
+		for _, act := range []string{"user.read", "user.create", "user.update", "user.delete"} {
+			d := e.IsAuthorized(Principal{UserUUID: "u", SystemRole: role, MFAEnrolled: false}, act, global)
+			if d.Allowed || !decidedBy(d, "abac.require_mfa_for_user_admin") {
+				t.Errorf("%s without MFA on %s: want the MFA forbid, got %+v", role, act, d)
+			}
+		}
+	}
+	d := e.IsAuthorized(Principal{UserUUID: "u", SystemRole: "manager", MFAEnrolled: true, AMR: []string{"pwd", "otp"}}, "user.update", global)
+	if !d.Allowed {
+		t.Fatalf("manager with MFA must keep user.update at global scope: %+v", d)
+	}
+	d = e.IsAuthorized(Principal{UserUUID: "u", SystemRole: "operator", MFAEnrolled: false}, "user.read", global)
+	if decidedBy(d, "abac.require_mfa_for_user_admin") {
+		t.Errorf("a read-only role must not trip the user-admin MFA forbid: %v", d.Reasons)
+	}
+}
+
+func TestABACUserAdminFromPublicIPInProd(t *testing.T) {
+	e := newTestEngine(t, "production")
+	for _, act := range []string{"user.read", "user.create", "user.update", "user.delete"} {
+		d := e.Evaluate(Request{
+			Principal: Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true},
+			Action:    act,
+			Resource:  Resource{},
+			ClientIP:  "8.8.8.8",
+		})
+		if d.Allowed || !decidedBy(d, "abac.deny_user_admin_from_public_ip_in_prod") {
+			t.Errorf("public-IP %s in prod: want the IP forbid, got %+v", act, d)
+		}
+	}
+	d := newTestEngine(t, "development").Evaluate(Request{
+		Principal: Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true},
+		Action:    "user.update",
+		Resource:  Resource{},
+		ClientIP:  "8.8.8.8",
+	})
+	if !d.Allowed {
+		t.Fatalf("outside production the IP forbid is inert: %+v", d)
+	}
+}

@@ -321,77 +321,36 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 	// fatal: see the guard below.
 	previous, previousErr := h.userService.GetUser(ctx, req.ID)
 
+	// Target-tier guard, on EVERY patch (profile-only ones included: a
+	// manager must not rename or re-email an administrator either). It
+	// fails closed when the target's row could not be read — `previous`
+	// is also what decides whether the role actually CHANGED, and only a
+	// change retires the authz cache and ends the sessions minted under
+	// the old role (see emitUpdateLifecycleEvents); a read failure that
+	// still let the write through would apply the new role while skipping
+	// both (M-13). "No such user" is deliberately NOT that case: nothing
+	// will be written, and the request falls through to UpdateUser's
+	// clean 404. The caller's resolved role is reused by the
+	// role-escalation guard below.
+	attempted := "profile_update"
+	if req.Body.Role != "" {
+		attempted = "role_assignment"
+	}
+	callerRole, err := guardTargetTier(ctx, h, previous, previousErr, "user", "user.update.refused", req.ID, attempted, req.Body.Role)
+	if err != nil {
+		return nil, err
+	}
+
 	// Role-escalation guard. Order matters: this fires *before* the
 	// last-admin check so a denied promotion to super_admin doesn't
 	// also report a misleading quorum failure.
 	if req.Body.Role != "" {
-		// Fail closed when the target's current role is unreadable.
-		// `previous` is what decides whether the role actually CHANGED,
-		// and only a change retires the authz cache and ends the
-		// sessions minted under the old role (see
-		// emitUpdateLifecycleEvents). A transient read failure that
-		// still let the write through would therefore apply the new
-		// role while silently skipping both — leaving the old role's
-		// cached verdicts and access tokens live, which is the hole
-		// this PR closes (M-13). Refuse rather than write blind.
-		//
-		// "No such user" is deliberately NOT that case: nothing will be
-		// written, so no effect can be lost, and the request falls
-		// through to UpdateUser's clean 404.
-		if previousErr != nil && !errors.Is(previousErr, services.ErrUserNotFound) {
-			slog.ErrorContext(ctx, "user: refusing a role change, the target's current role could not be read",
-				slog.String("user_uuid", req.ID),
-				slog.String("error", previousErr.Error()))
-			// Audited like every other refusal on this path. The two
-			// fail-closed 500s here are adjacent and indistinguishable
-			// from outside, so one of them auditing and the other not
-			// would leave a SOC2 trail that shows only half of them —
-			// and the half it hides is the one that refuses over the
-			// TARGET's row. `from` is "unknown", not "", because the
-			// previous role is precisely what could not be read.
-			h.emitAudit(ctx, iface.AuditEvent{
-				ActorUserID:  actorUUID,
-				ActorEmail:   actorEmail,
-				ActorType:    "user",
-				Action:       "user.update.refused",
-				ResourceType: "user",
-				ResourceID:   req.ID,
-				Outcome:      "denied",
-				Metadata: map[string]any{
-					"code":      errcode.UserRoleLookupUnavailable,
-					"attempted": "role_assignment",
-					"from":      "unknown",
-					"to":        req.Body.Role,
-				},
-			})
-			return nil, errcode.Internal(errcode.UserRoleLookupUnavailable,
-				"Could not read the user's current role. Retry shortly.")
-		}
 		// Target's current role for the denied-event metadata. Empty
 		// when previous is nil (the user does not exist); the
 		// downstream UpdateUser will then surface 404 cleanly.
 		previousRole := ""
 		if previous != nil {
 			previousRole = previous.Role
-		}
-		callerRole, err := h.callerRole(ctx)
-		if err != nil {
-			h.emitAudit(ctx, iface.AuditEvent{
-				ActorUserID:  actorUUID,
-				ActorEmail:   actorEmail,
-				ActorType:    "user",
-				Action:       "user.update.refused",
-				ResourceType: "user",
-				ResourceID:   req.ID,
-				Outcome:      "denied",
-				Metadata: map[string]any{
-					"code":      errcode.UserRoleLookupUnavailable,
-					"attempted": "role_assignment",
-					"from":      previousRole,
-					"to":        req.Body.Role,
-				},
-			})
-			return nil, err
 		}
 		if !canAssignRole(callerRole, req.Body.Role) {
 			h.emitAudit(ctx, iface.AuditEvent{
@@ -454,11 +413,13 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 			return nil, err
 		}
 	}
-	user, err := h.userService.UpdateUser(ctx, req.ID, &req.Body)
+	user, err := h.userService.UpdateUser(expectTargetRole(ctx, previous), req.ID, &req.Body)
 	if err != nil {
 		switch err {
 		case services.ErrUserNotFound:
 			return nil, huma.Error404NotFound("User not found", err)
+		case services.ErrTargetRoleChanged:
+			return nil, targetChangedError()
 		case services.ErrEmailNotUnique:
 			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case services.ErrInvalidInput:
@@ -642,6 +603,13 @@ func (h *UserHandler) DeleteUser(ctx context.Context, req *DeleteUserRequest) (*
 		})
 		return nil, errcode.Forbidden(errcode.UserSelfDeleteForbidden, "You cannot delete your own account")
 	}
+	// Target-tier guard: a caller never deletes a user whose current role
+	// is above their own. Runs before the quorum check so a refused
+	// deletion of an administrator by a manager reports the real reason.
+	previous, previousErr := h.userService.GetUser(ctx, req.ID)
+	if _, err := guardTargetTier(ctx, h, previous, previousErr, "user", "user.delete.refused", req.ID, "delete", ""); err != nil {
+		return nil, err
+	}
 	if err := h.checkLastAdminRemoval(ctx, req.ID); err != nil {
 		if isLastAdminError(err) {
 			h.emitAudit(ctx, iface.AuditEvent{
@@ -657,10 +625,12 @@ func (h *UserHandler) DeleteUser(ctx context.Context, req *DeleteUserRequest) (*
 		}
 		return nil, err
 	}
-	if err := h.userService.SoftDeleteAndAliasEmail(ctx, req.ID); err != nil {
+	if err := h.userService.SoftDeleteAndAliasEmail(expectTargetRole(ctx, previous), req.ID); err != nil {
 		switch err {
 		case services.ErrUserNotFound:
 			return nil, huma.Error404NotFound("User not found", err)
+		case services.ErrTargetRoleChanged:
+			return nil, targetChangedError()
 		case services.ErrInvalidInput:
 			return nil, huma.Error400BadRequest("Invalid user ID", err)
 		default:
@@ -898,6 +868,116 @@ func canAssignRole(callerRole, targetRole string) bool {
 		return false
 	}
 	return caller >= target
+}
+
+// outranksCaller reports whether a target whose CURRENT role is
+// targetRole sits strictly above the caller in the tier ladder. An
+// unknown caller tier (-1: no principal, unresolvable role) outranks
+// nothing and is therefore refused against every recognised target —
+// the same fail-closed reading canAssignRole gives it. An unknown target
+// role (-1) outranks nobody: a row carrying a custom or garbage role is
+// not thereby protected from every caller.
+func outranksCaller(callerRole, targetRole string) bool {
+	return systemRoleTier(targetRole) > systemRoleTier(callerRole)
+}
+
+// tierGuardHost is what guardTargetTier needs from a handler: the
+// caller's DATABASE role (D28, never the claim) and the audit sink. Both
+// user-admin handlers satisfy it.
+type tierGuardHost interface {
+	callerRole(ctx context.Context) (string, error)
+	emitAudit(ctx context.Context, event iface.AuditEvent)
+}
+
+// guardTargetTier is the target-tier guard every update and delete of a
+// user runs: a caller may not touch a user whose current system role is
+// above their own (a manager renaming, deactivating, re-emailing or
+// deleting an administrator). It is the complement of canAssignRole,
+// which guards the role being ASSIGNED; with the user routes gated by
+// user.update / user.delete rather than system.users.admin, holding the
+// key must not be enough to reach up the ladder.
+//
+// Inputs are the target's pre-read (previous may be nil when the row does
+// not exist — the request then falls through to the handler's clean 404)
+// and its error. Three fail-closed refusals, every one audited under
+// `action` with resourceType/targetID:
+//
+//   - the pre-read failed with anything but ErrUserNotFound: the target's
+//     role is unknown, so the request cannot be reasoned about. 500
+//     user.role_lookup_unavailable, metadata from="unknown".
+//   - the caller's own role cannot be resolved: callerRole's 500, with the
+//     same audit row.
+//   - the target outranks the caller: 403 user.target_tier_forbidden,
+//     metadata attempted="target_above_caller".
+//
+// `attempted` names what the caller was doing (role_assignment,
+// profile_update, delete) so the trail reads the same whichever branch
+// refused; `to` is the role being assigned, if any. On success the
+// caller's resolved role is returned so a following role-escalation check
+// reuses it instead of reading the caller's row twice.
+func guardTargetTier(ctx context.Context, h tierGuardHost, previous *iface.UserManagementResponse, previousErr error,
+	resourceType, action, targetID, attempted, to string) (string, error) {
+	actorUUID, actorEmail := actorFromCtx(ctx)
+	refuse := func(code string, meta map[string]any) {
+		meta["code"] = code
+		h.emitAudit(ctx, iface.AuditEvent{
+			ActorUserID:  actorUUID,
+			ActorEmail:   actorEmail,
+			ActorType:    "user",
+			Action:       action,
+			ResourceType: resourceType,
+			ResourceID:   targetID,
+			Outcome:      "denied",
+			Metadata:     meta,
+		})
+	}
+	if previousErr != nil && !errors.Is(previousErr, services.ErrUserNotFound) {
+		slog.ErrorContext(ctx, "user: refusing the request, the target's current role could not be read",
+			slog.String("user_uuid", targetID),
+			slog.String("error", previousErr.Error()))
+		refuse(errcode.UserRoleLookupUnavailable, map[string]any{"attempted": attempted, "from": "unknown", "to": to})
+		return "", errcode.Internal(errcode.UserRoleLookupUnavailable,
+			"Could not read the user's current role. Retry shortly.")
+	}
+	previousRole := ""
+	if previous != nil {
+		previousRole = previous.Role
+	}
+	callerRole, err := h.callerRole(ctx)
+	if err != nil {
+		refuse(errcode.UserRoleLookupUnavailable, map[string]any{"attempted": attempted, "from": previousRole, "to": to})
+		return "", err
+	}
+	if previous != nil && outranksCaller(callerRole, previous.Role) {
+		refuse(errcode.UserTargetTierForbidden, map[string]any{
+			"attempted":   "target_above_caller",
+			"from":        previousRole,
+			"to":          to,
+			"caller_role": callerRole,
+		})
+		return "", errcode.Forbidden(errcode.UserTargetTierForbidden,
+			"You cannot modify a user whose role is higher than your own")
+	}
+	return callerRole, nil
+}
+
+// expectTargetRole binds the write that follows guardTargetTier to the role
+// the guard read (services.WithExpectedRole), so a promotion landing
+// between the read and the write refuses the write instead of letting a
+// lower tier modify a user it now ranks below. A nil or role-less
+// snapshot sets no condition.
+func expectTargetRole(ctx context.Context, previous *iface.UserManagementResponse) context.Context {
+	if previous == nil || previous.Role == "" {
+		return ctx
+	}
+	return services.WithExpectedRole(ctx, previous.Role)
+}
+
+// targetChangedError is the answer to a write whose target changed role
+// after the target-tier guard read it.
+func targetChangedError() error {
+	return errcode.Conflict(errcode.UserTargetChanged,
+		"The user's role changed while the request was processed. Reload the user and retry.")
 }
 
 // isPrivilegedSystemRole reports whether a role is a privileged system role

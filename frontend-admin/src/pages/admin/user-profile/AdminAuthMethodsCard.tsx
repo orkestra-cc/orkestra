@@ -146,6 +146,19 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
     );
   }
 
+  // The auth-methods surface stays on system.users.admin (it reaches
+  // credentials: MFA reset, OAuth unlink). A manager who reaches this
+  // profile through user.read is not entitled to it, and a 403 is not a
+  // load failure to retry: hide the card rather than nag.
+  if (
+    error &&
+    typeof error === 'object' &&
+    'status' in error &&
+    error.status === 403
+  ) {
+    return null;
+  }
+
   if (error || !data) {
     return (
       <Card className="mb-3">

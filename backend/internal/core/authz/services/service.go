@@ -204,6 +204,12 @@ type repoBackend interface {
 //  2. If the user's system role is "administrator" or "developer", every
 //     system permission is granted; non-system permissions still come from
 //     bindings.
+//     2b. At GLOBAL scope only (orgID == ""), the seeded platform role named
+//     by the user's system role (administrator, developer, manager,
+//     operator, guest) conveys its SeedSystemRoles permission set. This is
+//     how a platform manager holds user.update on the platform user
+//     routes without being an administrator. Inside an org the system
+//     role conveys nothing: membership is bindings only.
 //  3. Otherwise, the user's permissions in the given org are the union of
 //     all permissions from non-expired role bindings for (userUUID, orgID),
 //     plus any bindings on the user with orgID="" (global grants).
@@ -750,6 +756,43 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 			perms[k] = struct{}{}
 		}
 		s.mu.RUnlock()
+	}
+
+	// Rule 2b: at GLOBAL scope (tenantID == ""), the seeded platform role
+	// named by the user's system role conveys its permission set — the
+	// matrix SeedSystemRoles writes (manager: everything but .delete/.admin;
+	// operator: .read/.self; guest: .read; administrator: every key;
+	// developer: every key, or read-only in production). Until this rule a
+	// platform manager/operator/guest held NOTHING from their role: the
+	// seeded rows existed but nobody was bound to them, and a global binding
+	// to a platform role cannot be created through the API. That made every
+	// non-System key on a platform surface (user.read, user.update, …)
+	// unreachable, so the user routes stayed on system.users.admin.
+	//
+	// Global scope only: inside a tenant the system role must not act as an
+	// implicit membership (a platform manager is not org_admin of every
+	// tenant). Platform-reserved (System:true) keys are skipped: those stay
+	// with rule 2 — administrator and developer through the shortcuts
+	// above, nobody else — so a seeded manager row that happens to carry a
+	// System key without a .delete/.admin suffix (auth.service_accounts.
+	// manage, system.users.password_reset, …) does not hand it out. No
+	// verdict existing before this rule changes: every key checked at
+	// global scope was System:true, and those are exactly the ones this
+	// rule leaves alone. An inactive or missing seeded row conveys nothing
+	// (fail closed, like an inactive bound role).
+	if tenantID == "" && systemRole != "" && systemRole != "super_admin" {
+		if role, err := s.repo.GetRoleByName(ctx, "", systemRole); err == nil && role != nil && role.IsActive && role.IsSystem {
+			systemKeys := s.systemPermissionSnapshot()
+			for _, p := range role.Permissions {
+				if p == "*" {
+					continue
+				}
+				if _, isSystem := systemKeys[p]; isSystem {
+					continue
+				}
+				perms[p] = struct{}{}
+			}
+		}
 	}
 
 	// Union of global bindings (tenantID="").

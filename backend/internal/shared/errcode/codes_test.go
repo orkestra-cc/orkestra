@@ -106,6 +106,8 @@ var goldenCodes = map[string]string{
 	"UserSelfDeleteForbidden":                "user.self_delete_forbidden",
 	"UserLastAdminForbidden":                 "user.last_admin_forbidden",
 	"UserRoleEscalationForbidden":            "user.role_escalation_forbidden",
+	"UserTargetTierForbidden":                "user.target_tier_forbidden",
+	"UserTargetChanged":                      "user.target_changed",
 	"UserRoleLookupUnavailable":              "user.role_lookup_unavailable",
 	"LoggingLogProviderUnavailable":          "logging.log_provider_unavailable",
 	"LoggingLogPreviewInvalid":               "logging.log_preview_invalid",

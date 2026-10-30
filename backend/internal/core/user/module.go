@@ -60,15 +60,16 @@ func (m *UserModule) NavItems() []module.NavItemSpec {
 		{Realm: "personal", Name: "Dashboard", Icon: "chart-pie", Path: "/user/dashboard", Active: true},
 		{Realm: "personal", Name: "Profile", Icon: "user", Path: "/user/profile", Active: true},
 		{Realm: "personal", Name: "Calendar", Icon: "calendar-alt", Path: "/user/calendar", Active: true},
-		{Realm: "platform", Tier: "internal", Name: "User Management", Icon: "users-cog", Path: "/admin/users", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "User Management", Icon: "users-cog", Path: "/admin/users", MinRole: "manager", Active: true},
 		{Realm: "platform", Tier: "internal", Name: "Module Management", Icon: "puzzle-piece", Path: "/admin/modules", MinRole: "administrator", Active: true},
 	}
 }
 
 func (m *UserModule) Permissions() []iface.PermissionSpec {
 	return []iface.PermissionSpec{
-		{Key: "user.read", Module: "user", Description: "List users"},
-		{Key: "user.update", Module: "user", Description: "Update user profiles"},
+		{Key: "user.read", Module: "user", Description: "List and read users"},
+		{Key: "user.create", Module: "user", Description: "Create and invite users"},
+		{Key: "user.update", Module: "user", Description: "Update user profiles, roles and status"},
 		{Key: "user.delete", Module: "user", Description: "Delete users"},
 		{Key: "user.self", Module: "user", Description: "Edit your own profile"},
 		{Key: "user.avatar.self", Module: "user", Description: "Manage your own avatar (upload, pick from linked OAuth provider, reset to initials)"},
@@ -190,39 +191,106 @@ func registerAvatarRoutes(api huma.API, h *handlers.AvatarHandler, opIDPrefix st
 	}, h.SetAvatarSource)
 }
 
+// userRouteGroup binds one slice of the user-management surface to the
+// permission that gates it (plus whether it also needs a fresh step-up
+// proof). Data rather than inline middleware calls so
+// route_permissions_test.go can register each group on a throwaway API
+// and assert which operation landed under which key: "read means read" is
+// checked, not reviewed.
+type userRouteGroup struct {
+	Permission string
+	StepUp     bool
+	Register   func(huma.API)
+}
+
+// routeGroups is the per-permission map of the platform user-management
+// surface, operator and client tiers alike (the keys are the same for
+// both: a user admin is a user admin whichever collection the row lives
+// in). Users are global, so every group is gated with
+// RequireSystemPermission — evaluated at global scope, where the caller's
+// platform role conveys its seeded permission set (authz rule 2b) and a
+// tenant membership never does.
+//
+//   - user.read   — every GET.
+//   - user.create — POST /v1/users and the client-tier create/invite/
+//     resend/resend-verification mails; the role-escalation guard in the
+//     handlers refuses privilege seeding, so no step-up.
+//   - user.update — PUT /v1/users/{id}, PATCH client user, both under
+//     RequireStepUp(5m) (role change, deactivate); plus send-password-reset,
+//     which mails a credential link to an EXISTING user: an update by
+//     nature, but no state changes until the recipient redeems it, so it
+//     stays outside the step-up group.
+//   - user.delete — both DELETEs, under RequireStepUp(5m).
+//
+// The handlers add the target-tier guard on every update/delete: holding
+// a key never lets a lower tier touch a higher one.
+func (m *UserModule) routeGroups() []userRouteGroup {
+	return []userRouteGroup{
+		{Permission: "user.read", Register: func(api huma.API) {
+			RegisterReadRoutes(api, m.handler)
+			RegisterAdminClientReadRoutes(api, m.adminClientHandler)
+		}},
+		{Permission: "user.create", Register: func(api huma.API) {
+			RegisterCreateRoutes(api, m.handler)
+			RegisterAdminClientCreateRoutes(api, m.adminClientHandler)
+		}},
+		{Permission: "user.update", Register: func(api huma.API) {
+			RegisterAdminClientPasswordResetRoute(api, m.adminClientHandler)
+		}},
+		{Permission: "user.update", StepUp: true, Register: func(api huma.API) {
+			RegisterUpdateRoutes(api, m.handler)
+			RegisterAdminClientUpdateRoutes(api, m.adminClientHandler)
+		}},
+		{Permission: "user.delete", StepUp: true, Register: func(api huma.API) {
+			RegisterDeleteRoutes(api, m.handler)
+			RegisterAdminClientDeleteRoutes(api, m.adminClientHandler)
+		}},
+	}
+}
+
+// registrarFor returns the registrar of the group bound to (permission,
+// stepUp). Panics on an unknown pair: that can only mean RegisterRoutes
+// and routeGroups have drifted, a programming error to surface at boot,
+// not a route to silently leave unmounted.
+func (m *UserModule) registrarFor(permission string, stepUp bool) func(huma.API) {
+	for _, g := range m.routeGroups() {
+		if g.Permission == permission && g.StepUp == stepUp {
+			return g.Register
+		}
+	}
+	panic("user: no route group declared for " + permission)
+}
+
 func (m *UserModule) RegisterRoutes(ri *module.RouteInfo) {
 	// User management is a platform-level concern: users are global, so
-	// routes live on the system permission gate (administrators) rather
-	// than per-org. The surface is split into three router groups by
-	// destructiveness:
-	//
-	//   - **read** — GET endpoints, gated by `system.users.admin` only.
-	//   - **soft mutation** — POST endpoints that create new rows or
-	//     trigger emails; the role-escalation guard inside the handler
-	//     rejects privilege seeding, so no step-up is required here.
-	//   - **hard mutation** — PUT/PATCH/DELETE; gated additionally by
-	//     `RequireStepUp(5m)` so a long-lived admin session can't
-	//     destructively mutate platform state hours after the last
-	//     MFA proof. The SPA's StepUpModal catches the 401 and prompts
-	//     the admin to re-verify.
+	// every group sits on the system-permission gate (global scope), one
+	// per-action key each — see routeGroups. The permission literals stay
+	// written out here (not looped) so policycoverage can see which key
+	// gates which group. The step-up groups add RequireStepUp(5m) so a
+	// long-lived session can't destructively mutate platform state hours
+	// after the last MFA proof; the SPA's StepUpModal catches the 401 and
+	// prompts the caller to re-verify.
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.admin"))
-		api := humachi.New(r, ri.APIConfig)
-		RegisterReadRoutes(api, m.handler)
-		RegisterAdminClientReadRoutes(api, m.adminClientHandler)
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.read"))
+		m.registrarFor("user.read", false)(humachi.New(r, ri.APIConfig))
 	})
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.admin"))
-		api := humachi.New(r, ri.APIConfig)
-		RegisterSoftMutationRoutes(api, m.handler)
-		RegisterAdminClientSoftMutationRoutes(api, m.adminClientHandler)
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.create"))
+		m.registrarFor("user.create", false)(humachi.New(r, ri.APIConfig))
 	})
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.admin"))
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.update"))
+		m.registrarFor("user.update", false)(humachi.New(r, ri.APIConfig))
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.update"))
 		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
-		api := humachi.New(r, ri.APIConfig)
-		RegisterHardMutationRoutes(api, m.handler)
-		RegisterAdminClientHardMutationRoutes(api, m.adminClientHandler)
+		m.registrarFor("user.update", true)(humachi.New(r, ri.APIConfig))
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.delete"))
+		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+		m.registrarFor("user.delete", true)(humachi.New(r, ri.APIConfig))
 	})
 
 	// Self-service avatar surface — mounted on BOTH audiences so a

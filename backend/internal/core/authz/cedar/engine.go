@@ -319,9 +319,19 @@ func (e *Engine) Evaluate(req Request) Decision {
 	// Time-of-day + weekday come from the engine's injectable clock so
 	// business-hours ABAC policies are deterministic in tests. hour_utc is
 	// a 0–23 Long, weekday a lowercase 3-letter string ("mon"…"sun").
+	// scope says whether the check is global ("global": no tenant in
+	// scope — RequireSystemPermission and the platform user routes) or
+	// tenant-bound ("tenant"). platform.cedar's manager/operator/guest
+	// permits are global-only, mirroring evaluator rule 2b: a system role
+	// is not a membership inside a tenant.
+	scope := "tenant"
+	if r.TenantUUID == "" {
+		scope = "global"
+	}
 	now := e.clock()
 	ctxRec := cedar.RecordMap{
 		"env":           types.String(e.env),
+		"scope":         types.String(scope),
 		"action_suffix": types.String(suffix),
 		"action_module": types.String(module),
 		"action_key":    types.String(action),

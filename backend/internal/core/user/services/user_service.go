@@ -30,7 +30,21 @@ var (
 	ErrEmailNotUnique         = errors.New("email address already in use")
 	ErrOAuthProviderNotLinked = errors.New("oauth provider is not linked to this user")
 	ErrInvalidAvatarSource    = errors.New("invalid avatar source")
+	// ErrTargetRoleChanged: an UpdateUser or SoftDeleteAndAliasEmail under
+	// WithExpectedRole found the user holding another role.
+	ErrTargetRoleChanged = repository.ErrRoleChanged
 )
+
+// WithExpectedRole makes the next UpdateUser or SoftDeleteAndAliasEmail on
+// ctx write only while the user still holds role, failing with
+// ErrTargetRoleChanged otherwise. It closes the window between the
+// handlers' target-tier guard, which reads the role, and the write.
+func WithExpectedRole(ctx context.Context, role string) context.Context {
+	return repository.WithExpectedRole(ctx, role)
+}
+
+// ExpectedRole returns the precondition WithExpectedRole put on ctx.
+func ExpectedRole(ctx context.Context) string { return repository.ExpectedRole(ctx) }
 
 // UserService defines the interface for user business logic
 type UserService interface {
@@ -295,6 +309,9 @@ func (s *userService) UpdateUser(ctx context.Context, id string, input *iface.Up
 		if err == repository.ErrUserNotFound {
 			return nil, ErrUserNotFound
 		}
+		if errors.Is(err, repository.ErrRoleChanged) {
+			return nil, ErrTargetRoleChanged
+		}
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
 
@@ -337,6 +354,9 @@ func (s *userService) SoftDeleteAndAliasEmail(ctx context.Context, id string) er
 	if err := s.userRepo.SoftDeleteAndAliasEmail(ctx, id); err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil
+		}
+		if errors.Is(err, repository.ErrRoleChanged) {
+			return ErrTargetRoleChanged
 		}
 		return fmt.Errorf("failed to soft-delete-and-alias user: %w", err)
 	}
