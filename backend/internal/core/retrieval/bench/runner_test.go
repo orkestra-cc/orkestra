@@ -62,6 +62,8 @@ type fakeEngine struct {
 	queries          []engine.Query
 	block            bool
 	ignorePrincipals bool
+	queryErr         error // returned by every Query when set
+	dropErr          error // returned by DropCollection when set
 }
 
 func newFake() *fakeEngine { return &fakeEngine{Engine: enginefake.New()} }
@@ -82,15 +84,22 @@ func (f *fakeEngine) DropCollection(ctx context.Context, name string) error {
 		left = time.Until(dl)
 	}
 	f.dropDeadline = append(f.dropDeadline, left)
+	dropErr := f.dropErr
 	f.mu.Unlock()
+	if dropErr != nil {
+		return dropErr
+	}
 	return f.Engine.DropCollection(ctx, name)
 }
 
 func (f *fakeEngine) Query(ctx context.Context, name string, q engine.Query) ([]engine.Candidate, error) {
 	f.mu.Lock()
 	f.queries = append(f.queries, q)
-	block, ignore := f.block, f.ignorePrincipals
+	block, ignore, queryErr := f.block, f.ignorePrincipals, f.queryErr
 	f.mu.Unlock()
+	if queryErr != nil {
+		return nil, queryErr
+	}
 	if block {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -252,6 +261,8 @@ func baseCfg(eng engine.Engine, embed, rerank *httptest.Server) Config {
 
 func TestRun_ModesAndCleanup(t *testing.T) {
 	fx := loadSmoke(t)
+	// An unjudged query is timed but stays out of the quality averages.
+	fx.Queries = append(fx.Queries, FixtureQuery{ID: "q-unjudged", Text: fx.Queries[0].Text, Principals: fx.Queries[0].Principals})
 	fake := newFake()
 	var bodies [][]string
 	var mu sync.Mutex
@@ -298,6 +309,40 @@ func TestRun_ModesAndCleanup(t *testing.T) {
 	}
 	if !rep.OK() {
 		t.Error("violations on a filtering engine")
+	}
+	// The quality figures are the first-sample metrics averaged over the
+	// judged queries: recompute them from the fake's ranking on a second
+	// scratch collection and compare.
+	s := &session{cfg: cfg, fx: fx, coll: "bench_scratcht2_g1"}
+	s.cfg.applyDefaults()
+	if err := s.index(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range rep.Modes {
+		if m.RecallAtK < 0 || m.RecallAtK > 1 || m.NDCGAtK < 0 || m.NDCGAtK > 1 {
+			t.Errorf("mode %s: recall %v nDCG %v outside [0,1]", m.Mode, m.RecallAtK, m.NDCGAtK)
+		}
+		var recall, ndcg float64
+		judged := 0
+		for _, q := range fx.Queries {
+			cands, err := s.rank(context.Background(), m.Mode, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids, _ := s.account(cands, q)
+			if len(q.Expected) > 0 {
+				judged++
+				recall += RecallAtK(ids, q.Expected, s.cfg.K)
+				ndcg += NDCGAtK(ids, q.Expected, s.cfg.K)
+			}
+		}
+		if judged != len(fx.Queries)-1 || math.Abs(m.RecallAtK-recall/float64(judged)) > 1e-9 || math.Abs(m.NDCGAtK-ndcg/float64(judged)) > 1e-9 {
+			t.Errorf("mode %s: recall %v nDCG %v, want %v %v over %d judged queries",
+				m.Mode, m.RecallAtK, m.NDCGAtK, recall/float64(judged), ndcg/float64(judged), judged)
+		}
+		if m.Mode != ModeKeyword && m.RecallAtK == 0 {
+			t.Errorf("mode %s: zero recall on the fake ranking", m.Mode)
+		}
 	}
 	// P21: documents carry the document prefix and the title first; queries the query prefix.
 	mu.Lock()
@@ -406,30 +451,64 @@ func TestRun_CountsVisibilityViolations(t *testing.T) {
 	}
 }
 
+// The reranker reorders the RerankTopK hybrid candidates and the cut to K
+// comes after it: with scores that reverse the order, the result is the
+// tail of the hybrid top RerankTopK, reversed.
 func TestRun_RerankReordersHybrid(t *testing.T) {
 	fx := loadSmoke(t)
 	fake := newFake()
 	emb := newTEI(t, "e", "s", teiOpts{})
 	rr := newTEI(t, "r", "s", teiOpts{rerankByIdx: true})
 	cfg := baseCfg(fake, emb, rr)
-	cfg.K, cfg.RerankTopK = 5, 5
+	cfg.K, cfg.RerankTopK = 3, 6
 	s := &session{cfg: cfg, fx: fx, coll: "bench_scratcht1_g1"}
 	s.cfg.applyDefaults()
 	if err := s.index(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	q := fx.Queries[0]
-	hy, _, err := s.rank(context.Background(), ModeHybrid, q)
+	wide := *s
+	wide.cfg.K = cfg.RerankTopK
+	hc, err := wide.rank(context.Background(), ModeHybrid, q)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rk, _, err := s.rank(context.Background(), ModeHybridRerank, q)
+	hy, _ := wide.account(hc, q)
+	rc, err := s.rank(context.Background(), ModeHybridRerank, q)
 	if err != nil {
 		t.Fatal(err)
+	}
+	rk, _ := s.account(rc, q)
+	if len(hy) != cfg.RerankTopK {
+		t.Fatalf("hybrid top %d = %v", cfg.RerankTopK, hy)
 	}
 	slices.Reverse(hy)
-	if len(hy) < 2 || !slices.Equal(hy, rk) {
+	if !slices.Equal(hy[:cfg.K], rk) {
 		t.Fatalf("hybrid reversed %v, reranked %v", hy, rk)
+	}
+}
+
+// A failed drop is reported even when the run already failed (M6): the
+// leftover collection matters most then.
+func TestRun_JoinsDropErrorWithRunError(t *testing.T) {
+	fx := loadSmoke(t)
+	emb := newTEI(t, "e", "s", teiOpts{})
+	queryErr, dropErr := errors.New("query exploded"), errors.New("drop exploded")
+
+	fake := newFake()
+	fake.queryErr, fake.dropErr = queryErr, dropErr
+	rep, err := Run(context.Background(), baseCfg(fake, emb, nil), fx, "smoke")
+	if rep != nil || !errors.Is(err, queryErr) || !errors.Is(err, dropErr) ||
+		!strings.Contains(err.Error(), "drop scratch collection bench_scratcht1_g1") {
+		t.Fatalf("rep %v, err %v", rep, err)
+	}
+
+	// On an otherwise successful run the report comes back with the error.
+	fake = newFake()
+	fake.dropErr = dropErr
+	rep, err = Run(context.Background(), baseCfg(fake, emb, nil), fx, "smoke")
+	if rep == nil || !errors.Is(err, dropErr) {
+		t.Fatalf("rep %v, err %v", rep, err)
 	}
 }
 

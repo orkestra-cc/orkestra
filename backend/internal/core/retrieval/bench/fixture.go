@@ -39,6 +39,10 @@ type FixtureQuery struct {
 type Fixture struct {
 	Items   []FixtureItem
 	Queries []FixtureQuery
+
+	// index maps an item id to its position in Items. LoadFixture builds it,
+	// so VisibleTo is a map lookup per candidate on a large corpus too.
+	index map[string]int
 }
 
 // maxLine bounds one JSONL line; item texts are short professional profiles.
@@ -133,12 +137,18 @@ func LoadFixture(r io.Reader) (*Fixture, error) {
 		}
 		f.Queries = append(f.Queries, q)
 	}
+	f.index = items
 	return f, nil
 }
 
 // VisibleTo reports whether the item is visible to the principals
-// (visibleTo intersects principals). An unknown item is not visible.
+// (visibleTo intersects principals). An unknown item is not visible. A
+// Fixture built without LoadFixture has no index and falls back to a scan.
 func (f *Fixture) VisibleTo(itemID string, principals []string) bool {
+	if f.index != nil {
+		i, ok := f.index[itemID]
+		return ok && visible(&f.Items[i], principals)
+	}
 	for i := range f.Items {
 		if f.Items[i].ID == itemID {
 			return visible(&f.Items[i], principals)

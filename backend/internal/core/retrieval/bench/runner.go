@@ -173,10 +173,11 @@ func (s *session) index(ctx context.Context) error {
 	return nil
 }
 
-// rank runs one query in one mode and returns the top-K source ids plus the
-// number of returned ids invisible to the query's principals. The latency of
-// the caller's measurement covers query embedding, the engine and the rerank.
-func (s *session) rank(ctx context.Context, mode string, q FixtureQuery) ([]string, int, error) {
+// rank runs one query in one mode and returns the ranked candidates: at most
+// K, or RerankTopK reordered by the reranker in hybrid+rerank mode. Its
+// duration is the measured latency: query embedding, the engine and the
+// rerank, nothing else.
+func (s *session) rank(ctx context.Context, mode string, q FixtureQuery) ([]engine.Candidate, error) {
 	eq := engine.Query{TenantID: s.cfg.TenantID, Principals: q.Principals, PerArm: s.cfg.PerArm, Limit: s.cfg.K}
 	if mode == ModeHybridRerank {
 		eq.Limit = s.cfg.RerankTopK
@@ -188,17 +189,17 @@ func (s *session) rank(ctx context.Context, mode string, q FixtureQuery) ([]stri
 	if mode != ModeKeyword {
 		vecs, err := s.cfg.Embed.Embed(ctx, []string{s.cfg.QueryPrefix + q.Text})
 		if err != nil {
-			return nil, 0, fmt.Errorf("embed query %q: %w", q.ID, err)
+			return nil, fmt.Errorf("embed query %q: %w", q.ID, err)
 		}
 		if len(vecs) != 1 || len(vecs[0]) != s.dims {
-			return nil, 0, fmt.Errorf("embed query %q: unexpected vector", q.ID)
+			return nil, fmt.Errorf("embed query %q: unexpected vector", q.ID)
 		}
 		eq.Dense = vecs[0]
 		eq.Weights.Dense = 1
 	}
 	cands, err := s.cfg.Engine.Query(ctx, s.coll, eq)
 	if err != nil {
-		return nil, 0, fmt.Errorf("query %q (%s): %w", q.ID, mode, err)
+		return nil, fmt.Errorf("query %q (%s): %w", q.ID, mode, err)
 	}
 	if mode == ModeHybridRerank && len(cands) > 0 {
 		texts := make([]string, len(cands))
@@ -207,17 +208,24 @@ func (s *session) rank(ctx context.Context, mode string, q FixtureQuery) ([]stri
 		}
 		scores, err := s.cfg.Rerank.Rerank(ctx, q.Text, texts)
 		if err != nil {
-			return nil, 0, fmt.Errorf("rerank query %q: %w", q.ID, err)
+			return nil, fmt.Errorf("rerank query %q: %w", q.ID, err)
 		}
 		reordered := make([]engine.Candidate, 0, len(scores))
 		for _, sc := range scores {
 			if sc.Index < 0 || sc.Index >= len(cands) {
-				return nil, 0, fmt.Errorf("rerank query %q: index %d out of range", q.ID, sc.Index)
+				return nil, fmt.Errorf("rerank query %q: index %d out of range", q.ID, sc.Index)
 			}
 			reordered = append(reordered, cands[sc.Index])
 		}
 		cands = reordered
 	}
+	return cands, nil
+}
+
+// account returns the top-K source ids of the candidates plus the number of
+// candidates invisible to the query's principals. It runs outside the timed
+// region: on a large fixture the bookkeeping must not inflate the latency.
+func (s *session) account(cands []engine.Candidate, q FixtureQuery) ([]string, int) {
 	violations := 0
 	ids := make([]string, 0, min(len(cands), s.cfg.K))
 	for _, c := range cands {
@@ -228,7 +236,7 @@ func (s *session) rank(ctx context.Context, mode string, q FixtureQuery) ([]stri
 			ids = append(ids, c.Runtime.SourceID)
 		}
 	}
-	return ids, violations, nil
+	return ids, violations
 }
 
 func (s *session) runMode(ctx context.Context, mode string) (ModeResult, error) {
@@ -242,11 +250,12 @@ func (s *session) runMode(ctx context.Context, mode string) (ModeResult, error) 
 				return res, err
 			}
 			t0 := time.Now()
-			ids, viol, err := s.rank(ctx, mode, q)
+			cands, err := s.rank(ctx, mode, q)
 			lat = append(lat, time.Since(t0))
 			if err != nil {
 				return res, err
 			}
+			ids, viol := s.account(cands, q)
 			res.VisibilityViolations += viol
 			if rep == 0 && len(q.Expected) > 0 {
 				judged++
@@ -264,8 +273,9 @@ func (s *session) runMode(ctx context.Context, mode string) (ModeResult, error) 
 
 // Run indexes the fixture into a scratch collection of its own, measures the
 // four search modes and drops the collection on every exit path. A failed
-// drop on an otherwise successful run is returned as an error together with
-// the report.
+// drop is joined to the run's error, so a leftover collection is reported
+// even when the run itself failed; on an otherwise successful run it is
+// returned together with the report.
 func Run(ctx context.Context, cfg Config, fx *Fixture, fixtureName string) (rep *Report, err error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(fx); err != nil {
@@ -295,8 +305,8 @@ func Run(ctx context.Context, cfg Config, fx *Fixture, fixtureName string) (rep 
 	defer func() {
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dropTimeout)
 		defer cancel()
-		if derr := cfg.Engine.DropCollection(dctx, s.coll); derr != nil && err == nil {
-			err = fmt.Errorf("drop scratch collection %s: %w", s.coll, derr)
+		if derr := cfg.Engine.DropCollection(dctx, s.coll); derr != nil {
+			err = errors.Join(err, fmt.Errorf("drop scratch collection %s: %w", s.coll, derr))
 		}
 	}()
 

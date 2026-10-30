@@ -34,6 +34,33 @@ func TestRun_UsageErrors(t *testing.T) {
 	if code := run([]string{"-nope"}, envOf(nil), &out, &errb); code != 2 {
 		t.Fatalf("unknown flag: code %d", code)
 	}
+	// A positional argument stops flag parsing; it must not silently drop
+	// the flags after it.
+	errb.Reset()
+	if code := run([]string{"my.jsonl", "-k", "5"}, envOf(nil), &out, &errb); code != 2 ||
+		!strings.Contains(errb.String(), `unexpected argument "my.jsonl" (flags only; use -fixture)`) {
+		t.Fatalf("positional: code %d, stderr %q", code, errb.String())
+	}
+	errb.Reset()
+	if code := run([]string{"-fixture", "x.jsonl", "extra"}, envOf(nil), &out, &errb); code != 2 ||
+		!strings.Contains(errb.String(), `"extra"`) {
+		t.Fatalf("trailing positional: code %d, stderr %q", code, errb.String())
+	}
+}
+
+// The binary refuses production itself, before it reads any other setting.
+func TestRun_RefusesProduction(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := envOf(map[string]string{"ENV": "production", "QDRANT_URL": "http://qdrant:6333"})
+	code := run([]string{"-fixture", "x.jsonl"}, env, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "refusing to run with ENV=production") {
+		t.Fatalf("code %d, stderr %q", code, errb.String())
+	}
+	errb.Reset()
+	env = envOf(map[string]string{"ENV": "staging"})
+	if code := run([]string{"-fixture", "x.jsonl"}, env, &out, &errb); code != 1 || !strings.Contains(errb.String(), "QDRANT_URL is not set") {
+		t.Fatalf("staging: code %d, stderr %q", code, errb.String())
+	}
 }
 
 func TestRun_NeedsQdrant(t *testing.T) {

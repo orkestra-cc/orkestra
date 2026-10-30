@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/llm/installation"
@@ -90,6 +91,11 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
+	// Parsing stops at the first non-flag, so a stray argument would silently
+	// drop every flag after it (and benchmark the default fixture).
+	if fs.NArg() > 0 {
+		return o, fmt.Errorf("unexpected argument %q (flags only; use -fixture)", fs.Arg(0))
+	}
 	if o.fixture == "" {
 		return o, errors.New("-fixture is required")
 	}
@@ -97,13 +103,20 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 }
 
 // run parses flags and env, runs the benchmark and prints the report:
-// 0 ok, 1 run error or visibility violations, 2 usage.
+// 0 ok, 1 run error or visibility violations, 2 usage (production included).
 func run(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	o, err := parseFlags(args, stderr)
 	if err != nil {
 		if !errors.Is(err, flag.ErrHelp) {
 			fmt.Fprintln(stderr, "retrieval-bench:", err)
 		}
+		return 2
+	}
+	// orkestra.sh refuses production too; this holds for a binary built and
+	// run elsewhere: the bench loads the inference servers for minutes and
+	// writes a scratch collection into the serving Qdrant.
+	if strings.TrimSpace(getenv("ENV")) == "production" {
+		fmt.Fprintln(stderr, "retrieval-bench: refusing to run with ENV=production; benchmark a development or staging stack")
 		return 2
 	}
 	fail := func(err error) int {
@@ -175,7 +188,9 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGTERM and SIGHUP (a closed terminal, a stopped exec) cancel the run
+	// like Ctrl-C, so the scratch collection is still dropped.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	rep, runErr := bench.Run(ctx, cfg, fx, o.fixture)
 	if rep == nil {

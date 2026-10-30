@@ -52,6 +52,14 @@ func TestLoadFixture_QueryBeforeItem(t *testing.T) {
 	if !f.VisibleTo("i1", []string{"tenant:*"}) || f.VisibleTo("i2", []string{"tenant:*"}) || f.VisibleTo("zz", []string{"tenant:*"}) {
 		t.Error("VisibleTo mismatch")
 	}
+	if len(f.index) != len(f.Items) {
+		t.Errorf("index has %d ids for %d items", len(f.index), len(f.Items))
+	}
+	// A Fixture built by hand has no index and answers the same.
+	bare := &Fixture{Items: f.Items}
+	if !bare.VisibleTo("i1", []string{"tenant:*"}) || bare.VisibleTo("i2", []string{"tenant:*"}) || bare.VisibleTo("zz", []string{"tenant:*"}) {
+		t.Error("VisibleTo mismatch without an index")
+	}
 }
 
 func TestSmokeFixture_Composition(t *testing.T) {
