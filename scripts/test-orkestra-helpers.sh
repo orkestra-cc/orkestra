@@ -222,6 +222,248 @@ obs_catalog_count="$(
 )"
 check "observability log picker uses the explicit service catalog" "6" "$obs_catalog_count"
 
+# --- Retrieval overlay (ADR-0023): fail closed, seed before serving, scope the
+# five owned services, and keep the other overlay's backend override. ---
+# has <file> <ERE> -> yes|no. Negative checks pair it with a positive one
+# ("<ran>/<forbidden>") so a run that logged nothing cannot pass them.
+has() { grep -Eq -- "$2" "$1" && printf yes || printf no; }
+# A shell-exported setting would change what the lifecycle does; the tests set
+# them per call instead.
+unset RETRIEVAL_SKIP_SEED RETRIEVAL_SEED_TIMEOUT QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY
+# Scratch docker/.env: the developer's real one is never read.
+ret_env_file="$(mktemp)"
+ret_log="$(mktemp)"
+ret_out="$(mktemp)"
+export RET_ENV_FILE="$ret_env_file" RET_LOG="$ret_log"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+
+# ret_run <cmd...> — runs cmd in a subshell against a stubbed Docker that logs
+# every call to $RET_LOG. RET_FAIL (an ERE) makes the matching call return 1.
+# Output goes to $ret_out; returns the subshell's status.
+ret_run() {
+    : > "$RET_LOG"
+    (
+        check_docker_running() { :; }
+        retrieval_check_file() { :; }
+        retrieval_init_env() {
+            ENV=development
+            COMPOSE_PROJECT_NAME=orkestra-test-development
+            INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+            COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+            RETRIEVAL_COMPOSE="$PROJECT_ROOT/docker/docker-compose.retrieval.yml"
+            ENV_FILE="$RET_ENV_FILE"
+        }
+        observability_init_env() { retrieval_init_env; }
+        page_header() { :; }
+        p_ok() { :; }
+        with_spinner() {
+            shift
+            "$@"
+        }
+        docker() {
+            local IFS=' '
+            printf '%s\n' "$*" >> "$RET_LOG"
+            if [ -n "${RET_FAIL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$RET_FAIL"; then
+                return 1
+            fi
+            case " $* " in
+                *" config --services "*)
+                    printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
+                        otel-collector tempo prometheus loki promtail grafana \
+                        qdrant tei-embed tei-rerank tei-embed-seed tei-rerank-seed
+                    ;;
+                *" config --volumes "*)
+                    printf '%s\n' mongodb-data redis-data rustfs-data \
+                        tempo-data prometheus-data loki-data promtail-positions grafana-data \
+                        qdrant-data tei-weights
+                    ;;
+                *" ps -q backend "*) printf 'backend-id\n' ;;
+                *" ps -q qdrant tei-embed tei-rerank "*) printf '%s\n' qdrant-id tei-embed-id tei-rerank-id ;;
+            esac
+            return 0
+        }
+        retrieval_init_env
+        "$@"
+    ) > "$ret_out" 2>&1
+}
+
+ret_discovery_log="$(mktemp)"
+export RET_DISCOVERY_LOG="$ret_discovery_log"
+(
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$RET_DISCOVERY_LOG"
+        return 17
+    }
+    INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+    COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+    RETRIEVAL_COMPOSE="$PROJECT_ROOT/docker/docker-compose.retrieval.yml"
+    ENV_FILE="$RET_ENV_FILE"
+    retrieval_list_services
+) >/dev/null 2>&1
+ret_discovery_status=$?
+check "retrieval discovery fails closed on invalid compose" "1" "$ret_discovery_status"
+check "retrieval discovery validates the merged stack" "3" "$(sed -n '1p' "$ret_discovery_log" | grep -o -- ' -f ' | wc -l | tr -d ' ')"
+check "retrieval discovery lists the seed profile" "yes" "$(has "$ret_discovery_log" '--profile retrieval-seed config --services$')"
+rm -f "$ret_discovery_log"
+
+# Missing keys: the failure names the empty one and prints no key value.
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=\n' > "$ret_env_file"
+RET_FAIL='config --services' ret_run retrieval_up; rc=$?
+check "retrieval up with a missing key fails before any lifecycle call" "1/no" \
+    "$rc/$(has "$ret_log" ' (up|rm) ')"
+check "the missing-key failure names the empty key only" "yes/no" \
+    "$(has "$ret_out" 'RETRIEVAL_INFERENCE_API_KEY must be set')/$(has "$ret_out" 'QDRANT_API_KEY')"
+check "the missing-key failure prints no key value" "no" "$(has "$ret_out" 'qdrant-key-value-1234')"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+
+ret_run retrieval_up; rc=$?
+ret_seed_line="$(grep -nE 'compose .* --profile retrieval-seed up -d --wait .* tei-embed-seed tei-rerank-seed$' "$ret_log" | head -1 | cut -d: -f1)"
+ret_serve_line="$(grep -nE 'compose .* up -d --wait .* qdrant tei-embed tei-rerank$' "$ret_log" | head -1 | cut -d: -f1)"
+check "retrieval up succeeds" "0" "$rc"
+check "retrieval up seeds before serving" "yes" \
+    "$([ -n "$ret_seed_line" ] && [ -n "$ret_serve_line" ] && [ "$ret_seed_line" -lt "$ret_serve_line" ] && printf yes || printf no)"
+check "retrieval up waits with the default seed timeout" "yes" "$(has "$ret_log" 'up -d --wait --wait-timeout 1800 tei-embed-seed tei-rerank-seed$')"
+check "retrieval up removes the seed containers" "yes" "$(has "$ret_log" 'compose .* --profile retrieval-seed rm -sf tei-embed-seed tei-rerank-seed$')"
+check "retrieval up applies its backend override" "yes" "$(has "$ret_log" 'compose .* -f .*docker-compose.retrieval.yml .* up -d --no-deps backend$')"
+check "retrieval up and info print no key value" "no/no" \
+    "$(has "$ret_out" 'qdrant-key-value-1234')/$(has "$ret_out" 'inference-key-value-5678')"
+
+RETRIEVAL_SKIP_SEED=true ret_run retrieval_up
+check "RETRIEVAL_SKIP_SEED skips the seed step" "yes/no" \
+    "$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" ' up .*tei-embed-seed')"
+printf 'RETRIEVAL_SKIP_SEED=true\n' >> "$ret_env_file"
+ret_run retrieval_up
+check "RETRIEVAL_SKIP_SEED in docker/.env skips the seed step" "yes/no" \
+    "$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" ' up .*tei-embed-seed')"
+RETRIEVAL_SKIP_SEED=false ret_run retrieval_up
+check "the shell RETRIEVAL_SKIP_SEED wins over docker/.env" "yes" "$(has "$ret_log" ' up .*tei-embed-seed')"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n# RETRIEVAL_SKIP_SEED=true\nRETRIEVAL_SEED_TIMEOUT=60\n' > "$ret_env_file"
+ret_run retrieval_up
+check "a commented RETRIEVAL_SKIP_SEED is ignored" "yes" "$(has "$ret_log" ' up .*tei-embed-seed')"
+check "RETRIEVAL_SEED_TIMEOUT from docker/.env bounds the seed wait" "yes" "$(has "$ret_log" 'up -d --wait --wait-timeout 60 tei-embed-seed tei-rerank-seed$')"
+RETRIEVAL_SEED_TIMEOUT=soon ret_run retrieval_up; rc=$?
+check "an invalid RETRIEVAL_SEED_TIMEOUT is refused before seeding" "1/no" "$rc/$(has "$ret_log" ' up ')"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+
+RET_FAIL='up -d --wait .* tei-embed-seed' ret_run retrieval_up; rc=$?
+check "a failed seed exits non-zero" "1" "$rc"
+check "a failed seed still removes the seeds" "yes" "$(has "$ret_log" '--profile retrieval-seed rm -sf tei-embed-seed tei-rerank-seed$')"
+check "a failed seed starts no serving container" "yes/no" \
+    "$(has "$ret_log" 'tei-embed-seed tei-rerank-seed$')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')"
+check "a failed seed applies no backend override" "no" "$(has "$ret_log" 'up -d --no-deps backend$')"
+
+ret_run retrieval_down; rc=$?
+check "retrieval down succeeds" "0" "$rc"
+check "retrieval down removes only five explicit services" "yes" \
+    "$(has "$ret_log" 'compose .* --profile retrieval-seed rm -sf qdrant tei-embed tei-rerank tei-embed-seed tei-rerank-seed$')"
+check "retrieval down never uses project-wide down or removes volumes" "yes/no/no" \
+    "$(has "$ret_log" ' rm -sf ')/$(has "$ret_log" 'compose .* down( |$)')/$(has "$ret_log" '( rm -sfv |^volume rm )')"
+check "retrieval down restores the backend without the overlay" "yes" \
+    "$(has "$ret_log" 'compose -f .*docker-compose.infra.yml -f .*docker-compose.dev.yml --env-file .* up -d --no-deps backend$')"
+(
+    observability_project_active() { return 0; }
+    ret_run retrieval_down
+)
+check "retrieval down keeps the observability override" "yes/no" \
+    "$(has "$ret_log" 'docker-compose.observability.yml .*up -d --no-deps backend$')/$(has "$ret_log" 'docker-compose.retrieval.yml .*up -d --no-deps backend$')"
+(
+    retrieval_project_active() { return 0; }
+    ret_run observability_down
+)
+check "observability down keeps the retrieval override" "yes/no" \
+    "$(has "$ret_log" 'docker-compose.retrieval.yml .*up -d --no-deps backend$')/$(has "$ret_log" 'docker-compose.observability.yml .*up -d --no-deps backend$')"
+(
+    retrieval_project_active() { return 0; }
+    ret_run observability_up
+)
+check "observability up keeps the retrieval override" "yes" \
+    "$(has "$ret_log" 'docker-compose.observability.yml -f .*docker-compose.retrieval.yml .*up -d --no-deps backend$')"
+
+ret_run retrieval_status
+check "retrieval status reports memory usage of the three servers" "yes/yes" \
+    "$(has "$ret_log" 'ps qdrant tei-embed tei-rerank$')/$(has "$ret_log" '^stats --no-stream .*MemUsage')"
+check "retrieval status prints no key value" "no" "$(has "$ret_out" '(qdrant|inference)-key-value')"
+
+# stack_compose_files: an overlay joins the -f list when its containers exist
+# or --with names it, unless --without names it.
+ret_stack_files() {
+    (
+        INFRA_COMPOSE=/x/docker-compose.infra.yml
+        COMPOSE_FILE=/x/docker-compose.dev.yml
+        OBSERVABILITY_COMPOSE=/x/docker-compose.observability.yml
+        RETRIEVAL_COMPOSE=/x/docker-compose.retrieval.yml
+        # Not obs/ret: stack_compose_files' own locals would shadow them.
+        local stub_obs=$1 stub_ret=$2
+        shift 2
+        observability_project_active() { [ "$stub_obs" = yes ]; }
+        retrieval_project_active() { [ "$stub_ret" = yes ]; }
+        stack_compose_files "$@"
+        local IFS=' '
+        printf '%s:%s' "${#STACK_COMPOSE_FILES[@]}" "${STACK_COMPOSE_FILES[*]}"
+    ) 2>/dev/null
+}
+check "stack files: no overlay active" "4" "$(ret_stack_files no no | cut -d: -f1)"
+check "stack files: both overlays active" \
+    "8:-f /x/docker-compose.infra.yml -f /x/docker-compose.dev.yml -f /x/docker-compose.observability.yml -f /x/docker-compose.retrieval.yml" \
+    "$(ret_stack_files yes yes)"
+check "stack files: --without retrieval" "6" "$(ret_stack_files yes yes --without retrieval | cut -d: -f1)"
+check "stack files: --with retrieval when inactive" \
+    "6:-f /x/docker-compose.infra.yml -f /x/docker-compose.dev.yml -f /x/docker-compose.retrieval.yml" \
+    "$(ret_stack_files no no --with retrieval)"
+check "stack files: an unknown overlay is refused" "no" \
+    "$(ret_stack_files no no --with grafana >/dev/null && printf yes || printf no)"
+
+# The production rolling update must keep both overlays' backend override. The
+# companion counts stop the "no line uses another list" checks passing on a
+# function that no longer has the line at all.
+ret_deploy_fn="$(declare -f fullstack_execute_deploy)"
+check "production rolling update exists once" "1" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep -c 'up -d --no-deps "$BACKEND_SERVICE"')"
+check "production rolling update uses the stack file list" "0" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep 'up -d --no-deps "$BACKEND_SERVICE"' | grep -vc 'compose_files\[@\]')"
+check "production admin frontend update exists once" "1" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep -c 'up -d --no-deps "$FRONTEND_SERVICE"')"
+check "production admin frontend update uses the stack file list" "0" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep 'up -d --no-deps "$FRONTEND_SERVICE"' | grep -vc 'compose_files\[@\]')"
+check "deploy builds its file list with stack_compose_files" "yes/yes" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep -q '^ *stack_compose_files;\{0,1\}$' && printf yes || printf no)/$(printf '%s\n' "$ret_deploy_fn" | grep -q 'compose_files=("${STACK_COMPOSE_FILES\[@\]}")' && printf yes || printf no)"
+
+# gum spin runs an external process and the TTY spinner a subshell: a shell
+# function passed to with_spinner fails under gum and loses globals such as
+# STACK_COMPOSE_FILES. Every with_spinner call must run a real command.
+check "overlay lifecycle functions exist" "yes" \
+    "$(declare -F retrieval_up retrieval_down retrieval_seed observability_up observability_down observability_reset >/dev/null && printf yes || printf no)"
+check "overlay lifecycle passes no shell function to with_spinner" "0" \
+    "$(declare -f retrieval_up retrieval_down retrieval_seed observability_up observability_down observability_reset | grep -c 'with_spinner .*\(retrieval\|observability\)_')"
+ret_spinner_fns=""
+while IFS= read -r ret_word; do
+    if [ "$(type -t "$ret_word" 2>/dev/null)" = function ]; then
+        ret_spinner_fns="$ret_spinner_fns $ret_word"
+    fi
+done < <(declare -f | sed -n 's/^.*with_spinner "[^"]*" \([^ ;|&]*\).*$/\1/p' | sort -u)
+check "no with_spinner call in orkestra.sh runs a shell function" "" "$ret_spinner_fns"
+
+ret_catalog_count="$(
+    (
+        get_services() { return 17; }
+        list_all_services retrieval
+        printf '%s' "${#SERVICES[@]}"
+    ) 2>/dev/null
+)"
+check "retrieval log picker uses the explicit service catalog" "5" "$ret_catalog_count"
+ret_run logs_cli retrieval qdrant -n 20 -t; rc=$?
+check "retrieval logs read the merged stack, scoped to the project" "0/yes/no" \
+    "$rc/$(has "$ret_log" '^compose -f .*docker-compose.infra.yml -f .*docker-compose.dev.yml -f .*docker-compose.retrieval.yml --env-file .* logs --timestamps --tail=20 qdrant$')/$(has "$ret_log" '^ps .*--filter')"
+ret_run logs_cli retrieval tei-embed-seed -f
+check "retrieval logs of a seed carry its profile" "yes" \
+    "$(has "$ret_log" '-f .*docker-compose.retrieval.yml --env-file .* --profile retrieval-seed logs --follow tei-embed-seed$')"
+ret_run logs_cli retrieval backend; rc=$?
+check "retrieval logs refuse a service outside the catalog" "1/no" "$rc/$(has "$ret_log" ' logs ')"
+
+rm -f "$ret_env_file" "$ret_log" "$ret_out"
+unset -f ret_run ret_stack_files has
+
 
 # --- env-validate.sh: same-site host pairings (spec §8 follow-up #16) ---
 # The validator derives its ENV_FILE from its own location, so a copy in a

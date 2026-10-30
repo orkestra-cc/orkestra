@@ -166,6 +166,11 @@ ENV_FILE="$DOCKER_DIR/.env"
 # whichever app stack is up.
 OBSERVABILITY_COMPOSE="$DOCKER_DIR/docker-compose.observability.yml"
 
+# ADR-0023 — opt-in self-hosted retrieval stack (Qdrant + two TEI inference
+# servers) on the stack's internal network. Same overlay model as
+# observability: merged into the stack's own Compose project.
+RETRIEVAL_COMPOSE="$DOCKER_DIR/docker-compose.retrieval.yml"
+
 # Clone-version pin. A caller may export ORKESTRA_CLONE_VERSION to override
 # git describe for the whole run (post-release reconciliation — see
 # resolve_stack_identity). Captured ONCE, at load time: the resolver exports
@@ -410,6 +415,11 @@ _spinner_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 # errors. Returns the command's exit code.
 #
 # Usage: with_spinner "Building images..." docker compose build
+#
+# Pass an external command only, never a shell function: `gum spin` runs it as
+# a separate process (a function is not found there), and the TTY path runs it
+# in a background subshell, so any global it sets is lost. Call a function
+# directly after a p_step line instead.
 with_spinner() {
     local message=$1
     shift
@@ -1313,13 +1323,12 @@ fullstack_execute_deploy() {
     preflight_reclaim_containers "$INFRA_COMPOSE"
     preflight_reclaim_containers "$COMPOSE_FILE"
 
-    local -a compose_files=(-f "$INFRA_COMPOSE" -f "$COMPOSE_FILE")
-    # Preserve the backend's Loki/Grafana environment override whenever this
-    # stack already has observability containers. The overlay is only valid as
-    # part of this merged stack, never on its own.
-    if observability_project_active; then
-        compose_files+=(-f "$OBSERVABILITY_COMPOSE")
-    fi
+    # Preserve each overlay's backend override (observability's Loki/Grafana
+    # environment, retrieval's endpoints and retrieval-net) whenever this
+    # stack already has that overlay's containers. The overlays are only
+    # valid as part of this merged stack, never on their own.
+    stack_compose_files
+    local -a compose_files=("${STACK_COMPOSE_FILES[@]}")
     with_spinner "Ensuring infrastructure services are running" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mongodb redis rustfs gotenberg
     sleep 5
@@ -1330,12 +1339,12 @@ fullstack_execute_deploy() {
     elif [ "$ENV" = "production" ]; then
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Rolling-update backend" \
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$BACKEND_SERVICE"
+                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d --no-deps "$BACKEND_SERVICE"
             with_spinner "Waiting for backend to be healthy" sleep 15
         fi
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Deploying admin frontend" \
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$FRONTEND_SERVICE"
+                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d --no-deps "$FRONTEND_SERVICE"
         fi
         with_spinner "Waiting for services to stabilize" sleep 30
     else
@@ -1573,6 +1582,63 @@ fullstack_status() {
 }
 
 # ---------------------------------------------------------------------------
+# Overlays — shared by observability and retrieval
+# ---------------------------------------------------------------------------
+
+# An overlay command can run before any app deploy ran in this shell, so
+# resolve ENV/COMPOSE_FILE + the stack identity here — mirrors
+# fullstack_init_env() without the missing-.env wizard prompt.
+overlay_init_env() {
+    if [ -z "${ENV:-}" ] || [ -z "${COMPOSE_FILE:-}" ]; then
+        if ! detect_environment > /dev/null 2>&1; then
+            die "Cannot detect ENV. Set ENV=development|staging|production in docker/.env or as a shell variable."
+        fi
+        ENV="$DETECTED_ENV"
+        set_env_config
+    fi
+    resolve_stack_identity
+}
+
+stack_backend_running() {
+    [ -n "$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
+        ps -q "$BACKEND_SERVICE" 2> /dev/null)" ]
+}
+
+# stack_compose_files [--with|--without observability|retrieval]...
+#
+# Sets the global STACK_COMPOSE_FILES to the -f list of this stack:
+# (-f infra -f app [-f observability] [-f retrieval]). An overlay is included
+# when its project is active (its containers exist) or --with names it, and
+# left out when --without names it. Every command that recreates the backend
+# goes through it, so changing one overlay never drops the other's backend
+# override. Call it directly — never through with_spinner, whose subshell
+# would lose the array.
+declare -a STACK_COMPOSE_FILES=()
+stack_compose_files() {
+    local obs=auto ret=auto mode
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --with) mode=yes ;;
+            --without) mode=no ;;
+            *) die "stack_compose_files: unknown argument '$1'" ;;
+        esac
+        case "${2:-}" in
+            observability) obs=$mode ;;
+            retrieval) ret=$mode ;;
+            *) die "stack_compose_files: unknown overlay '${2:-}'" ;;
+        esac
+        shift 2
+    done
+    STACK_COMPOSE_FILES=(-f "$INFRA_COMPOSE" -f "$COMPOSE_FILE")
+    if [ "$obs" = yes ] || { [ "$obs" = auto ] && observability_project_active; }; then
+        STACK_COMPOSE_FILES+=(-f "$OBSERVABILITY_COMPOSE")
+    fi
+    if [ "$ret" = yes ] || { [ "$ret" = auto ] && retrieval_project_active; }; then
+        STACK_COMPOSE_FILES+=(-f "$RETRIEVAL_COMPOSE")
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Observability stack (ADR-0005 Phase D)
 # ---------------------------------------------------------------------------
 #
@@ -1593,18 +1659,8 @@ observability_check_file() {
     fi
 }
 
-# The observability command can run before any app deploy ran in this shell,
-# so resolve ENV/COMPOSE_FILE + the stack identity here —
-# mirrors fullstack_init_env() without the missing-.env wizard prompt.
 observability_init_env() {
-    if [ -z "${ENV:-}" ] || [ -z "${COMPOSE_FILE:-}" ]; then
-        if ! detect_environment > /dev/null 2>&1; then
-            die "Cannot detect ENV. Set ENV=development|staging|production in docker/.env or as a shell variable."
-        fi
-        ENV="$DETECTED_ENV"
-        set_env_config
-    fi
-    resolve_stack_identity
+    overlay_init_env
 }
 
 # This allowlist is deliberately explicit. The overlay also contains a partial
@@ -1651,11 +1707,6 @@ observability_remove_volumes() {
     done
 }
 
-observability_backend_running() {
-    [ -n "$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
-        ps -q "$BACKEND_SERVICE" 2> /dev/null)" ]
-}
-
 observability_project_active() {
     local container_ids
     container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" \
@@ -1663,15 +1714,19 @@ observability_project_active() {
     [ -n "$container_ids" ]
 }
 
+# The backend's file list goes through stack_compose_files so that a running
+# retrieval overlay keeps its own backend override when this one changes.
 observability_apply_backend_override() {
-    observability_backend_running || return 0
-    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+    stack_backend_running || return 0
+    stack_compose_files --with observability
+    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" \
         up -d --no-deps "$BACKEND_SERVICE"
 }
 
 observability_restore_backend_config() {
-    observability_backend_running || return 0
-    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
+    stack_backend_running || return 0
+    stack_compose_files --without observability
+    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" \
         up -d --no-deps "$BACKEND_SERVICE"
 }
 
@@ -1687,8 +1742,9 @@ observability_up() {
     with_spinner "Starting observability stack" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         up -d "${OBS_SERVICES[@]}" || die "Observability start failed."
-    with_spinner "Applying backend observability configuration" \
-        observability_apply_backend_override || die "Backend observability configuration failed."
+    # Not through with_spinner: it cannot run a shell function (see its header).
+    p_step "Applying backend observability configuration"
+    observability_apply_backend_override || die "Backend observability configuration failed."
     echo
     p_ok "Observability stack is up."
     observability_info
@@ -1704,8 +1760,8 @@ observability_down() {
     with_spinner "Stopping observability stack" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         rm -sf "${OBS_SERVICES[@]}" || die "Observability stop failed."
-    with_spinner "Restoring backend application configuration" \
-        observability_restore_backend_config || die "Backend configuration restore failed."
+    p_step "Restoring backend application configuration"
+    observability_restore_backend_config || die "Backend configuration restore failed."
     echo
     p_ok "Observability stack stopped (volumes preserved)."
 }
@@ -1729,10 +1785,10 @@ observability_reset() {
     with_spinner "Removing observability containers" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         rm -sfv "${OBS_SERVICES[@]}" || die "Observability container removal failed."
-    with_spinner "Removing observability volumes" observability_remove_volumes || \
-        die "Observability volume removal failed."
-    with_spinner "Restoring backend application configuration" \
-        observability_restore_backend_config || die "Backend configuration restore failed."
+    p_step "Removing observability volumes"
+    observability_remove_volumes || die "Observability volume removal failed."
+    p_step "Restoring backend application configuration"
+    observability_restore_backend_config || die "Backend configuration restore failed."
     p_ok "Observability state wiped."
 }
 
@@ -1800,6 +1856,289 @@ observability_info() {
 }
 
 # ---------------------------------------------------------------------------
+# Retrieval stack (ADR-0023)
+# ---------------------------------------------------------------------------
+#
+# Qdrant + two TEI inference servers (embeddings, reranking) for the core
+# retrieval module, joined to the SAME Compose project as the app stack via
+# `-f infra -f app -f retrieval`, like observability. Serving containers live
+# only on the internal retrieval-net; the model weights are fetched first by
+# two short-lived seed containers (profile retrieval-seed), the only services
+# with egress, which are always removed afterwards. Every action names the
+# overlay's own services explicitly — never a project-wide `down` — and
+# printed output names the key variables, never their values.
+
+retrieval_check_file() {
+    if [ ! -f "$RETRIEVAL_COMPOSE" ]; then
+        die "Retrieval compose file not found at $RETRIEVAL_COMPOSE"
+    fi
+}
+
+retrieval_init_env() {
+    overlay_init_env
+}
+
+# Explicit ownership, as for observability: the overlay's partial `backend`
+# makes it invalid alone, so discovery never comes from parsing it.
+declare -ar RET_SERVICES=(qdrant tei-embed tei-rerank)
+declare -ar RET_SEED_SERVICES=(tei-embed-seed tei-rerank-seed)
+declare -ar RET_VOLUMES=(qdrant-data tei-weights)
+
+# retrieval_setting KEY — the shell environment wins, then the first active
+# KEY= line of docker/.env (one surrounding quote pair stripped). orkestra.sh
+# never sources .env. Unlike env_get it ignores commented stubs, so a
+# `# RETRIEVAL_SKIP_SEED=true` left in the file does not skip seeding.
+retrieval_setting() {
+    local key=$1 line
+    if [ -n "${!key:-}" ]; then
+        printf '%s' "${!key}"
+        return 0
+    fi
+    [ -f "$ENV_FILE" ] || return 0
+    line=$(grep -E "^${key}=" "$ENV_FILE" 2> /dev/null | head -1 || true)
+    line=${line#*=}
+    if [ "${line#\"}" != "$line" ] && [ "${line%\"}" != "$line" ]; then
+        line=${line#\"}; line=${line%\"}
+    elif [ "${line#\'}" != "$line" ] && [ "${line%\'}" != "$line" ]; then
+        line=${line#\'}; line=${line%\'}
+    fi
+    printf '%s' "$line"
+}
+
+# Validate the explicit ownership lists against the merged infra + app +
+# retrieval graph, seeds included. The overlay refuses to render without its
+# two keys (${…:?}), so this is also where a missing key stops every action.
+retrieval_list_services() {
+    local services volumes expected key missing=""
+    if ! services=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
+        --env-file "$ENV_FILE" --profile retrieval-seed config --services); then
+        for key in QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY; do
+            [ -n "$(retrieval_setting "$key")" ] || missing="${missing:+$missing and }$key"
+        done
+        [ -n "$missing" ] || missing="QDRANT_API_KEY and RETRIEVAL_INFERENCE_API_KEY"
+        die "Retrieval compose validation failed — $missing must be set (make init); no lifecycle action was taken."
+    fi
+    if ! volumes=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
+        --env-file "$ENV_FILE" --profile retrieval-seed config --volumes); then
+        die "Retrieval volume validation failed; no lifecycle action was taken."
+    fi
+    for expected in "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}"; do
+        if ! grep -Fxq "$expected" <<< "$services"; then
+            die "Retrieval service '$expected' is missing from the merged compose stack."
+        fi
+    done
+    for expected in "${RET_VOLUMES[@]}"; do
+        if ! grep -Fxq "$expected" <<< "$volumes"; then
+            die "Retrieval volume '$expected' is missing from the merged compose stack."
+        fi
+    done
+}
+
+# Active = a serving container exists (running or not), so a deploy keeps the
+# backend wired while Qdrant restarts. False when the overlay cannot render
+# (keys emptied): the backend then deploys without it.
+retrieval_project_active() {
+    local container_ids
+    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
+        --env-file "$ENV_FILE" ps -a -q "${RET_SERVICES[@]}" 2> /dev/null) || return 1
+    [ -n "$container_ids" ]
+}
+
+# Download the pinned weights into the tei-weights volume through the seed
+# containers, which are healthy only once TEI has loaded the model. The seeds
+# are the only services with egress, so they are removed on every path —
+# success, failure, timeout or Ctrl-C — before a serving container starts.
+# Runs in the foreground (not with_spinner): a cold download takes minutes and
+# Compose's progress is the operator's only feedback.
+retrieval_seed() {
+    local skip timeout rc=0 rm_rc=0 saved_int
+    skip=$(retrieval_setting RETRIEVAL_SKIP_SEED)
+    if [ "$skip" = true ]; then
+        p_warn "RETRIEVAL_SKIP_SEED=true — no download; the ${COMPOSE_PROJECT_NAME}_tei-weights volume must already hold the weights."
+        return 0
+    fi
+    timeout=$(retrieval_setting RETRIEVAL_SEED_TIMEOUT)
+    : "${timeout:=1800}"
+    if ! [[ "$timeout" =~ ^[1-9][0-9]*$ ]]; then
+        die "RETRIEVAL_SEED_TIMEOUT must be a whole number of seconds; nothing was started."
+    fi
+
+    p_step "Seeding the model weights (first run downloads ~4.5 GB; waits up to ${timeout}s)"
+    saved_int=$(trap -p INT)
+    # Ctrl-C stops the wait (Compose gets the signal), never the removal below.
+    trap ':' INT
+    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        --profile retrieval-seed up -d --wait --wait-timeout "$timeout" "${RET_SEED_SERVICES[@]}" || rc=$?
+    p_step "Removing the seed containers"
+    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        --profile retrieval-seed rm -sf "${RET_SEED_SERVICES[@]}" || rm_rc=$?
+    if [ -n "$saved_int" ]; then
+        eval "$saved_int"
+    else
+        trap - INT
+    fi
+
+    if [ "$rm_rc" -ne 0 ]; then
+        die "Could not remove the seed containers (they have internet access): run ./orkestra.sh retrieval down."
+    fi
+    if [ "$rc" -ne 0 ]; then
+        die "Model weight seeding failed (exit $rc); the seeds were removed and no serving container was started. Check access to huggingface.co, free disk space and RETRIEVAL_SEED_TIMEOUT, then re-run (a partial download resumes)."
+    fi
+    p_ok "Model weights seeded; seed containers removed"
+}
+
+retrieval_apply_backend_override() {
+    stack_backend_running || return 0
+    stack_compose_files --with retrieval
+    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" \
+        up -d --no-deps "$BACKEND_SERVICE"
+}
+
+retrieval_restore_backend_config() {
+    stack_backend_running || return 0
+    stack_compose_files --without retrieval
+    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" \
+        up -d --no-deps "$BACKEND_SERVICE"
+}
+
+retrieval_up() {
+    page_header "Retrieval · Up"
+    check_docker_running
+    retrieval_check_file
+    retrieval_init_env
+    retrieval_list_services
+    echo
+    p_muted "Compose: $(basename "$RETRIEVAL_COMPOSE")"
+    echo
+    retrieval_seed
+    with_spinner "Starting Qdrant and the inference servers" \
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        up -d --wait --wait-timeout 900 "${RET_SERVICES[@]}" || die "Retrieval start failed."
+    p_step "Applying backend retrieval configuration"
+    retrieval_apply_backend_override || die "Backend retrieval configuration failed."
+    echo
+    p_ok "Retrieval stack is up."
+    retrieval_info
+}
+
+retrieval_down() {
+    page_header "Retrieval · Down"
+    check_docker_running
+    retrieval_check_file
+    retrieval_init_env
+    retrieval_list_services
+    echo
+    with_spinner "Removing retrieval containers" \
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        --profile retrieval-seed rm -sf "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}" || die "Retrieval stop failed."
+    p_step "Restoring backend application configuration"
+    retrieval_restore_backend_config || die "Backend configuration restore failed."
+    echo
+    p_ok "Retrieval stack stopped (volumes preserved)."
+}
+
+# Memory usage against each container's limit is the sizing source for
+# QDRANT_MEM_LIMIT / TEI_EMBED_MEM_LIMIT / TEI_RERANK_MEM_LIMIT.
+retrieval_status() {
+    page_header "Retrieval · Status"
+    check_docker_running
+    retrieval_check_file
+    retrieval_init_env
+    retrieval_list_services
+    echo
+
+    p_section "Containers"
+    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        ps "${RET_SERVICES[@]}"
+    echo
+
+    p_section "Resource usage"
+    local container_ids
+    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        ps -q "${RET_SERVICES[@]}" 2>/dev/null)
+    if [ -z "$container_ids" ]; then
+        p_muted "No running containers — start the stack with 'retrieval up'."
+        return
+    fi
+    # shellcheck disable=SC2086
+    docker stats --no-stream \
+        --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}" \
+        $container_ids
+}
+
+retrieval_info() {
+    local project="${COMPOSE_PROJECT_NAME:-<project>}"
+    page_header "Retrieval · Info"
+    draw_box "Internal endpoints (retrieval-net only — no host ports)" \
+        "" \
+        "  ${c_bold}Qdrant${c_reset}      http://qdrant:6333        ${c_muted}(API key: QDRANT_API_KEY)${c_reset}" \
+        "  ${c_bold}Embeddings${c_reset}  http://tei-embed:80       ${c_muted}BAAI/bge-m3${c_reset}" \
+        "  ${c_bold}Reranker${c_reset}    http://tei-rerank:80      ${c_muted}BAAI/bge-reranker-v2-m3${c_reset}" \
+        "  ${c_muted}Inference key: RETRIEVAL_INFERENCE_API_KEY. Backend access only.${c_reset}" \
+        ""
+    echo
+    draw_box "Backend wiring (set by the overlay)" \
+        "" \
+        "  QDRANT_URL, QDRANT_API_KEY, RETRIEVAL_INFERENCE_ENDPOINTS," \
+        "  RETRIEVAL_INFERENCE_API_KEY — the keys come from docker/.env (make init)." \
+        "  Deploys keep this wiring while the retrieval containers exist." \
+        ""
+    echo
+    draw_box "Opt out / remove" \
+        "" \
+        "  ${c_accent}./orkestra.sh retrieval down${c_reset}  removes the containers, keeps the volumes;" \
+        "  run it before ${c_accent}./orkestra.sh stop --with-infra${c_reset}." \
+        "  Opt out for good: empty QDRANT_API_KEY and RETRIEVAL_INFERENCE_API_KEY." \
+        "  Wipe the data (after down):" \
+        "    ${c_muted}docker volume rm ${project}_qdrant-data${c_reset}" \
+        "    ${c_muted}docker volume rm ${project}_tei-weights${c_reset}" \
+        ""
+    echo
+    draw_box "Offline hosts" \
+        "" \
+        "  Copy a seeded ${project}_tei-weights volume in, then set" \
+        "  ${c_accent}RETRIEVAL_SKIP_SEED=true${c_reset} in docker/.env. A slow link may need a" \
+        "  larger ${c_accent}RETRIEVAL_SEED_TIMEOUT${c_reset} (seconds, default 1800)." \
+        ""
+    echo
+    draw_box "Benchmark (development / staging)" \
+        "" \
+        "  ${c_accent}./orkestra.sh retrieval bench${c_reset}   runs in the backend container" \
+        ""
+}
+
+# Logs through the merged stack and this project only. view_logs would parse
+# the overlay alone (invalid: partial backend) and fall back to a host-wide
+# label match, which on a shared host can read another stack's qdrant.
+retrieval_view_logs() {
+    local service=$1 follow=${2:-false} lines=${3:-100} timestamps=${4:-false}
+    stack_compose_files --with retrieval
+    local -a cmd=(docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE")
+    local seed
+    for seed in "${RET_SEED_SERVICES[@]}"; do
+        if [ "$service" = "$seed" ]; then
+            cmd+=(--profile retrieval-seed)
+        fi
+    done
+    cmd+=(logs)
+    [ "$timestamps" = "true" ] && cmd+=(--timestamps)
+    if [ "$follow" = "true" ]; then
+        cmd+=(--follow)
+    else
+        cmd+=(--tail="$lines")
+    fi
+    cmd+=("$service")
+
+    echo
+    local cmd_display
+    printf -v cmd_display '%s ' "${cmd[@]}"
+    p_muted "${ic_arrow} ${cmd_display% }"
+    [ "$follow" = "true" ] && p_muted "  Press Ctrl-C to stop following"
+    draw_rule
+    ( "${cmd[@]}" ) || true
+}
+
+# ---------------------------------------------------------------------------
 # Unified logs picker (SKU profiles + full-stack aware)
 # ---------------------------------------------------------------------------
 
@@ -1822,6 +2161,13 @@ list_all_services() {
             for svc in "${OBS_SERVICES[@]}"; do
                 SERVICES+=("$svc")
                 SERVICE_FILE["$svc"]="$OBSERVABILITY_COMPOSE"
+            done
+            return 0
+            ;;
+        retrieval)
+            for svc in "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}"; do
+                SERVICES+=("$svc")
+                SERVICE_FILE["$svc"]="$RETRIEVAL_COMPOSE"
             done
             return 0
             ;;
@@ -2005,6 +2351,10 @@ logs_cli() {
         done
         exit 1
     fi
+    if [ "$profile" = "retrieval" ]; then
+        retrieval_view_logs "$service" "$follow" "$lines" "$timestamps"
+        return
+    fi
     view_logs "${SERVICE_FILE[$service]}" "$service" "$follow" "$lines" "$timestamps"
 }
 
@@ -2134,6 +2484,13 @@ ${c_bold}OBSERVABILITY${c_reset} ${c_muted}(self-hosted OTEL stack — runs alon
   ${c_accent}observability info${c_reset}                URLs + backend wiring recipe
   ${c_accent}observability logs${c_reset} <svc> [flags]  View logs for an observability service
 
+${c_bold}RETRIEVAL${c_reset} ${c_muted}(Qdrant + TEI inference for the retrieval module — opt-in overlay, ADR-0023)${c_reset}
+  ${c_accent}retrieval up${c_reset}                      Seed model weights, start Qdrant + TEI, wire the backend
+  ${c_accent}retrieval down${c_reset}                    Remove containers (volumes kept), unwire the backend
+  ${c_accent}retrieval status${c_reset}                  Containers + memory usage (sizing)
+  ${c_accent}retrieval info${c_reset}                    Internal URLs, backend variables, opt-out, offline seeding
+  ${c_accent}retrieval logs${c_reset} <svc> [flags]      View logs for a retrieval service (seeds included)
+
 ${c_bold}LOG FLAGS${c_reset}
   ${c_accent}-f${c_reset}, ${c_accent}--follow${c_reset}           Follow log output (tail -f)
   ${c_accent}-n${c_reset}, ${c_accent}--lines${c_reset} N          Lines to show when not following (default 100)
@@ -2149,6 +2506,7 @@ ${c_bold}EXAMPLES${c_reset}
   ./orkestra.sh logs backend -f
   ./orkestra.sh observability up
   ./orkestra.sh observability logs grafana -f
+  ./orkestra.sh retrieval up
 
 ${c_bold}ENHANCEMENTS${c_reset}
   Install ${c_accent}gum${c_reset} (charm.sh) for prettier prompts, spinners, and choose menus.
@@ -2264,6 +2622,30 @@ cli_dispatch() {
                     ;;
                 "") die "Missing subcommand. Try --help." ;;
                 *) die "Unknown observability subcommand: $subcmd. Valid: up | down | reset | status | info | logs" ;;
+            esac
+            ;;
+
+        retrieval)
+            local subcmd=${1:-}
+            [ -n "$subcmd" ] && shift
+            case "$subcmd" in
+                up) retrieval_up ;;
+                down) retrieval_down ;;
+                status) retrieval_status ;;
+                info)
+                    retrieval_init_env
+                    retrieval_info
+                    ;;
+                logs)
+                    local service=${1:-}
+                    [ -n "$service" ] && shift
+                    [ -z "$service" ] && die "Usage: ./orkestra.sh retrieval logs <service> [-f] [-n N] [-t]"
+                    retrieval_check_file
+                    retrieval_init_env
+                    logs_cli "retrieval" "$service" "$@"
+                    ;;
+                "") die "Missing subcommand. Try --help." ;;
+                *) die "Unknown retrieval subcommand: $subcmd. Valid: up | down | status | info | logs" ;;
             esac
             ;;
 
