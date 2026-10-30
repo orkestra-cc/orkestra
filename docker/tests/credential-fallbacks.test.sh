@@ -35,7 +35,6 @@ creds='MONGO_ROOT_PASSWORD|REDIS_PASSWORD|STORAGE_SECRET_KEY|RUSTFS_ROOT_PASSWOR
 for f in docker/docker-compose.infra.yml docker/docker-compose.dev.yml \
          docker/docker-compose.staging.yml docker/docker-compose.prod.yml \
          docker/docker-compose.retrieval.yml; do
-  [ -f "$f" ] || continue
   if hits="$(grep -nE "\\\$\\{(${creds}):-[^\$}][^}]*\\}" "$f")"; then
     fail "$f gives a credential a literal fallback:"$'\n'"$hits"
   fi

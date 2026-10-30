@@ -206,6 +206,17 @@ services:
       PDF_RENDERER_USER: ${PDF_RENDERER_USER:-orkestra}
       PDF_RENDERER_PASSWORD: ${PDF_RENDERER_PASSWORD:-}
 
+      # Retrieval (ADR-0023). Empty values leave retrieval "not configured"
+      # (search answers retrieval.not_configured). docker-compose.retrieval.yml
+      # overrides QDRANT_URL, QDRANT_API_KEY, RETRIEVAL_INFERENCE_ENDPOINTS and
+      # RETRIEVAL_INFERENCE_API_KEY with the self-hosted Qdrant + TEI stack; set
+      # them in .env instead to point at an external service.
+      QDRANT_URL: ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION_PREFIX: ${QDRANT_COLLECTION_PREFIX:-}
+      RETRIEVAL_INFERENCE_ENDPOINTS: ${RETRIEVAL_INFERENCE_ENDPOINTS:-}
+      RETRIEVAL_INFERENCE_API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:-}
+
       # Hot reload
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server
       AIR_BIN: ./tmp/main

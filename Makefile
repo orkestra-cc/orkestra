@@ -163,7 +163,7 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test agents-check agents-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening backend-retrieval-hardening
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
@@ -297,7 +297,7 @@ agents-test:
 
 # ---- Backend ----
 
-ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-retrieval-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -318,6 +318,14 @@ backend-credential-fallbacks:
 # and IP flags on. See docker/tests/gotenberg-hardening.test.sh.
 backend-gotenberg-hardening:
 	@bash docker/tests/gotenberg-hardening.test.sh
+
+# Static gate: the retrieval overlay (Qdrant + TEI, ADR-0023) keeps its
+# hardening — no published port, retrieval-net only (egress only for the weight
+# seeds), digest-pinned images, API keys on every sidecar, and the endpoints
+# JSON matching the model each TEI serves. See
+# docker/tests/retrieval-hardening.test.sh.
+backend-retrieval-hardening:
+	@bash docker/tests/retrieval-hardening.test.sh
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
 # from the routes in the current source — same gate as policycoverage but for
