@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import react from '@vitejs/plugin-react';
 import compileSCSS from './compile-scss';
+import { devProxy } from './src/config/devProxy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -386,7 +387,8 @@ export default ({ mode }) => {
             clientPort: 443
           }
         : true,
-      watch: resolveWatchOptions()
+      watch: resolveWatchOptions(),
+      proxy: devProxy(process.env.VITE_DEV_PROXY_TARGET)
     }
   });
 };

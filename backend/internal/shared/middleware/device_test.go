@@ -15,7 +15,7 @@ func TestDeviceMiddleware_ExtractDeviceInfo(t *testing.T) {
 	// Setup
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	errorManager := errors.NewManager(logger, true)
-	middleware := NewDeviceMiddleware(errorManager)
+	middleware := NewDeviceMiddleware(errorManager, "")
 
 	// Test cases
 	tests := []struct {
@@ -120,7 +120,7 @@ func TestDeviceMiddleware_ExtractDeviceInfo(t *testing.T) {
 func TestDeviceMiddleware_DeviceTypeDetection(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	errorManager := errors.NewManager(logger, true)
-	middleware := NewDeviceMiddleware(errorManager)
+	middleware := NewDeviceMiddleware(errorManager, "")
 
 	tests := []struct {
 		userAgent    string
@@ -146,7 +146,7 @@ func TestDeviceMiddleware_DeviceTypeDetection(t *testing.T) {
 func TestDeviceMiddleware_PlatformDetection(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	errorManager := errors.NewManager(logger, true)
-	middleware := NewDeviceMiddleware(errorManager)
+	middleware := NewDeviceMiddleware(errorManager, "")
 
 	tests := []struct {
 		userAgent        string

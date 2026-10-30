@@ -319,6 +319,8 @@ Adding a new field: declare it on `RuntimeConfig` in `src/config/environment.ts`
 
 If a stale config reappears at an edge, diff origin against edge before touching this code — `curl -sI http://127.0.0.1:${FRONTEND_PORT}/config.js` vs `curl -sI https://<host>/config.js` — a `cf-cache-status` other than `DYNAMIC`/`BYPASS` means the CDN, not the app, owns the header, and the fix is a cache rule on the zone.
 
+**Same-origin dev proxy (optional).** Set `VITE_DEV_PROXY_TARGET` (for example `http://backend:3000`) when `npm run dev` runs against a separate backend. The dev server then forwards `/v1` (HTTP) and `/ws` (WebSocket) to that target, so the SPA can call its API on its own origin. The proxy only forwards: the SPA still calls the `apiUrl`/`wsUrl` it resolves (`src/config/environment.ts`: `public/config.js` first, then `VITE_API_URL` / `VITE_WS_URL`, default `http://localhost:3000`), so point them at the dev server's own origin (e.g. `apiUrl: 'http://localhost:8080'`, `wsUrl: 'ws://localhost:8080/ws'`) — a value in `public/config.js` overrides the `VITE_*` ones. Unset or empty, the proxy is off and nothing changes. The mapping lives in `src/config/devProxy.js`, wired into `server.proxy` in `vite.config.js`. It is dev-server only: the production nginx image is not affected.
+
 ## Application version
 
 The version string rendered in the footer (`src/components/footer/Footer.tsx` reads it from `src/config.ts`) and embedded in the dev-server `/health` response is derived from the git tag, not `package.json#version`. The chain:

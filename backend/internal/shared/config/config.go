@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log/slog"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -180,6 +181,11 @@ type CookieConfig struct {
 	// there is no access-token cookie). Read from `COOKIE_NAME_REFRESH`,
 	// defaulting to `orkestra_cookie`.
 	Name string
+	// DeviceName is the device-id cookie name. Read from
+	// `DEVICE_COOKIE_NAME`, defaulting to `orkestra_did`; must be an
+	// RFC 6265 token (checked in Validate). Two stacks on one host share
+	// cookies by name, so each sets its own.
+	DeviceName string
 	// OperatorDomain scopes refresh-token cookies minted on the operator
 	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`.
 	OperatorDomain string
@@ -346,8 +352,9 @@ func Load() (*Config, error) {
 	config.Auth = AuthConfig{
 		JWT: jwtConfig,
 		Cookie: CookieConfig{
-			Secret: getEnv("COOKIE_SECRET", "default-cookie-secret"),
-			Name:   getEnv("COOKIE_NAME_REFRESH", "orkestra_cookie"),
+			Secret:     getEnv("COOKIE_SECRET", "default-cookie-secret"),
+			Name:       getEnv("COOKIE_NAME_REFRESH", "orkestra_cookie"),
+			DeviceName: getEnv("DEVICE_COOKIE_NAME", "orkestra_did"),
 			// ADR-0003 PR-D D-9: per-audience cookie domains. BOTH default
 			// to "" in every environment since bdcbb7ab — see
 			// defaultOperatorCookieDomain / defaultClientCookieDomain below.
@@ -466,7 +473,14 @@ func Load() (*Config, error) {
 	return config, nil
 }
 
+// deviceCookieNameRE is the RFC 6265 cookie-name token.
+var deviceCookieNameRE = regexp.MustCompile("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
+
 func (c *Config) Validate() error {
+	if n := c.Auth.Cookie.DeviceName; n != "" && !deviceCookieNameRE.MatchString(n) {
+		return fmt.Errorf("DEVICE_COOKIE_NAME %q is not a valid cookie name (RFC 6265 token)", n)
+	}
+
 	// Production/Staging security validations
 	if c.IsProductionLike() {
 		// JWT keys are REQUIRED in production

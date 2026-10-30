@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestCookieDomainDefaults_HostOnly guards the fix for the LAN-IP refresh
 // bug: the cookie-domain default MUST be empty (host-only) in every
@@ -114,5 +117,23 @@ func TestAPIDocsEnabled_ExplicitValueWins(t *testing.T) {
 	}
 	if !cfg.Server.APIDocsEnabled {
 		t.Error("unset API_DOCS_ENABLED must fall back to the development default (on)")
+	}
+}
+
+func TestValidateRejectsInvalidDeviceCookieName(t *testing.T) {
+	for _, bad := range []string{"bad name", "a;b", "a=b", "na,me", `q"q`} {
+		c := &Config{}
+		c.Auth.Cookie.DeviceName = bad
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "DEVICE_COOKIE_NAME") {
+			t.Errorf("DeviceName %q: want an error naming DEVICE_COOKIE_NAME, got %v", bad, err)
+		}
+	}
+	for _, ok := range []string{"", "orkestra_did", "owt_0a1b-2c3d_did", "a.b!c~"} {
+		c := &Config{}
+		c.Auth.Cookie.DeviceName = ok
+		if err := c.Validate(); err != nil && strings.Contains(err.Error(), "DEVICE_COOKIE_NAME") {
+			t.Errorf("DeviceName %q must be valid, got %v", ok, err)
+		}
 	}
 }
