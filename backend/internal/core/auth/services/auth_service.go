@@ -1535,6 +1535,23 @@ func (s *authService) RevokeAllUserSessionsExcept(ctx context.Context, userUUID,
 // opened without touching the user's password or OAuth sessions.
 // Returns the count revoked; a partial Redis push is reported through
 // SessionRevocationDegradedError after the loop, as RevokeAllUserSessionsExcept does.
+// RevokePINSession ends one PIN session of the user, leaving the others
+// alone. A session that is not the user's, not a PIN session or already
+// gone is a no-op.
+func (s *authService) RevokePINSession(ctx context.Context, userUUID, sessionUUID, reason string) error {
+	if userUUID == "" || sessionUUID == "" || s.authSessionRepo == nil {
+		return nil
+	}
+	sess, err := s.authSessionRepo.GetByUUID(ctx, sessionUUID)
+	if err != nil {
+		return err
+	}
+	if sess == nil || sess.UserUUID != userUUID || sess.LoginMethod != models.LoginMethodPIN {
+		return nil
+	}
+	return s.revokeSessionInternal(ctx, sessionUUID, reason)
+}
+
 func (s *authService) RevokePINSessions(ctx context.Context, userUUID, deviceID, reason string) (int, error) {
 	if userUUID == "" {
 		return 0, fmt.Errorf("revoke pin sessions: userUUID required")

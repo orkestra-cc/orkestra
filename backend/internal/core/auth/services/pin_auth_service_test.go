@@ -192,6 +192,17 @@ func (f *pinDeviceFake) Delete(_ context.Context, u, d string) error {
 	return nil
 }
 
+func (f *pinDeviceFake) DeleteIfSecret(_ context.Context, u, d, secretHash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.rows[f.key(u, d)]
+	if !ok || row.SecretHash != secretHash {
+		return repository.ErrPINDeviceNotFound
+	}
+	delete(f.rows, f.key(u, d))
+	return nil
+}
+
 func (f *pinDeviceFake) DeleteAllByUser(_ context.Context, u string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -223,6 +234,13 @@ func (a *pinAuthzFake) HasPermission(_ context.Context, userUUID, org, perm stri
 type pinRevokerFake struct {
 	mu    sync.Mutex
 	calls []string
+}
+
+func (r *pinRevokerFake) RevokePINSession(_ context.Context, userUUID, sessionUUID, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, userUUID+"|session:"+sessionUUID+"|"+reason)
+	return nil
 }
 
 func (r *pinRevokerFake) RevokePINSessions(_ context.Context, userUUID, deviceID, reason string) (int, error) {

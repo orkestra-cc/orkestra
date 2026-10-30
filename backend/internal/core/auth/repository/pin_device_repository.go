@@ -29,6 +29,10 @@ type PINDeviceRepository interface {
 	TouchLastUsed(ctx context.Context, userUUID, deviceID string, when time.Time) error
 	// Delete removes one device; ErrPINDeviceNotFound when absent.
 	Delete(ctx context.Context, userUUID, deviceID string) error
+	// DeleteIfSecret removes the device only while it still carries
+	// secretHash (the enrollment that wrote it); ErrPINDeviceNotFound
+	// otherwise, so a newer enrollment of the same device is never undone.
+	DeleteIfSecret(ctx context.Context, userUUID, deviceID, secretHash string) error
 	// DeleteAllByUser removes every device of the user (PIN removal,
 	// GDPR erasure) and returns the count.
 	DeleteAllByUser(ctx context.Context, userUUID string) (int64, error)
@@ -101,6 +105,18 @@ func (r *pinDeviceRepository) TouchLastUsed(ctx context.Context, userUUID, devic
 func (r *pinDeviceRepository) Delete(ctx context.Context, userUUID, deviceID string) error {
 	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
 	res, err := r.coll.DeleteOne(ctx, bson.M{"userUuid": userUUID, "deviceId": deviceID})
+	if err != nil {
+		return err
+	}
+	if res.DeletedCount == 0 {
+		return ErrPINDeviceNotFound
+	}
+	return nil
+}
+
+func (r *pinDeviceRepository) DeleteIfSecret(ctx context.Context, userUUID, deviceID, secretHash string) error {
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	res, err := r.coll.DeleteOne(ctx, bson.M{"userUuid": userUUID, "deviceId": deviceID, "secretHash": secretHash})
 	if err != nil {
 		return err
 	}

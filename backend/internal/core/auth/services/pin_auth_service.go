@@ -48,6 +48,9 @@ type PINPermissionChecker interface {
 // PINSessionRevoker ends the PIN sessions of a user (authService).
 type PINSessionRevoker interface {
 	RevokePINSessions(ctx context.Context, userUUID, deviceID, reason string) (int, error)
+	// RevokePINSession ends one PIN session of the user (a session a
+	// sign-in just minted and then found stale).
+	RevokePINSession(ctx context.Context, userUUID, sessionUUID, reason string) error
 }
 
 // PINSessionChecker re-validates a PIN session when it refreshes
@@ -408,11 +411,12 @@ func (s *PINAuthService) EnrollDevice(ctx context.Context, in PINDeviceEnrollInp
 	if err != nil {
 		return "", err
 	}
+	secretHash := hashPINSecret(secret)
 	if err := s.devices.Upsert(ctx, &authModels.PINDeviceDoc{
 		UUID:       authModels.GenerateUUIDv7(),
 		UserUUID:   user.UUID,
 		DeviceID:   deviceID,
-		SecretHash: hashPINSecret(secret),
+		SecretHash: secretHash,
 		DeviceName: truncate(strings.TrimSpace(in.DeviceName), 100),
 		Platform:   in.Platform,
 		EnrolledBy: stored.By,
@@ -428,7 +432,9 @@ func (s *PINAuthService) EnrollDevice(ctx context.Context, in PINDeviceEnrollInp
 	if fresh, err := s.users.GetUserByID(ctx, user.UUID); err != nil || fresh == nil || !fresh.IsActive ||
 		fresh.PINHash == "" || pinFingerprint(fresh.PINHash) != stored.PIN {
 		//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
-		if derr := s.devices.Delete(ctx, user.UUID, deviceID); derr != nil && !stderrors.Is(derr, repository.ErrPINDeviceNotFound) {
+		// Only the row this request wrote: a newer enrollment of the same
+		// device that landed meanwhile keeps its own secret.
+		if derr := s.devices.DeleteIfSecret(ctx, user.UUID, deviceID, secretHash); derr != nil && !stderrors.Is(derr, repository.ErrPINDeviceNotFound) {
 			s.logger.Warn("pin: could not undo an enrollment whose PIN changed",
 				slog.String("user_uuid", user.UUID), slog.String("error", derr.Error()))
 		}
@@ -620,8 +626,16 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 	// this one yet. The credential is written before that revocation runs,
 	// so reading it once more closes the gap: if it changed, this session
 	// is ended here instead.
-	if err := s.credentialStillCurrent(ctx, user, device); err != nil {
-		s.revokePINSessions(ctx, user.UUID, strings.TrimSpace(in.DeviceID), "pin_changed_during_sign_in")
+	// Only this session is ended, and only on a proven change: a failed
+	// re-read is not evidence the credential moved, and other sessions of
+	// the device are the revocation's business, not this sign-in's.
+	if err := s.credentialStillCurrent(ctx, user, device); err != nil && stderrors.Is(err, ErrInvalidCredentials) {
+		if s.sessions != nil {
+			if rerr := s.sessions.RevokePINSession(ctx, user.UUID, resp.SessionID, "pin_changed_during_sign_in"); rerr != nil {
+				s.logger.Warn("pin: could not end a session minted for a changed credential",
+					slog.String("user_uuid", user.UUID), slog.String("error", rerr.Error()))
+			}
+		}
 		s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_changed_during_sign_in")
 		return nil, err
 	}
@@ -700,11 +714,16 @@ func (s *PINAuthService) credentialStillCurrent(ctx context.Context, user *iface
 	}
 	if device != nil {
 		//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
-		if _, err := s.devices.Find(ctx, user.UUID, device.DeviceID); err != nil {
+		freshDevice, err := s.devices.Find(ctx, user.UUID, device.DeviceID)
+		if err != nil {
 			if stderrors.Is(err, repository.ErrPINDeviceNotFound) {
 				return ErrInvalidCredentials
 			}
 			return fmt.Errorf("%w: device re-read: %w", ErrAuthPolicyUnavailable, err)
+		}
+		// Re-enrolled meanwhile: the secret this sign-in verified is gone.
+		if freshDevice.SecretHash != device.SecretHash {
+			return ErrInvalidCredentials
 		}
 	}
 	return nil

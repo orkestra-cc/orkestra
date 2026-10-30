@@ -114,3 +114,24 @@ func TestPINDeviceRepository_LifeCycle(t *testing.T) {
 		t.Fatalf("u-2 still has %d devices", len(list))
 	}
 }
+
+// DeleteIfSecret removes a device only while it still carries the secret
+// the caller wrote: a newer enrollment of the same device survives.
+func TestPINDeviceRepository_DeleteIfSecret(t *testing.T) {
+	db := livePINDeviceDB(t)
+	repo := NewOperatorPINDeviceRepository(db)
+	ctx := context.Background()
+	if err := repo.Upsert(ctx, &models.PINDeviceDoc{UUID: "d1", UserUUID: "u-1", DeviceID: "tab-1", SecretHash: "newer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteIfSecret(ctx, "u-1", "tab-1", "older"); !errors.Is(err, ErrPINDeviceNotFound) {
+		t.Fatalf("DeleteIfSecret with an older secret = %v, want ErrPINDeviceNotFound", err)
+	}
+	//tenantscope:allow test reads one isolated database's user-keyed PIN devices
+	if _, err := repo.Find(ctx, "u-1", "tab-1"); err != nil {
+		t.Fatalf("the newer enrollment was removed: %v", err)
+	}
+	if err := repo.DeleteIfSecret(ctx, "u-1", "tab-1", "newer"); err != nil {
+		t.Fatalf("DeleteIfSecret with the current secret: %v", err)
+	}
+}

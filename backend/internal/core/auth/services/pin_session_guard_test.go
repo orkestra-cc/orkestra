@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -265,5 +266,74 @@ func TestPIN_CanManage(t *testing.T) {
 	}
 	if f.svc.CanManage(context.Background(), "") {
 		t.Fatal("canManage for an anonymous caller")
+	}
+}
+
+// A device re-enrolled while a sign-in was verifying its old secret: the
+// secret is gone, so no session is issued for it.
+func TestPIN_DeviceReenrolledDuringSignIn(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	f.enrolledDevice(t)
+	snapshot := *f.user(t)
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	device, err := f.devices.Find(ctx, pinWorkerUUID, "tab-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := *device
+	f.devices.mu.Lock()
+	row := f.devices.rows[f.devices.key(pinWorkerUUID, "tab-1")]
+	row.SecretHash = "re-enrolled"
+	f.devices.rows[f.devices.key(pinWorkerUUID, "tab-1")] = row
+	f.devices.mu.Unlock()
+	if err := f.svc.credentialStillCurrent(ctx, &snapshot, &old); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("re-enrolled device = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// pinFailingUsers fails every user read after the first `after`.
+type pinFailingUsers struct {
+	pinUsersCopying
+	reads *int
+	after int
+}
+
+func (u pinFailingUsers) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
+	*u.reads++
+	if *u.reads > u.after {
+		return nil, errors.New("store down")
+	}
+	return u.pinUsersCopying.GetUserByID(ctx, id)
+}
+
+// A failed re-read after issuance is not evidence the credential moved:
+// the sign-in stands and no session is revoked.
+func TestPIN_ReadFailureAfterIssueRevokesNothing(t *testing.T) {
+	f := newPINFixture(t, nil)
+	secret := f.enrolledDevice(t)
+	reads := 0
+	f.svc.users = pinFailingUsers{pinUsersCopying: pinUsersCopying{f.users}, reads: &reads, after: 1}
+	before := len(f.revoker.calls)
+	if _, err := f.login(goodPIN, secret); err != nil {
+		t.Fatalf("login with a failing post-issue read: %v", err)
+	}
+	if got := f.revoker.calls[before:]; len(got) != 0 {
+		t.Fatalf("sessions revoked on a read failure: %v", got)
+	}
+}
+
+// The rollback of an enrollment whose PIN changed removes only the row it
+// wrote, never a newer enrollment of the same device.
+func TestPIN_EnrollmentRollbackSparesANewerEnrollment(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	f.enrolledDevice(t)
+	if err := f.devices.DeleteIfSecret(ctx, pinWorkerUUID, "tab-1", "someone-elses-secret"); !errors.Is(err, repository.ErrPINDeviceNotFound) {
+		t.Fatalf("DeleteIfSecret with another secret = %v, want ErrPINDeviceNotFound", err)
+	}
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	if _, err := f.devices.Find(ctx, pinWorkerUUID, "tab-1"); err != nil {
+		t.Fatalf("the newer enrollment was removed: %v", err)
 	}
 }
