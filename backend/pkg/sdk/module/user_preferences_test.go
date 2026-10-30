@@ -216,3 +216,22 @@ func TestRetryInitRegistersUserPreferences(t *testing.T) {
 		t.Errorf("Sections() = %+v, want crm.activity", s)
 	}
 }
+
+// Durations follow the settings form's grammar: Go durations plus a bare
+// "<n>d", in values and in declared defaults alike.
+func TestPreferenceDurationsAcceptDays(t *testing.T) {
+	schema := []ConfigField{{Key: "window", Type: FieldDuration, Default: "2d"}}
+	if err := NewUserPreferenceRegistry().RegisterFields("crm", schema); err != nil {
+		t.Fatalf("a 2d default must register: %v", err)
+	}
+	for _, v := range []string{"2d", "0.5d", "90m", "36h"} {
+		if err := ValidateValues(schema, map[string]string{"window": v}); err != nil {
+			t.Errorf("%q refused: %v", v, err)
+		}
+	}
+	for _, v := range []string{"1d12h", "d", "two days"} {
+		if ValidateValues(schema, map[string]string{"window": v}) == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+}

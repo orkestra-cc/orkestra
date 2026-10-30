@@ -341,8 +341,8 @@ func validateFieldValue(f ConfigField, v string) error {
 			return fmt.Errorf("must be at most %d", *f.Max)
 		}
 	case FieldDuration:
-		if _, err := time.ParseDuration(v); err != nil {
-			return fmt.Errorf("must be a duration such as 30m or 2h")
+		if _, ok := parseHumanDuration(v); !ok {
+			return fmt.Errorf("must be a duration such as 30m, 2h or 7d")
 		}
 	case FieldEnum:
 		ok := false
@@ -373,4 +373,27 @@ func validateFieldValue(f ConfigField, v string) error {
 		}
 	}
 	return nil
+}
+
+// parseHumanDuration accepts what time.ParseDuration does plus a bare
+// "<number>d" for days — the same grammar the settings form and the
+// backend's utils.ParseDuration accept, kept here so the SDK imports no
+// backend package. Compound forms ("1d12h") are refused, not half-read.
+func parseHumanDuration(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if days, ok := strings.CutSuffix(raw, "d"); ok {
+		n, err := strconv.ParseFloat(days, 64)
+		if err != nil {
+			return 0, false
+		}
+		return time.Duration(n * float64(24*time.Hour)), true
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, false
+	}
+	return d, true
 }
