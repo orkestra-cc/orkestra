@@ -58,7 +58,8 @@ PRODUCTION_VARS=(
 # pair from STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY and its S3 API is
 # browser-facing behind the proxy, so a placeholder there is a public root
 # password — that is the case this list exists for. Object storage may be
-# disabled outright (both STORAGE_* keys empty); RUSTFS_ROOT_PASSWORD is only
+# disabled outright (both STORAGE_* keys empty); RUSTFS_ROOT_PASSWORD, QDRANT_API_KEY
+# and RETRIEVAL_INFERENCE_API_KEY (opt-in retrieval overlay) are only
 # checked when set.
 SECRET_VARS=(
     "COOKIE_SECRET"
@@ -70,6 +71,8 @@ SECRET_VARS=(
     "STORAGE_SECRET_KEY"
     "RUSTFS_ROOT_PASSWORD"
     "PDF_RENDERER_PASSWORD"
+    "QDRANT_API_KEY"
+    "RETRIEVAL_INFERENCE_API_KEY"
 )
 
 # --- Same-site host pairings (spec §8 follow-up #16) ---------------------
@@ -92,6 +95,80 @@ SECRET_VARS=(
 # shell), so this mirrors the ENV read above.
 env_value() {
     grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]'
+}
+
+# env_raw_value KEY — first ACTIVE assignment of KEY in $ENV_FILE, surrounding
+# whitespace and ONE pair of surrounding single or double quotes removed; inner
+# quotes are kept (JSON values). Unlike env_get (env-file.sh) it never falls
+# back to a commented stub, and unlike env_value it does not strip inner quotes.
+env_raw_value() {
+    local v
+    v=$(grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2-)
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    case "$v" in
+        \"*\") [ "${#v}" -ge 2 ] && v="${v:1:${#v}-2}" ;;
+        \'*\') [ "${#v}" -ge 2 ] && v="${v:1:${#v}-2}" ;;
+    esac
+    printf '%s' "$v"
+}
+
+# inference_endpoints_error VALUE — prints "" when VALUE is a valid
+# RETRIEVAL_INFERENCE_ENDPOINTS list, otherwise one short reason. Mirrors the
+# element rules of backend/internal/core/llm/installation (parseElement), which
+# DROPS an invalid entry with only a WARN — so a deploy gate must refuse it.
+# Duplicate profile IDs need the Go canonical-JSON hash and are not re-derived.
+# Needs jq; the caller checks `command -v jq` first.
+inference_endpoints_error() {
+    local reason
+    reason=$(printf '%s' "$1" | jq -r '
+        def isstr: type == "string";
+        def optstr($k): (.[$k] == null) or (.[$k] | isstr);
+        def optbool($k): (.[$k] == null) or (.[$k] | type == "boolean");
+        def bad($i; $f): "entry \($i): missing or invalid \($f)";
+        def entry_error($i):
+          if type != "object" then "entry \($i): not an object"
+          else
+            . as $e
+            | ["name","url","kind","boundary","model","revision","pooling","normalize","truncate","queryPrefix","documentPrefix","apiKeyEnv"] as $known
+            | (($e | keys_unsorted) - $known | first // null) as $unk
+            | ($e.kind // "") as $kind
+            | first(
+                (if $unk != null then "entry \($i): unknown field \($unk)" else empty end),
+                (["name","url","kind","boundary","model","revision","pooling","queryPrefix","documentPrefix","apiKeyEnv"][]
+                  | select(. as $k | $e | optstr($k) | not) | bad($i; .)),
+                (["normalize","truncate"][] | select(. as $k | $e | optbool($k) | not) | bad($i; .)),
+                (if ($e.name // "" | test("\\A[a-z][a-z0-9_-]{0,31}\\z")) | not then bad($i; "name") else empty end),
+                (if ($e.url // "" | test("\\Ahttps?://[^/?#@:][^/?#@]*([/][^?#]*)?\\z")) | not then bad($i; "url") else empty end),
+                (if ($kind | IN("embed","rerank","chat")) | not then bad($i; "kind") else empty end),
+                (if (($e.boundary // "") | IN("local","hosted")) | not then bad($i; "boundary") else empty end),
+                (if ($e.model // "" | test("\\A[A-Za-z0-9/][A-Za-z0-9._/:-]{0,199}\\z")) | not then bad($i; "model") else empty end),
+                (if ($e.revision // "" | test("\\A[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\\z")) | not then bad($i; "revision") else empty end),
+                (if $kind == "embed" then
+                    (if (($e.pooling // "") | IN("cls","mean","last_token")) | not then bad($i; "pooling") else empty end)
+                 elif ($e.pooling // "") != "" then bad($i; "pooling") else empty end),
+                (if $kind != "embed" and ($e.normalize // false) then bad($i; "normalize") else empty end),
+                (if $kind == "chat" and ($e.truncate // false) then bad($i; "truncate") else empty end),
+                (["queryPrefix","documentPrefix"][] as $k
+                  | if $kind != "embed" then (if ($e[$k] // "") != "" then bad($i; $k) else empty end)
+                    elif (($e[$k] // "") | utf8bytelength) > 256 then bad($i; $k) else empty end),
+                (if $e.apiKeyEnv != null and (($e.apiKeyEnv) | test("\\ARETRIEVAL_INFERENCE_[A-Z0-9_]{1,64}\\z") | not) then bad($i; "apiKeyEnv") else empty end)
+              ) // empty
+          end;
+        if type != "array" then "not a JSON array"
+        elif length == 0 then "empty list"
+        else
+          first(
+            (to_entries[] | .key as $i | .value | entry_error($i)),
+            ([.[].name] | group_by(.)[] | select(length > 1) | "duplicate name \(.[0])")
+          ) // ""
+        end' 2>/dev/null) || reason="not a JSON array"
+    printf '%s' "$reason"
+}
+
+# inference_endpoints_query VALUE FILTER — jq over a list already validated.
+inference_endpoints_query() {
+    printf '%s' "$1" | jq -r "$2" 2>/dev/null
 }
 
 # host_only VALUE — hostname of a URL or a bare host[:port], with scheme,
@@ -248,7 +325,7 @@ validate_env_file() {
                     continue
                 fi
                 ;;
-            RUSTFS_ROOT_PASSWORD)
+            RUSTFS_ROOT_PASSWORD | QDRANT_API_KEY | RETRIEVAL_INFERENCE_API_KEY)
                 [ -z "$value" ] && continue
                 ;;
         esac
@@ -257,7 +334,9 @@ validate_env_file() {
         # missing, placeholder or malformed — must recommend -hex 32; a
         # -hex 16 value would only fail the 64-hex check on the next run.
         hint="openssl rand -hex 16"
-        [ "$var" = "LLM_SECRET_ENCRYPTION_KEY" ] && hint="openssl rand -hex 32"
+        case "$var" in
+            LLM_SECRET_ENCRYPTION_KEY | QDRANT_API_KEY | RETRIEVAL_INFERENCE_API_KEY) hint="openssl rand -hex 32" ;;
+        esac
         if secret_is_placeholder "$value"; then
             reason="is empty or a placeholder"
         elif [ "$var" = "LLM_SECRET_ENCRYPTION_KEY" ] && ! [[ "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
@@ -279,6 +358,67 @@ validate_env_file() {
             warnings=$((warnings + 1))
         fi
     done
+
+    echo ""
+
+    # Retrieval overlay (ADR-0023): Qdrant + installation inference endpoints.
+    # Both keys are optional (retrieval is opt-in) but checked when set, and the
+    # backend only WARNs on a bad endpoint list, so the deploy gate is here.
+    print_info "Checking retrieval settings..."
+    local q_url q_key i_key i_eps q_prefix ep_reason ep_var ep_idx
+    q_url=$(env_value QDRANT_URL)
+    q_key=$(env_value QDRANT_API_KEY)
+    i_key=$(env_value RETRIEVAL_INFERENCE_API_KEY)
+    i_eps=$(env_raw_value RETRIEVAL_INFERENCE_ENDPOINTS)
+    q_prefix=$(env_value QDRANT_COLLECTION_PREFIX)
+    retrieval_problem() {
+        if [ "$strict" -eq 1 ]; then
+            print_error "$1"
+            errors=$((errors + 1))
+        else
+            print_warning "$1 — tolerated in development, refused in staging/production"
+            warnings=$((warnings + 1))
+        fi
+    }
+    if [ -z "$q_key" ] && [ -z "$i_key" ] && [ -z "$q_url" ] && [ -z "$i_eps" ]; then
+        print_info "Retrieval not configured (QDRANT_API_KEY and RETRIEVAL_INFERENCE_API_KEY empty) — the retrieval overlay will refuse to start"
+    fi
+    if { [ -z "$q_key" ] && [ -n "$i_key" ]; } || { [ -n "$q_key" ] && [ -z "$i_key" ]; }; then
+        print_warning "the retrieval overlay needs both QDRANT_API_KEY and RETRIEVAL_INFERENCE_API_KEY"
+        warnings=$((warnings + 1))
+    fi
+    if [ -n "$q_url" ] && [ -z "$q_key" ]; then
+        retrieval_problem "QDRANT_URL is set but QDRANT_API_KEY is empty — Qdrant must require an API key (ADR-0023 D3)"
+    fi
+    if [ -n "$q_prefix" ] && ! [[ "$q_prefix" =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
+        print_warning "QDRANT_COLLECTION_PREFIX '$q_prefix' does not match ^[a-z][a-z0-9-]{0,31}\$ — the backend falls back to 'orkestra'"
+        warnings=$((warnings + 1))
+    fi
+    if [ -n "$i_eps" ]; then
+        if ! command -v jq > /dev/null 2>&1; then
+            print_warning "jq not found — RETRIEVAL_INFERENCE_ENDPOINTS not validated"
+            warnings=$((warnings + 1))
+        else
+            ep_reason=$(inference_endpoints_error "$i_eps")
+            if [ -n "$ep_reason" ]; then
+                retrieval_problem "RETRIEVAL_INFERENCE_ENDPOINTS is not a valid endpoint list: $ep_reason"
+            else
+                if [ -n "$(inference_endpoints_query "$i_eps" '.[] | select(.boundary == "hosted" and (.url | startswith("http://"))) | .name')" ]; then
+                    retrieval_problem "RETRIEVAL_INFERENCE_ENDPOINTS has a hosted endpoint on http:// — the backend drops it in a production-like environment"
+                fi
+                # apiKeyEnv names a variable that must be non-empty AND reach the backend.
+                while IFS=$'\t' read -r ep_idx ep_var; do
+                    [ -z "$ep_var" ] && continue
+                    if [ -z "$(env_value "$ep_var")" ]; then
+                        retrieval_problem "RETRIEVAL_INFERENCE_ENDPOINTS entry $ep_idx: $ep_var is empty — set it in .env and pass it to the backend container (add $ep_var: \${$ep_var:-} to the app compose file)"
+                    fi
+                done < <(inference_endpoints_query "$i_eps" 'to_entries[] | select(.value.apiKeyEnv != null) | "\(.key)\t\(.value.apiKeyEnv)"')
+                if [ -z "$i_key" ] && [ -n "$(inference_endpoints_query "$i_eps" '.[] | select(.apiKeyEnv == null) | .name')" ]; then
+                    retrieval_problem "RETRIEVAL_INFERENCE_API_KEY is empty and an endpoint names no apiKeyEnv"
+                fi
+            fi
+        fi
+    fi
 
     echo ""
 
@@ -482,6 +622,14 @@ ${BLUE}Checks performed:${NC}
       (the llm module ignores anything else). Error in staging and
       production, warning in development. Object storage disabled (both
       STORAGE_* keys empty) needs RUSTFS_ROOT_* for the bundled container.
+      QDRANT_API_KEY and RETRIEVAL_INFERENCE_API_KEY are checked when set.
+    - Retrieval (opt-in overlay): QDRANT_URL needs QDRANT_API_KEY; both keys
+      together; a non-empty QDRANT_COLLECTION_PREFIX matches
+      ^[a-z][a-z0-9-]{0,31}\$ (warning); RETRIEVAL_INFERENCE_ENDPOINTS is a JSON
+      list the backend accepts (needs jq; checks the llm installation element
+      rules, a hosted endpoint on http://, and that an apiKeyEnv variable is
+      set — it must also be passed to the backend container). Duplicate
+      profile IDs are not checked here; the backend WARNs and drops them.
     - No placeholder/development values in production
 
 ${BLUE}Switching Environments:${NC}
