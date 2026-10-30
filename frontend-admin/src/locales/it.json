@@ -1055,7 +1055,8 @@
       "toastResendFailed": "Reinvio fallito: {{error}}",
       "toastPasswordResetSent": "Email di reset password inviata",
       "toastSendFailed": "Invio fallito: {{error}}",
-      "errorUnknown": "errore sconosciuto"
+      "errorUnknown": "errore sconosciuto",
+      "actionManagePin": "Gestisci PIN"
     },
     "attachMember": {
       "title": "Collega membro",
@@ -1280,7 +1281,8 @@
       "sessions": "Sessioni",
       "devices": "Dispositivi attendibili",
       "backupCodes": "Codici di backup",
-      "ai": "Account AI"
+      "ai": "Account AI",
+      "pin": "PIN"
     },
     "stats": {
       "mfaTitle": "Due fattori",
@@ -1526,6 +1528,9 @@
         "userAccount": "Addebitato al tuo piano",
         "userAccountSubtitle": "Token sul tuo account ChatGPT collegato"
       }
+    },
+    "pinTab": {
+      "intro": "Il PIN ti fa accedere dai dispositivi di campo con il tuo username. Gestiscilo qui; le modifiche richiedono un accesso forte recente."
     }
   },
   "operatorProfile": {
@@ -2223,16 +2228,13 @@
       "labelEmail": "Email",
       "labelPhone": "Telefono",
       "labelUsername": "Username",
-      "labelPin": "PIN",
       "labelRole": "Ruolo",
       "requiredMark": "*",
       "placeholderFullName": "es. Mario Rossi",
       "placeholderEmail": "mario.rossi@esempio.com",
       "placeholderPhone": "+39 333 1234567",
       "placeholderUsername": "mariorossi",
-      "placeholderPin": "12345",
       "helpUsername": "L'username verrà usato per l'accesso al sistema",
-      "helpPin": "Codice numerico di 5 cifre per l'accesso",
       "cancel": "Annulla",
       "submit": "Crea utente",
       "submitting": "Creazione…",
@@ -3869,6 +3871,81 @@
     "retryFailed": "Riprova le fallite",
     "errors": {
       "generic": "Operazione non riuscita."
+    }
+  },
+  "pinMethod": {
+    "title": "Accesso con PIN",
+    "cardTitle": "Accesso con PIN",
+    "badgeSet": "Impostato",
+    "badgeNotSet": "Non impostato",
+    "badgeLocked": "Bloccato",
+    "updatedAt": "Ultima modifica {{date}}.",
+    "notSetAdmin": "L'utente non ha un PIN. Impostalo per permettergli di accedere da un dispositivo di campo con username e PIN.",
+    "notSetSelf": "Non hai un PIN. Impostalo per accedere da un dispositivo di campo con il tuo username e il PIN.",
+    "lockedUntil": "Bloccato per troppi tentativi errati fino a {{when}}.",
+    "weakNote": "Il PIN è un metodo di accesso debole: non vale mai come autenticazione a due fattori, e una sessione aperta con il PIN non può cambiare le credenziali.",
+    "setButton": "Imposta PIN",
+    "replaceButton": "Cambia PIN",
+    "codeButton": "Codice di attivazione dispositivo",
+    "removeButton": "Rimuovi PIN",
+    "cancel": "Annulla",
+    "unavailable": "L'accesso con PIN è disattivato su questa superficie. Un PIN si può preparare ora e funzionerà quando un amministratore attiverà il metodo.",
+    "loadError": "Impossibile caricare lo stato del PIN.",
+    "retry": "Riprova",
+    "toastSet": "PIN impostato. Le sessioni aperte con il PIN sono state chiuse.",
+    "toastReplaced": "PIN cambiato. Le sessioni aperte con il PIN sono state chiuse.",
+    "toastRemoved": "PIN e dispositivi attivati rimossi.",
+    "toastDeviceRevoked": "Dispositivo revocato. Le sue sessioni con PIN sono state chiuse.",
+    "clientModalTitle": "Accesso con PIN — {{email}}",
+    "setModal": {
+      "titleSet": "Imposta PIN",
+      "titleReplace": "Cambia PIN",
+      "intro": "Scegli {{count}} cifre. Evita cifre ripetute e sequenze come 12345.",
+      "labelPin": "Nuovo PIN",
+      "labelConfirm": "Ripeti il PIN",
+      "replaceNote": "Cambiare il PIN chiude tutte le sessioni aperte con quello vecchio. I dispositivi attivati restano attivi.",
+      "submit": "Salva PIN",
+      "errorRequired": "Inserisci il PIN.",
+      "errorDigits": "Usa solo cifre.",
+      "errorLength": "Il PIN deve avere esattamente {{count}} cifre.",
+      "errorMismatch": "I due PIN non coincidono."
+    },
+    "codeModal": {
+      "title": "Codice di attivazione dispositivo",
+      "intro": "Inserisci questo codice nell'app sul dispositivo, insieme allo username. Vale una sola volta e non verrà mostrato di nuovo.",
+      "expires": "Valido fino a {{when}}.",
+      "done": "Fatto"
+    },
+    "removeModal": {
+      "title": "Rimuovere il PIN?",
+      "body": "Il PIN e tutti i dispositivi attivati vengono rimossi e le sessioni aperte con il PIN vengono chiuse. Gli altri metodi di accesso non cambiano.",
+      "submit": "Rimuovi"
+    },
+    "devices": {
+      "heading": "Dispositivi attivati",
+      "introRequired": "Il PIN funziona solo su questi dispositivi. Attiva un dispositivo con un codice monouso.",
+      "introOptional": "Il legame al dispositivo è disattivato su questa superficie: il PIN funziona su qualsiasi dispositivo. I dispositivi attivati restano elencati.",
+      "empty": "Nessun dispositivo attivato.",
+      "colDevice": "Dispositivo",
+      "colPlatform": "Piattaforma",
+      "colVia": "Attivato da",
+      "colEnrolled": "Attivato il",
+      "colLastUsed": "Ultimo uso",
+      "revoke": "Revoca",
+      "viaAdmin": "Amministratore",
+      "viaSelf": "Utente"
+    },
+    "errors": {
+      "auth_pin_invalid": "Il PIN deve avere esattamente il numero di cifre configurato.",
+      "auth_pin_too_weak": "Scegli un PIN che non sia una cifra ripetuta o una sequenza.",
+      "auth_pin_username_required": "L'utente deve prima avere uno username: è l'identificativo dell'accesso con PIN.",
+      "auth_pin_username_not_unique": "Un altro utente ha lo stesso username. Assegna prima a questo utente uno username univoco.",
+      "auth_pin_not_allowed": "Questo utente non può avere un PIN: ruoli privilegiati, account di servizio e utenti senza il permesso di accesso con PIN usano metodi più forti.",
+      "auth_pin_not_set": "Non c'è ancora un PIN.",
+      "auth_pin_session_forbidden": "Hai effettuato l'accesso con il PIN. Accedi con la password o un altro metodo forte per gestire il PIN.",
+      "auth_pin_device_not_found": "Il dispositivo non è più attivato.",
+      "user_target_tier_forbidden": "Non puoi cambiare il PIN di un utente con un ruolo superiore al tuo.",
+      "unknown": "L'operazione sul PIN non è riuscita."
     }
   },
   "adminRetrieval": {

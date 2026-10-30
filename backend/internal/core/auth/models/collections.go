@@ -99,6 +99,11 @@ type RefreshTokenDoc struct {
 	// RevokedReason=RevokeReasonRotated; lets a diagnostic query walk the
 	// chain forward from any row.
 	SucceededBy string `bson:"succeededBy,omitempty" json:"-"`
+	// LoginMethod records how the session began when that changes what a
+	// refresh may mint. Only LoginMethodPIN is written today: a rotation
+	// copies it forward and re-stamps amr ["pin"] plus the PIN lifetimes,
+	// because the refresh JWT carries no amr. Empty = every other method.
+	LoginMethod string `bson:"loginMethod,omitempty" json:"-"`
 }
 
 // RefreshTokenFamilyStateDoc is the durable revocation fence for a token
@@ -209,6 +214,11 @@ const (
 const (
 	SecurityEventsCollection = "auth_security_events"
 	DeviceTrustCollection    = "auth_device_trust"
+
+	// PIN device registry, split per tier like the
+	// rest of the credential-bearing auth collections.
+	OperatorPINDevicesCollection = "operator_pin_devices"
+	ClientPINDevicesCollection   = "client_pin_devices"
 
 	OperatorOAuthProvidersCollection       = "operator_oauth_providers"
 	ClientOAuthProvidersCollection         = "client_oauth_providers"

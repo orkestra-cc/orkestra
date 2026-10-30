@@ -4,6 +4,7 @@ import { Card, Col, Nav, Row, Spinner, Tab } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faDesktop,
+  faHashtag,
   faKey,
   faLaptop,
   faLifeRing,
@@ -27,6 +28,7 @@ const SessionsTab = lazy(() => import('./SessionsTab'));
 const TrustedDevicesTab = lazy(() => import('./TrustedDevicesTab'));
 const BackupCodesTab = lazy(() => import('./BackupCodesTab'));
 const AiAccountsTab = lazy(() => import('./AiAccountsTab'));
+const PinTab = lazy(() => import('./PinTab'));
 
 const TABS = [
   { key: 'password', labelKey: 'userSecurity.tabs.password', icon: faKey },
@@ -39,6 +41,9 @@ const TABS = [
     labelKey: 'userSecurity.tabs.backupCodes',
     icon: faLifeRing
   },
+  // PIN sign-in: shown only when the surface has the
+  // method on or the user already holds a PIN.
+  { key: 'pin', labelKey: 'userSecurity.tabs.pin', icon: faHashtag },
   // Linked ChatGPT accounts (Sign in with ChatGPT): shown only with the org
   // permission llm.accounts.self.
   { key: 'ai', labelKey: 'userSecurity.tabs.ai', icon: faRobot }
@@ -62,15 +67,19 @@ const SecurityPage = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { canLinkOwnAccounts } = useLlmPermissions();
-  const visibleTabs = TABS.filter(
-    item => item.key !== 'ai' || canLinkOwnAccounts
-  );
-  const tab = readTab(searchParams.get('tab'), visibleTabs);
-
   // The KPI row reads the same RTK Query caches the tabs read, so it costs no
   // extra round trip — RTK Query dedupes the in-flight requests (the pattern
   // /admin/compliance's summary row uses).
   const authMethods = useGetSelfAuthMethodsQuery();
+  const pinVisible =
+    !!authMethods.data?.pin?.available || !!authMethods.data?.pin?.set;
+  const visibleTabs = TABS.filter(
+    item =>
+      (item.key !== 'ai' || canLinkOwnAccounts) &&
+      (item.key !== 'pin' || pinVisible)
+  );
+  const tab = readTab(searchParams.get('tab'), visibleTabs);
+
   const sessions = useGetMySessionsQuery();
   const trusted = useListTrustedDevicesQuery();
 
@@ -261,6 +270,11 @@ const SecurityPage = () => {
                 <Tab.Pane eventKey="backup-codes">
                   <BackupCodesTab />
                 </Tab.Pane>
+                {pinVisible && (
+                  <Tab.Pane eventKey="pin" mountOnEnter unmountOnExit>
+                    <PinTab />
+                  </Tab.Pane>
+                )}
                 {canLinkOwnAccounts && (
                   // Mounted only while open: its three queries (accounts,
                   // models, usage) are not the security summary's.

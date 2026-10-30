@@ -104,6 +104,12 @@ const (
 	ScopeMFAVerify   = "mfa-verify"
 	ScopeMFAEnroll   = "mfa-enroll"
 	ScopeMFALogin    = "mfa-login"
+	// ScopePIN is the PIN sign-in account scope (per audience, per
+	// username — the PIN route's identifier); ScopePINEnroll is the device
+	// enrollment code scope. Separate keys: a burned enrollment budget must
+	// not lock the user's PIN sign-in, and vice versa.
+	ScopePIN       = "pin"
+	ScopePINEnroll = "pin-enroll"
 )
 
 const attemptKeyPrefix = "auth:attempts:"
@@ -196,6 +202,24 @@ func emailKey(scope string, aud PolicyAudience, email string) string {
 		return ""
 	}
 	return attemptKeyPrefix + scope + ":" + string(aud) + ":" + email
+}
+
+// AttemptKeyPIN / AttemptKeyPINEnroll are keyed on the submitted
+// username, exactly as typed (usernames are case-sensitive in the user
+// module), so a known and an unknown username lock alike.
+func AttemptKeyPIN(aud PolicyAudience, username string) string {
+	return usernameKey(ScopePIN, aud, username)
+}
+func AttemptKeyPINEnroll(aud PolicyAudience, username string) string {
+	return usernameKey(ScopePINEnroll, aud, username)
+}
+
+func usernameKey(scope string, aud PolicyAudience, username string) string {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return ""
+	}
+	return attemptKeyPrefix + scope + ":" + string(aud) + ":" + username
 }
 
 // AttemptKeyClient — a client ID IS an account, so it carries the

@@ -624,6 +624,24 @@ func TestRequireEnrolmentProof_NoFactorFreshAuthTimePasses(t *testing.T) {
 	}
 }
 
+// A PIN session's fresh auth_time is a sign-in with a weak secret and
+// must never let the caller add a factor.
+func TestRequireEnrolmentProof_NoFactorFreshPINSessionIsReauth(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{authModels.AMRPIN}, AuthTime: time.Now().Add(-time.Minute).Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "reauthentication_required")
+}
+
+// A PIN session is never step-up: no second factor, no last_otp_at.
+func TestRequireStepUp_PINSessionIsRefused(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{authModels.AMRPIN}, AuthTime: time.Now().Unix()}
+	if called, status, _ := runStepUp(t, 5*time.Minute, claims); called {
+		t.Fatalf("a PIN session passed RequireStepUp (status %d)", status)
+	}
+}
+
 // A fresh reauth (password reconfirm) is also a fresh proof, for the
 // users that endpoint still serves.
 func TestRequireEnrolmentProof_NoFactorFreshReauthPasses(t *testing.T) {

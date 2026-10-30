@@ -31,7 +31,12 @@ type AdminUserAuthHandler struct {
 	// back to "no rows yet" so a build without the audit pipeline
 	// returns an empty page instead of a 500.
 	eventRepo repository.SecurityEventRepository
+	// pin adds the PIN slice to the aggregator.
+	pin *services.PINAuthService
 }
+
+// SetPINService wires the operator tier's PIN service into the aggregator.
+func (h *AdminUserAuthHandler) SetPINService(pin *services.PINAuthService) { h.pin = pin }
 
 // NewAdminUserAuthHandler wires the dependencies. auth + inviter must
 // be the operator-tier instances — AdminUserAuthHandler operates on
@@ -65,6 +70,9 @@ func (h *AdminUserAuthHandler) GetAuthMethods(ctx context.Context, req *AdminAut
 	view, err := h.auth.GetUserAuthMethods(ctx, req.UserID)
 	if err != nil {
 		return nil, mapAdminUserAuthError(err)
+	}
+	if h.pin != nil {
+		view.PIN = h.pin.ViewByUUID(ctx, req.UserID)
 	}
 	return &AdminAuthMethodsResponse{Body: *view}, nil
 }

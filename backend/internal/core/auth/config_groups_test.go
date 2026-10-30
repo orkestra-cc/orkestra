@@ -83,7 +83,7 @@ func TestConfigGroups_EveryFieldIsGrouped(t *testing.T) {
 }
 
 // TestConfigGroups_FieldCountPerGroup pins the exact bucket every one of the
-// 67 fields lands in. `TestConfigGroups_EveryFieldIsGrouped` above only
+// 73 fields lands in. `TestConfigGroups_EveryFieldIsGrouped` above only
 // proves a field's `Group` resolves to *some* declared key — it would not
 // notice `passwordMinLength` moving from `password` to `login`, since
 // `login` is declared too. This is the regression guard the migration brief
@@ -92,13 +92,16 @@ func TestConfigGroups_EveryFieldIsGrouped(t *testing.T) {
 // `sessionAbsoluteTTL` to `login`, and the password-login toggle added
 // `passwordLoginEnabled{Admin,Client}` there too, bringing the module's full
 // field count to 65; the IP lockout policy pair (`ipLockoutThreshold`,
-// `ipLockoutDuration`, both `login`) brings it to 67 — update this map
+// `ipLockoutDuration`, both `login`) brings it to 67, and the six PIN
+// sign-in keys (`pinLoginEnabledAdmin/Client`,
+// `pinLength`, `pinRequiresTrustedDevice`, `pinAccessTokenTTL`,
+// `pinRefreshTokenTTL`, all `login`) to 73 — update this map
 // deliberately alongside any future field, not by reflexively editing
 // numbers until the suite goes green.
 func TestConfigGroups_FieldCountPerGroup(t *testing.T) {
 	want := map[string]int{
 		"registration":  5,
-		"login":         11,
+		"login":         17,
 		"password":      7,
 		"mfa":           5,
 		"oauth":         11,
@@ -114,8 +117,8 @@ func TestConfigGroups_FieldCountPerGroup(t *testing.T) {
 	for _, f := range schema {
 		got[f.Group]++
 	}
-	if len(schema) != 67 {
-		t.Errorf("ConfigSchema() returned %d fields, want 67", len(schema))
+	if len(schema) != 73 {
+		t.Errorf("ConfigSchema() returned %d fields, want 73", len(schema))
 	}
 	for group, wantCount := range want {
 		if got[group] != wantCount {

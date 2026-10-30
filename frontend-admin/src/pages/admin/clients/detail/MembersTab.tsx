@@ -17,6 +17,7 @@ import {
 import { Button } from 'react-bootstrap';
 import AttachMemberModal from './AttachMemberModal';
 import AdminResetMfaModal from 'pages/admin/users/AdminResetMfaModal';
+import ClientPinModal from './ClientPinModal';
 
 interface Props {
   org: Org;
@@ -57,6 +58,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
   const [sendPasswordReset] = useSendPasswordResetClientUserAdminMutation();
   const [attachOpen, setAttachOpen] = useState(false);
   const [mfaTarget, setMfaTarget] = useState<MfaTarget | null>(null);
+  const [pinTarget, setPinTarget] = useState<MfaTarget | null>(null);
 
   const unknownErr = t('adminClients.members.errorUnknown');
 
@@ -243,6 +245,19 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                         <FontAwesomeIcon icon="shield-alt" className="me-2" />
                         {t('adminClients.members.actionResetMfa')}
                       </Dropdown.Item>
+                      <Dropdown.Item
+                        as="button"
+                        type="button"
+                        onClick={() =>
+                          setPinTarget({
+                            id: m.userUUID,
+                            email: m.email || m.userUUID
+                          })
+                        }
+                      >
+                        <FontAwesomeIcon icon="key" className="me-2" />
+                        {t('adminClients.members.actionManagePin')}
+                      </Dropdown.Item>
                       {!m.isOwner && (
                         <>
                           <Dropdown.Divider className="my-1" />
@@ -286,6 +301,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
         tier="client"
         onHide={() => setMfaTarget(null)}
       />
+      <ClientPinModal target={pinTarget} onHide={() => setPinTarget(null)} />
     </>
   );
 };

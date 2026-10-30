@@ -59,6 +59,12 @@ type SecurityContext struct {
 	// service method. Not persisted — the fingerprint lives on
 	// AuthSessionDoc.DeviceInfo.Fingerprint once the session is created.
 	Fingerprint string `json:"fingerprint,omitempty" bson:"-"`
+	// AccessTTL / RefreshTTL override the configured token lifetimes for
+	// this mint when positive. Only the PIN method sets them (its own
+	// auth.pinAccessTokenTTL / auth.pinRefreshTokenTTL); the JWT service
+	// clamps both into its bounds. Not persisted.
+	AccessTTL  time.Duration `json:"-" bson:"-"`
+	RefreshTTL time.Duration `json:"-" bson:"-"`
 }
 
 // RiskAssessment contains detailed risk analysis results
@@ -104,14 +110,19 @@ type SecurityEvent struct {
 
 // TokenResponse represents the response containing tokens and session info
 type TokenResponse struct {
-	AccessToken    string                        `json:"accessToken,omitempty"`
-	RefreshToken   string                        `json:"refreshToken,omitempty"` // Not sent for mobile (stored in cookie)
-	TokenType      string                        `json:"tokenType,omitempty"`
-	ExpiresIn      int64                         `json:"expiresIn,omitempty"`
-	User           *iface.UserManagementResponse `json:"user,omitempty"`
-	OAuthProviders []OAuthProviderInfo           `json:"oauthProviders,omitempty"`
-	SessionID      string                        `json:"sessionId,omitempty"`
-	DeviceID       string                        `json:"deviceId,omitempty"`
+	AccessToken  string `json:"accessToken,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"` // Not sent for mobile (stored in cookie)
+	TokenType    string `json:"tokenType,omitempty"`
+	ExpiresIn    int64  `json:"expiresIn,omitempty"`
+	// RefreshExpiresIn is the refresh token's lifetime in seconds, for the
+	// handler's cookie Max-Age. Set by issuance paths whose refresh lifetime
+	// can differ from JWT_REFRESH_TOKEN_EXPIRY (the PIN method); zero means
+	// "the configured one". Not serialized.
+	RefreshExpiresIn int64                         `json:"-"`
+	User             *iface.UserManagementResponse `json:"user,omitempty"`
+	OAuthProviders   []OAuthProviderInfo           `json:"oauthProviders,omitempty"`
+	SessionID        string                        `json:"sessionId,omitempty"`
+	DeviceID         string                        `json:"deviceId,omitempty"`
 	// RequiresMFA is set when the caller presented valid primary credentials
 	// but must complete a second factor before receiving an access token.
 	// AccessToken/RefreshToken are empty in this case; clients exchange

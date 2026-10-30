@@ -117,7 +117,7 @@ func TestPrincipals_ContributorErrorFailsClosed(t *testing.T) {
 }
 
 // A contributor's error may name its principals: its text never leaves the
-// resolver, only the contributor's name and a fixed sentinel do (F1).
+// resolver, only the contributor's name and a fixed sentinel do.
 func TestPrincipals_ContributorErrorTextIsNotReturned(t *testing.T) {
 	boom := errors.New("teams: team:secret-team-42 lookup failed")
 	r := &PrincipalResolver{

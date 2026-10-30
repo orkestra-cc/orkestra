@@ -429,7 +429,7 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 	resp.Body.Success = true
 	resp.Body.AccessToken = token
 	resp.Body.TokenType = "Bearer"
-	resp.Body.ExpiresIn = int64(h.jwt.AccessTokenTTL(ctx).Seconds())
+	resp.Body.ExpiresIn = expiresInOf(h.jwt, token, h.jwt.AccessTokenTTL(ctx))
 	return resp, nil
 }
 

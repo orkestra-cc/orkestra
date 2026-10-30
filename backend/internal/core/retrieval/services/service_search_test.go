@@ -81,7 +81,7 @@ func TestService_SetSearchWithNilsFailsClosed(t *testing.T) {
 }
 
 // Service.Principals crosses the SDK boundary: it maps the resolver's errors
-// like search step 3 does, so no contributor text reaches a consumer (F2).
+// like search step 3 does, so no contributor text reaches a consumer.
 func TestService_PrincipalsMapsResolverErrors(t *testing.T) {
 	boom := errors.New("teams: team:secret-team-42 lookup failed")
 	cases := map[string]struct {

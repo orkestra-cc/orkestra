@@ -107,6 +107,20 @@ permit (
     )
 };
 
+// operator: PIN sign-in. auth.pin_login has a
+// neutral suffix, so SeedSystemRoles grants it to operator by name and
+// this permit mirrors that grant literally. Global scope only: the
+// permission is checked at sign-in, before any tenant is in play.
+@id("platform.operator.global_pin_login")
+permit (
+    principal,
+    action == Action::"auth.pin_login",
+    resource
+) when {
+    principal has system_role && principal.system_role == "operator" &&
+    context has scope && context.scope == "global"
+};
+
 // guest: read-only — global scope.
 @id("platform.guest.global_read_only")
 permit (

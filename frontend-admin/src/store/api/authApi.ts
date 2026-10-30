@@ -1,4 +1,5 @@
 import { baseApi } from './baseApi';
+import type { PinMethodView } from './pinApi';
 import { setAccessToken } from '../slices/authSlice';
 
 // Backend OAuth types matching the Go models
@@ -200,6 +201,8 @@ export interface SelfAuthMethods {
   mfaGraceExpiresAt?: string;
   mfaFactors: SelfAuthMfaFactor[];
   oauthProviders: SelfAuthOAuthProvider[];
+  /** PIN sign-in state; absent when the server has no PIN service. */
+  pin?: PinMethodView;
 }
 
 export interface SelfSessionInfo {

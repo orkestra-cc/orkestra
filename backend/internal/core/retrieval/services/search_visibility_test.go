@@ -352,7 +352,7 @@ func TestSearch_FullPageWithNoRoomToRefillIsFlagged(t *testing.T) {
 
 // The veto runs per engine call. A source whose first-call chunk survived
 // and whose refill chunk (same revision, same subjects) is covered by then
-// loses every chunk, not only the new one (F5).
+// loses every chunk, not only the new one.
 func TestSearch_RefillVetoDropsEveryChunkOfACoveredSource(t *testing.T) {
 	fx := newSearchFixture(t)
 	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales", "user:carol")

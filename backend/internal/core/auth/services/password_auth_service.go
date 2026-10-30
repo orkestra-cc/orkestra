@@ -522,6 +522,10 @@ type LoginTokenContext struct {
 	RiskFactors  []string
 	TrustLevel   string
 	MFACompleted bool
+	// AccessTTL / RefreshTTL override the configured lifetimes for this
+	// session when positive. Only the PIN method sets them.
+	AccessTTL  time.Duration
+	RefreshTTL time.Duration
 }
 
 // Login authenticates a user by email/password and returns a token pair.
@@ -562,13 +566,9 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	// disabled), or the IP can't be resolved (private/loopback) — the
 	// gate must fail open on degraded geoip lookups so an outage can't
 	// lock everyone out.
-	if s.policy != nil && s.geoResolver != nil && in.IP != "" {
-		if loc, err := s.geoResolver.Lookup(ctx, in.IP); err == nil && loc != nil && loc.Country != "" {
-			if s.policy.CountryBlocked(ctx, loc.Country) {
-				s.emitLoginFailed(ctx, email, "", in.IP, "country_blocked")
-				return nil, ErrCountryBlocked
-			}
-		}
+	if s.countryBlocked(ctx, in.IP) {
+		s.emitLoginFailed(ctx, email, "", in.IP, "country_blocked")
+		return nil, ErrCountryBlocked
 	}
 
 	// Peek both scopes before touching the database. Nothing is
@@ -598,31 +598,7 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	// user_inactive audit event. We skip users who never logged in at
 	// all — disabling those would brick fresh signups whose initial
 	// login hasn't completed yet.
-	if days := s.inactiveAccountThresholdDays(ctx); days > 0 && user.LastLogin != nil {
-		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-		if user.LastLogin.Before(threshold) && user.IsActive {
-			isActive := false
-			if _, uerr := s.userService.UpdateUser(ctx, user.UUID, &iface.UpdateUserInput{IsActive: &isActive}); uerr == nil {
-				user.IsActive = false
-				s.emitAudit(ctx, iface.AuditEvent{
-					ActorUserID: user.UUID,
-					ActorEmail:  user.Email,
-					ActorType:   "system",
-					Action:      "auth.account.auto_disabled",
-					Outcome:     "success",
-					IPAddress:   in.IP,
-					Metadata: map[string]any{
-						"thresholdDays": days,
-						"lastLogin":     user.LastLogin.UTC().Format(time.RFC3339),
-					},
-				})
-			} else if s.logger != nil {
-				s.logger.Warn("auth: failed to auto-disable inactive account",
-					slog.String("user_uuid", user.UUID),
-					slog.String("error", uerr.Error()))
-			}
-		}
-	}
+	s.autoDisableIfInactive(ctx, user, in.IP)
 
 	if !user.IsActive {
 		s.dummyVerify(in.Password) // this branch used to be measurably cheaper
@@ -885,6 +861,25 @@ func (s *PasswordAuthService) loadMembershipsAsAuthModel(ctx context.Context, us
 		out = append(out, authModels.TenantMembership{TenantUUID: m.TenantUUID, TenantKind: m.TenantKind, Roles: m.Roles})
 	}
 	return out
+}
+
+// loadMembershipsStrict is loadMembershipsAsAuthModel for a gate that
+// refuses privileged memberships: a failed lookup is reported instead of
+// read as "no memberships", so it can never let such a gate pass. Without
+// a tenant provider there are no memberships to read.
+func (s *PasswordAuthService) loadMembershipsStrict(ctx context.Context, userUUID string) ([]authModels.TenantMembership, error) {
+	if s.tenantProvider == nil {
+		return nil, nil
+	}
+	list, err := s.tenantProvider.ListUserMemberships(ctx, userUUID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]authModels.TenantMembership, 0, len(list))
+	for _, m := range list {
+		out = append(out, authModels.TenantMembership{TenantUUID: m.TenantUUID, TenantKind: m.TenantKind, Roles: m.Roles})
+	}
+	return out, nil
 }
 
 // SetAuditSink wires the compliance audit sink post-construction. The
@@ -1704,7 +1699,7 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	return &ConfirmPasswordResult{
 		AccessToken: token,
 		TokenType:   "Bearer",
-		ExpiresIn:   int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
+		ExpiresIn:   s.reMintExpiresIn(ctx, token),
 	}, nil
 }
 
@@ -1897,6 +1892,18 @@ func (s *PasswordAuthService) resetLoginFailures(ctx context.Context, email stri
 // the password-method gate, the geo block), which must leave the
 // counters and the audit trail untouched and so deliberately cost
 // nothing.
+// reMintExpiresIn reads a re-minted access token's lifetime from its own
+// exp claim: a PIN session's re-mint carries the PIN lifetime, not the
+// configured default.
+func (s *PasswordAuthService) reMintExpiresIn(ctx context.Context, token string) int64 {
+	if claims, err := s.jwtService.ValidateAccessToken(token); err == nil && claims.ExpiresAt > 0 {
+		if d := time.Until(time.Unix(claims.ExpiresAt, 0)); d > 0 {
+			return int64(d.Round(time.Second).Seconds())
+		}
+	}
+	return int64(s.jwtService.AccessTokenTTL(ctx).Seconds())
+}
+
 func (s *PasswordAuthService) dummyVerify(password string) {
 	_, _ = s.passwordService.Verify(password, s.passwordService.DummyHash())
 }
@@ -2023,6 +2030,9 @@ func loginMethodFromAMR(amr []string) string {
 		if method == "oauth" {
 			return "oauth"
 		}
+		if method == authModels.AMRPIN {
+			return authModels.LoginMethodPIN
+		}
 	}
 	return "password"
 }
@@ -2118,7 +2128,9 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		// exported IssueLoginTokens(External) seam and the setup
 		// wizard's initial-admin mint — every one of them lands here, so
 		// auth_time is stamped once, here.
-		AuthTime: now.Unix(),
+		AuthTime:   now.Unix(),
+		AccessTTL:  in.AccessTTL,
+		RefreshTTL: in.RefreshTTL,
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
@@ -2135,6 +2147,16 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 	if s.refreshTokenRepo == nil {
 		return nil, stderrors.New("refresh token persistence is unavailable")
 	}
+	refreshTTL := s.jwtService.RefreshTokenTTL()
+	if in.RefreshTTL > 0 {
+		refreshTTL = in.RefreshTTL
+	}
+	// Only the PIN method is recorded on the row: a rotation needs it to
+	// re-assert amr ["pin"] and the PIN lifetimes (see RefreshTokenDoc).
+	rowLoginMethod := ""
+	if loginMethod == authModels.LoginMethodPIN {
+		rowLoginMethod = authModels.LoginMethodPIN
+	}
 	if err := s.refreshTokenRepo.CreateRefreshToken(ctx, &authModels.RefreshTokenDoc{
 		UUID:         authModels.GenerateUUIDv7(),
 		UserUUID:     user.UUID,
@@ -2148,12 +2170,13 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		RiskScore:    riskScore,
 		RiskFactors:  append([]string(nil), in.RiskFactors...),
 		IssuedAt:     now,
-		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
+		ExpiresAt:    now.Add(refreshTTL),
 		LastActivity: now,
 		IsRevoked:    false,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		FamilyID:     familyID,
+		LoginMethod:  rowLoginMethod,
 	}); err != nil {
 		return nil, fmt.Errorf("persist refresh token: %w", err)
 	}
@@ -2177,14 +2200,19 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 	// Update the last login timestamp.
 	_ = s.userService.UpdateUserLastLogin(ctx, user.UUID)
 
+	expiresIn := int64(s.jwtService.AccessTokenTTL(ctx).Seconds())
+	if in.AccessTTL > 0 {
+		expiresIn = pair.ExpiresIn
+	}
 	return &authModels.TokenResponse{
-		AccessToken:  pair.AccessToken,
-		RefreshToken: pair.RefreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
-		SessionID:    in.SessionID,
-		DeviceID:     deviceID,
-		User:         s.buildUserResponse(ctx, user),
+		AccessToken:      pair.AccessToken,
+		RefreshToken:     pair.RefreshToken,
+		TokenType:        "Bearer",
+		ExpiresIn:        expiresIn,
+		RefreshExpiresIn: int64(refreshTTL.Seconds()),
+		SessionID:        in.SessionID,
+		DeviceID:         deviceID,
+		User:             s.buildUserResponse(ctx, user),
 	}, nil
 }
 
@@ -2269,6 +2297,52 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.
 		s.notifyNewDeviceLogin(ctx, user, doc, in.DeviceID, in.Platform, in.IPAddress, in.UserAgent)
 	}
 	return nil
+}
+
+// countryBlocked reports whether geoBlockCountries refuses a sign-in from
+// ip. It fails open — no policy, no resolver (geoip off), an unresolvable
+// (private/loopback) address or a lookup error all answer false — so a
+// geoip outage cannot lock everyone out. Shared by every sign-in method.
+func (s *PasswordAuthService) countryBlocked(ctx context.Context, ip string) bool {
+	if s.policy == nil || s.geoResolver == nil || ip == "" {
+		return false
+	}
+	loc, err := s.geoResolver.Lookup(ctx, ip)
+	return err == nil && loc != nil && loc.Country != "" && s.policy.CountryBlocked(ctx, loc.Country)
+}
+
+// autoDisableIfInactive flips isActive=false on a user whose lastLogin is
+// older than inactiveAccountAutoDisableDays (users who never signed in are
+// skipped) and audits auth.account.auto_disabled. Every sign-in method runs
+// it before its IsActive check: a method that skipped it would both let a
+// dormant account in and, by stamping lastLogin, clear the condition for
+// every later sign-in.
+func (s *PasswordAuthService) autoDisableIfInactive(ctx context.Context, user *iface.User, ip string) {
+	if days := s.inactiveAccountThresholdDays(ctx); days > 0 && user.LastLogin != nil {
+		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+		if user.LastLogin.Before(threshold) && user.IsActive {
+			isActive := false
+			if _, uerr := s.userService.UpdateUser(ctx, user.UUID, &iface.UpdateUserInput{IsActive: &isActive}); uerr == nil {
+				user.IsActive = false
+				s.emitAudit(ctx, iface.AuditEvent{
+					ActorUserID: user.UUID,
+					ActorEmail:  user.Email,
+					ActorType:   "system",
+					Action:      "auth.account.auto_disabled",
+					Outcome:     "success",
+					IPAddress:   ip,
+					Metadata: map[string]any{
+						"thresholdDays": days,
+						"lastLogin":     user.LastLogin.UTC().Format(time.RFC3339),
+					},
+				})
+			} else if s.logger != nil {
+				s.logger.Warn("auth: failed to auto-disable inactive account",
+					slog.String("user_uuid", user.UUID),
+					slog.String("error", uerr.Error()))
+			}
+		}
+	}
 }
 
 // inactiveAccountThresholdDays is a small wrapper that returns 0 when

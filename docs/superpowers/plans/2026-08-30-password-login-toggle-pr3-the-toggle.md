@@ -2409,7 +2409,7 @@ func runStepUpWithEnrollment(t *testing.T, claims *authModels.JWTClaims, hasFact
 }
 ```
 
-Existing tests that reach the password-confirm envelope through `runStepUpWithEnrollment` (which always sets a policy) keep passing because the zero-value fake answers `(true, nil)`. Any pre-existing test that reaches the no-factor branch with NO policy set now expects 503 — update those assertions; the spec changed that outcome deliberately (F4).
+Existing tests that reach the password-confirm envelope through `runStepUpWithEnrollment` (which always sets a policy) keep passing because the zero-value fake answers `(true, nil)`. Any pre-existing test that reaches the no-factor branch with NO policy set now expects 503 — update those assertions; the spec changed that outcome deliberately.
 
 In `backend/internal/core/tenant/handlers/admin_mfa_routes_test.go`, `mfaMasterSwitchOnPolicy` (`:53-58`) gains:
 

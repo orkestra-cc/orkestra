@@ -386,6 +386,13 @@ type GetAuthPolicyResponse struct {
 
 		PasswordLoginEnabled             *bool `json:"passwordLoginEnabled" doc:"Persisted per-surface email/password policy. Null ONLY when the policy store is unreadable while the operator break-glass is active — the emergency case; every ordinary read is non-null."`
 		PasswordLoginBreakGlassEffective bool  `json:"passwordLoginBreakGlassEffective" doc:"Operator endpoint only: the boot-time break-glass override is set AND the persisted policy is false or unreadable, so the console must render the labelled emergency login form. Always false on the client endpoint."`
+
+		// PIN sign-in. Lenient on purpose: an
+		// unreadable PIN toggle reports false (the app hides the keypad)
+		// rather than failing the whole policy read the password form needs.
+		PINLoginEnabled          bool `json:"pinLoginEnabled" doc:"Whether username + PIN sign-in is accepted on this surface"`
+		PINLength                int  `json:"pinLength" doc:"Digits a NEW PIN must have (4-8). Existing PINs may be shorter or longer, so a sign-in keypad must not auto-submit at this length"`
+		PINRequiresTrustedDevice bool `json:"pinRequiresTrustedDevice" doc:"Whether PIN sign-in needs an enrolled device (deviceId + deviceSecret)"`
 	}
 }
 
@@ -431,6 +438,13 @@ func (h *AuthHandler) GetAuthPolicy(ctx context.Context, _ *GetAuthPolicyRequest
 		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
 			"Sign-in policy is temporarily unavailable; try again shortly.")
 	}
+
+	if pinOn, err := h.policy.PINLoginEnabled(ctx, audience); err == nil {
+		resp.Body.PINLoginEnabled = pinOn
+	}
+	resp.Body.PINLength = h.policy.PINLength(ctx)
+	requires, err := h.policy.PINRequiresTrustedDevice(ctx)
+	resp.Body.PINRequiresTrustedDevice = err != nil || requires
 
 	return resp, nil
 }
@@ -1013,7 +1027,7 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 	if tokenSource == "cookie" {
 		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
-		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
+		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAgeFor(h.jwtService, tokenResponse), cookieDomain, isSecure)
 		if len(candidates) > 1 {
 			h.clearStaleParentDomainCookies(w, cookieName)
 		}
@@ -1387,7 +1401,7 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 	if tokenSource == "cookie" {
 		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
-		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
+		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAgeFor(h.jwtService, tokenResponse), cookieDomain, isSecure)
 		if len(candidates) > 1 {
 			h.clearStaleParentDomainCookies(w, cookieName)
 		}

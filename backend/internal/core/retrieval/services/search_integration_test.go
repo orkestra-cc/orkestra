@@ -219,7 +219,7 @@ func TestIntegrationSearch_LogRowWithDatetimeFilter(t *testing.T) {
 	assert.Equal(t, []string{"s1", "s2", "s3"}, got)
 	assert.Equal(t, []string{"crm:c-2", "user:alice", "user:bob"}, row.Subjects)
 
-	// The filter is stored as canonical JSON (F3): the raw BSON value is a
+	// The filter is stored as canonical JSON: the raw BSON value is a
 	// string, it decodes back into the SDK type, and it still validates
 	// against the corpus schema, datetime included.
 	var raw bson.M

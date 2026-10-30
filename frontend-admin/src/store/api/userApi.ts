@@ -66,7 +66,6 @@ export interface CreateUserInput {
   username: string;
   fullName: string;
   phone: string;
-  pin: string;
   role: string;
 }
 
@@ -77,7 +76,6 @@ export interface UpdateUserInput {
   phone?: string;
   role?: string;
   isActive?: boolean;
-  pin?: string;
   avatar?: string;
 }
 

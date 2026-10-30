@@ -44,6 +44,24 @@ type piiProducer struct {
 	sessionsCollection string
 	emailsCollection   string
 	mfaCollection      string
+
+	// pinDevices is the tier's PIN device registry,
+	// wired with SetPINDevices. The PIN hash itself lives on the user row
+	// and is never exported (a server secret, like the password hash).
+	pinDevices           repository.PINDeviceRepository
+	pinDevicesCollection string
+}
+
+// PINDeviceAware is implemented by the auth PII producer so module.go can
+// hand it the PIN device registry after construction.
+type PINDeviceAware interface {
+	SetPINDevices(repo repository.PINDeviceRepository, collection string)
+}
+
+// SetPINDevices adds the tier's PIN device registry to export and purge.
+func (p *piiProducer) SetPINDevices(repo repository.PINDeviceRepository, collection string) {
+	p.pinDevices = repo
+	p.pinDevicesCollection = collection
 }
 
 // NewPIIProducer builds the auth PII producer for a single tier. Pass
@@ -154,6 +172,24 @@ func (p *piiProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 		}
 	}
 
+	if p.pinDevices != nil {
+		devices, err := p.pinDevices.ListByUser(ctx, userUUID)
+		if err == nil && len(devices) > 0 {
+			rows := make([]map[string]any, 0, len(devices))
+			for _, d := range devices {
+				rows = append(rows, map[string]any{
+					"deviceId":   d.DeviceID,
+					"deviceName": d.DeviceName,
+					"platform":   d.Platform,
+					"via":        d.Via,
+					"createdAt":  d.CreatedAt,
+					"lastUsedAt": d.LastUsedAt,
+				})
+			}
+			out["pinDevices"] = rows
+		}
+	}
+
 	if len(out) == 0 {
 		return nil, nil
 	}
@@ -236,6 +272,17 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 		if n > 0 {
 			rows += n
 			collections = append(collections, authModels.DeviceTrustCollection)
+		}
+	}
+
+	if p.pinDevices != nil {
+		n, err := p.pinDevices.DeleteAllByUser(ctx, userUUID)
+		if err != nil {
+			return iface.PurgeResult{}, err
+		}
+		if n > 0 {
+			rows += n
+			collections = append(collections, p.pinDevicesCollection)
 		}
 	}
 

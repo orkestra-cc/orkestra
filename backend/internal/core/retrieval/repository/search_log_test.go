@@ -173,7 +173,7 @@ func TestSearchLog_InsertCreatedAtAndEmptyArrays(t *testing.T) {
 }
 
 // The filter is stored under "filter" as the JSON string it was given, and
-// is absent when the row has none (F3).
+// is absent when the row has none.
 func TestSearchLog_InsertStoresFilterAsJSONString(t *testing.T) {
 	r, db := newSearchLog(t)
 	const js = `{"field":"team","op":"eq","value":"sales"}`
