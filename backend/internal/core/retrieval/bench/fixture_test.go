@@ -12,24 +12,32 @@ const (
 )
 
 func TestLoadFixture_Errors(t *testing.T) {
+	const qHead = `{"kind":"query","id":"q1","lang":"en","text":"x",`
 	cases := []struct {
-		name, in, want string
+		name, in string
+		want     []string // every substring must appear: the line and the rule
 	}{
-		{"unknown kind", okItem + `{"kind":"doc","id":"x"}` + "\n", "line 2"},
-		{"duplicate id", okItem + okItem, "line 2"},
-		{"empty text", `{"kind":"item","id":"i1","lang":"en","title":"T","text":" ","visibleTo":["tenant:*"]}` + "\n", "line 1"},
-		{"no principals", okItem + `{"kind":"query","id":"q1","lang":"en","text":"x","principals":[],"expected":["i1"]}` + "\n", "line 2"},
-		{"unknown expected", okItem + `{"kind":"query","id":"q1","lang":"en","text":"x","principals":["tenant:*"],"expected":["nope"]}` + "\n", "line 2"},
-		{"invisible expected", okItem + okItem2 + `{"kind":"query","id":"q1","lang":"en","text":"x","principals":["tenant:*"],"expected":["i2"]}` + "\n", "line 3"},
-		{"unknown hidden", okItem + `{"kind":"query","id":"q1","lang":"en","text":"x","principals":["tenant:*"],"expected":["i1"],"hidden":["nope"]}` + "\n", "line 2"},
-		{"visible hidden", okItem + `{"kind":"query","id":"q1","lang":"en","text":"x","principals":["tenant:*"],"expected":["i1"],"hidden":["i1"]}` + "\n", "line 2"},
-		{"malformed json", okItem + "{oops\n", "line 2"},
+		{"unknown kind", okItem + `{"kind":"doc","id":"x"}` + "\n", []string{"line 2", "unknown kind"}},
+		{"duplicate id", okItem + okItem, []string{"line 2", "duplicate id"}},
+		{"empty item text", `{"kind":"item","id":"i1","lang":"en","title":"T","text":" ","visibleTo":["tenant:*"]}` + "\n", []string{"line 1", "item", "empty text"}},
+		{"empty query text", okItem + `{"kind":"query","id":"q1","lang":"en","text":" ","principals":["tenant:*"],"expected":["i1"]}` + "\n", []string{"line 2", "query", "empty text"}},
+		{"no principals", okItem + qHead + `"principals":[],"expected":[]}` + "\n", []string{"line 2", "no principals"}},
+		{"unknown expected", okItem + qHead + `"principals":["tenant:*"],"expected":["nope"]}` + "\n", []string{"line 2", "expects unknown item"}},
+		{"invisible expected", okItem + okItem2 + qHead + `"principals":["tenant:*"],"expected":["i2"]}` + "\n", []string{"line 3", "not visible to its principals"}},
+		{"unknown hidden", okItem + qHead + `"principals":["tenant:*"],"expected":["i1"],"hidden":["nope"]}` + "\n", []string{"line 2", "hides unknown item"}},
+		{"visible hidden", okItem + qHead + `"principals":["tenant:*"],"expected":["i1"],"hidden":["i1"]}` + "\n", []string{"line 2", "lists hidden item"}},
+		{"malformed json", okItem + "{oops\n", []string{"line 2", "invalid character"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := LoadFixture(strings.NewReader(c.in))
-			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("want error containing %q, got %v", c.want, err)
+			if err == nil {
+				t.Fatal("want an error, got nil")
+			}
+			for _, w := range c.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q lacks %q", err, w)
+				}
 			}
 		})
 	}
