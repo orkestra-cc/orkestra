@@ -2,6 +2,10 @@
 # Sources orkestra.sh (main() is guarded, so this does NOT launch the TUI) and
 # unit-tests ask_value's non-interactive path. Also re-tested by Task 3.
 set -uo pipefail
+# A pre-push hook fired from a linked worktree exports GIT_DIR, which would
+# turn every `git -C "$tmp/..."` below into an operation on the real repo.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$DIR/../orkestra.sh"     # guarded main => no menu; sourcing is safe
@@ -827,7 +831,7 @@ ORKESTRA_CLONE_VERSION_PIN=""
 ORKESTRA_CLONE_VERSION="stale-from-previous-resolution"
 resolve_stack_identity
 check "re-resolution without a pin recomputes the clone version" "dev" "$ORKESTRA_CLONE_VERSION"
-check "build commit is derived from HEAD" "$(git rev-parse --short HEAD)" "$ORKESTRA_BUILD_COMMIT"
+check "build commit is derived from HEAD" "$(git -C "$DIR/.." rev-parse --short HEAD)" "$ORKESTRA_BUILD_COMMIT"
 unset ORKESTRA_CLONE_VERSION ORKESTRA_BUILD_COMMIT
 ENV_FILE="$old_env_file"
 rm -f "$pin_tmp"
