@@ -322,6 +322,8 @@ The `tenant_entitlements` collection is keyed by `(tenantUUID, capabilityID)`. S
 
 `Tenant` exposes `UUID, Kind, ParentTenantUUID, Status, Name, Slug, Plan`. `TenantMembership` exposes `TenantUUID, TenantName, TenantSlug, TenantKind, Roles, IsOwner`. Both are intentionally trimmed — anything richer lives in `tenant/models` and is only reachable via the concrete service, not through the provider interface.
 
+`ListUserMemberships` and `IsMember` count only current memberships: a row past its `ExpiresAt` is ignored by both. The repository's `GetMembership` still returns it, because its other callers (attach, role change, setup tenant) check whether the row exists.
+
 Typical consumers:
 - **auth** — `ListUserMemberships` during JWT issuance so memberships are embedded in the access token's `memberships` claim (frontend reads them to build the org switcher without an extra round trip).
 - **middleware** — `IsMember` on every protected request that resolves an `X-Tenant-ID` header; `RequireCapability` consumes `AccessProvider.HasCapability` against the request's resolved tenant UUID (`X-Tenant-ID`) and returns 402 on a miss. Capability gating without a tenant context is undefined post-Unified-Client-Aggregate.

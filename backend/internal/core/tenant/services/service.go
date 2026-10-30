@@ -356,15 +356,19 @@ func (s *Service) ListUserMemberships(ctx context.Context, userUUID string) ([]i
 	return out, nil
 }
 
+// IsMember reports whether userUUID holds a current membership of tenantUUID.
+// A membership past its ExpiresAt does not count, as in ListUserMemberships;
+// GetMembership itself still returns it, since its other callers check
+// whether the row exists.
 func (s *Service) IsMember(ctx context.Context, userUUID, tenantUUID string) (bool, error) {
-	_, err := s.repo.GetMembership(ctx, userUUID, tenantUUID)
+	m, err := s.repo.GetMembership(ctx, userUUID, tenantUUID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
 	}
-	return true, nil
+	return m.ExpiresAt == nil || m.ExpiresAt.After(time.Now()), nil
 }
 
 // --- Platform default tenant ---
