@@ -702,6 +702,29 @@
         ],
         "type": "object"
       },
+      "AdminSetPINRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AdminSetPINRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "pin": {
+            "description": "New PIN: exactly auth.pinLength digits, not a repeated digit or a sequence (422 auth.pin_invalid / auth.pin_too_weak)",
+            "maxLength": 16,
+            "type": "string"
+          }
+        },
+        "required": [
+          "pin"
+        ],
+        "type": "object"
+      },
       "AdminSimpleResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -1312,6 +1335,9 @@
           },
           "passwordUsableForLogin": {
             "type": "boolean"
+          },
+          "pin": {
+            "$ref": "#/components/schemas/PINMethodView"
           }
         },
         "required": [
@@ -3324,6 +3350,19 @@
             "description": "Whether the signup form should advertise an uppercase requirement",
             "type": "boolean"
           },
+          "pinLength": {
+            "description": "Digits a NEW PIN must have (4-8). Existing PINs may be shorter or longer, so a sign-in keypad must not auto-submit at this length",
+            "format": "int64",
+            "type": "integer"
+          },
+          "pinLoginEnabled": {
+            "description": "Whether username + PIN sign-in is accepted on this surface",
+            "type": "boolean"
+          },
+          "pinRequiresTrustedDevice": {
+            "description": "Whether PIN sign-in needs an enrolled device (deviceId + deviceSecret)",
+            "type": "boolean"
+          },
           "registrationEnabled": {
             "description": "Whether self-service signup is currently accepted on this surface",
             "type": "boolean"
@@ -3341,7 +3380,10 @@
           "passwordRequireDigit",
           "passwordRequireSymbol",
           "passwordLoginEnabled",
-          "passwordLoginBreakGlassEffective"
+          "passwordLoginBreakGlassEffective",
+          "pinLoginEnabled",
+          "pinLength",
+          "pinRequiresTrustedDevice"
         ],
         "type": "object"
       },
@@ -7000,6 +7042,282 @@
         ],
         "type": "object"
       },
+      "PINDeviceDoc": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "via": {
+            "enum": [
+              "admin",
+              "self"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "deviceId",
+          "via",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "PINDeviceEnrollRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PINDeviceEnrollRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "code": {
+            "description": "One-time enrollment code (XXXX-XXXX) issued by an administrator or by the user",
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          },
+          "deviceId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "deviceName": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "platform": {
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 50,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "code",
+          "deviceId"
+        ],
+        "type": "object"
+      },
+      "PINDeviceEnrollResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PINDeviceEnrollResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "deviceSecret": {
+            "description": "Store it in the device's secure storage; it is never shown again",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deviceSecret"
+        ],
+        "type": "object"
+      },
+      "PINEnrollmentCodeResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PINEnrollmentCodeResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "code": {
+            "description": "Type it on the device within the validity window; single use",
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "PINLoginRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PINLoginRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "deviceId": {
+            "description": "Stable per-installation device id; required when PIN sign-in is bound to enrolled devices",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "deviceSecret": {
+            "description": "Secret returned once by device enrollment",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "pin": {
+            "description": "Numeric PIN",
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          },
+          "platform": {
+            "description": "Client platform; ios and android receive the refresh token in the body",
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "Username (case-sensitive)",
+            "maxLength": 50,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "pin"
+        ],
+        "type": "object"
+      },
+      "PINLoginResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PINLoginResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "tokenType": {
+            "type": "string"
+          },
+          "user": {}
+        },
+        "required": [
+          "success",
+          "accessToken",
+          "tokenType",
+          "expiresIn"
+        ],
+        "type": "object"
+      },
+      "PINMethodView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PINMethodView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/PINDeviceDoc"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "length": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lockedUntil": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "requiresTrustedDevice": {
+            "type": "boolean"
+          },
+          "set": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "set",
+          "length",
+          "devices",
+          "requiresTrustedDevice"
+        ],
+        "type": "object"
+      },
       "PasswordConfirmRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -9596,6 +9914,29 @@
         ],
         "type": "object"
       },
+      "SetPINRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SetPINRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "pin": {
+            "description": "New PIN: exactly auth.pinLength digits, not a repeated digit or a sequence (422 auth.pin_invalid / auth.pin_too_weak)",
+            "maxLength": 16,
+            "type": "string"
+          }
+        },
+        "required": [
+          "pin"
+        ],
+        "type": "object"
+      },
       "SinkPolicy": {
         "additionalProperties": false,
         "properties": {
@@ -12077,6 +12418,236 @@
         "summary": "Trigger a password-reset email for a Tier-2 client user",
         "tags": [
           "Users Admin"
+        ]
+      }
+    },
+    "/v1/admin/client-users/{userId}/auth-methods/pin": {
+      "delete": {
+        "operationId": "admin-client-user-pin-remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: remove a user's PIN and enrolled devices",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      },
+      "get": {
+        "operationId": "admin-client-user-pin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINMethodView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: read a user's PIN sign-in state",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      },
+      "put": {
+        "description": "Refused for privileged roles, service principals, users without a unique username or without auth.pin_login (409), and for a target whose role is above the caller's (403 user.target_tier_forbidden). Ends the user's PIN sessions.",
+        "operationId": "admin-client-user-pin-set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSetPINRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: set or replace a user's PIN",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/admin/client-users/{userId}/auth-methods/pin/devices/{deviceId}": {
+      "delete": {
+        "operationId": "admin-client-user-pin-device-revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "deviceId",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: revoke one of a user's PIN devices",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/admin/client-users/{userId}/auth-methods/pin/enrollment-code": {
+      "post": {
+        "operationId": "admin-client-user-pin-enrollment-code",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINEnrollmentCodeResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: issue a one-time device enrollment code for a user's PIN",
+        "tags": [
+          "Administration",
+          "Authentication"
         ]
       }
     },
@@ -16889,6 +17460,236 @@
         ]
       }
     },
+    "/v1/admin/users/{userId}/auth-methods/pin": {
+      "delete": {
+        "operationId": "admin-user-pin-remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: remove a user's PIN and enrolled devices",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      },
+      "get": {
+        "operationId": "admin-user-pin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINMethodView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: read a user's PIN sign-in state",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      },
+      "put": {
+        "description": "Refused for privileged roles, service principals, users without a unique username or without auth.pin_login (409), and for a target whose role is above the caller's (403 user.target_tier_forbidden). Ends the user's PIN sessions.",
+        "operationId": "admin-user-pin-set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSetPINRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: set or replace a user's PIN",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/admin/users/{userId}/auth-methods/pin/devices/{deviceId}": {
+      "delete": {
+        "operationId": "admin-user-pin-device-revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "deviceId",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: revoke one of a user's PIN devices",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/admin/users/{userId}/auth-methods/pin/enrollment-code": {
+      "post": {
+        "operationId": "admin-user-pin-enrollment-code",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINEnrollmentCodeResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin: issue a one-time device enrollment code for a user's PIN",
+        "tags": [
+          "Administration",
+          "Authentication"
+        ]
+      }
+    },
     "/v1/admin/users/{userId}/mfa/reset": {
       "post": {
         "operationId": "mfa-admin-reset",
@@ -17540,6 +18341,96 @@
         ]
       }
     },
+    "/v1/auth/client/login/pin": {
+      "post": {
+        "description": "Weak, opt-in method (auth.pinLoginEnabled{Admin,Client}). The session carries amr [\"pin\"]: it never satisfies MFA or step-up and cannot manage credentials. With auth.pinRequiresTrustedDevice on, deviceId and deviceSecret of an enrolled device are required.",
+        "operationId": "client-pin-login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PINLoginRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINLoginResponseBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Sign in with username and PIN",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/auth/client/login/pin/device": {
+      "post": {
+        "operationId": "client-pin-device-enroll",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PINDeviceEnrollRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINDeviceEnrollResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Enroll a device for PIN sign-in with a one-time code",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
     "/v1/auth/client/me": {
       "get": {
         "description": "Get information about the currently authenticated user",
@@ -17990,6 +18881,188 @@
           }
         ],
         "summary": "Reconfirm password to satisfy step-up when no MFA factor is enrolled",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/auth/client/me/pin": {
+      "delete": {
+        "operationId": "client-self-pin-remove",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove your own PIN and its enrolled devices",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      },
+      "get": {
+        "operationId": "client-self-pin",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINMethodView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read your own PIN sign-in state",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      },
+      "put": {
+        "description": "Refused from a PIN session (403 auth.pin_session_forbidden). Ends every PIN session of the account.",
+        "operationId": "client-self-pin-set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPINRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set or change your own PIN",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/auth/client/me/pin/devices/{deviceId}": {
+      "delete": {
+        "operationId": "client-self-pin-device-revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deviceId",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke one of your PIN devices",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/auth/client/me/pin/enrollment-code": {
+      "post": {
+        "operationId": "client-self-pin-enrollment-code",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINEnrollmentCodeResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Issue a one-time code to enroll a device for your PIN",
         "tags": [
           "Authentication",
           "Self-Service"
@@ -19080,6 +20153,96 @@
         ]
       }
     },
+    "/v1/auth/operator/login/pin": {
+      "post": {
+        "description": "Weak, opt-in method (auth.pinLoginEnabled{Admin,Client}). The session carries amr [\"pin\"]: it never satisfies MFA or step-up and cannot manage credentials. With auth.pinRequiresTrustedDevice on, deviceId and deviceSecret of an enrolled device are required.",
+        "operationId": "operator-pin-login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PINLoginRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINLoginResponseBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Sign in with username and PIN",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/auth/operator/login/pin/device": {
+      "post": {
+        "operationId": "operator-pin-device-enroll",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PINDeviceEnrollRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINDeviceEnrollResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Enroll a device for PIN sign-in with a one-time code",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
     "/v1/auth/operator/me": {
       "get": {
         "description": "Get information about the currently authenticated user",
@@ -19732,6 +20895,188 @@
           }
         ],
         "summary": "Reconfirm password to satisfy step-up when no MFA factor is enrolled",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/auth/operator/me/pin": {
+      "delete": {
+        "operationId": "operator-self-pin-remove",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove your own PIN and its enrolled devices",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      },
+      "get": {
+        "operationId": "operator-self-pin",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINMethodView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read your own PIN sign-in state",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      },
+      "put": {
+        "description": "Refused from a PIN session (403 auth.pin_session_forbidden). Ends every PIN session of the account.",
+        "operationId": "operator-self-pin-set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPINRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set or change your own PIN",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/auth/operator/me/pin/devices/{deviceId}": {
+      "delete": {
+        "operationId": "operator-self-pin-device-revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deviceId",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke one of your PIN devices",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/auth/operator/me/pin/enrollment-code": {
+      "post": {
+        "operationId": "operator-self-pin-enrollment-code",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PINEnrollmentCodeResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Issue a one-time code to enroll a device for your PIN",
         "tags": [
           "Authentication",
           "Self-Service"
