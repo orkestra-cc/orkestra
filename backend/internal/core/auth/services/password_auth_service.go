@@ -566,13 +566,9 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	// disabled), or the IP can't be resolved (private/loopback) — the
 	// gate must fail open on degraded geoip lookups so an outage can't
 	// lock everyone out.
-	if s.policy != nil && s.geoResolver != nil && in.IP != "" {
-		if loc, err := s.geoResolver.Lookup(ctx, in.IP); err == nil && loc != nil && loc.Country != "" {
-			if s.policy.CountryBlocked(ctx, loc.Country) {
-				s.emitLoginFailed(ctx, email, "", in.IP, "country_blocked")
-				return nil, ErrCountryBlocked
-			}
-		}
+	if s.countryBlocked(ctx, in.IP) {
+		s.emitLoginFailed(ctx, email, "", in.IP, "country_blocked")
+		return nil, ErrCountryBlocked
 	}
 
 	// Peek both scopes before touching the database. Nothing is
@@ -602,31 +598,7 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	// user_inactive audit event. We skip users who never logged in at
 	// all — disabling those would brick fresh signups whose initial
 	// login hasn't completed yet.
-	if days := s.inactiveAccountThresholdDays(ctx); days > 0 && user.LastLogin != nil {
-		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-		if user.LastLogin.Before(threshold) && user.IsActive {
-			isActive := false
-			if _, uerr := s.userService.UpdateUser(ctx, user.UUID, &iface.UpdateUserInput{IsActive: &isActive}); uerr == nil {
-				user.IsActive = false
-				s.emitAudit(ctx, iface.AuditEvent{
-					ActorUserID: user.UUID,
-					ActorEmail:  user.Email,
-					ActorType:   "system",
-					Action:      "auth.account.auto_disabled",
-					Outcome:     "success",
-					IPAddress:   in.IP,
-					Metadata: map[string]any{
-						"thresholdDays": days,
-						"lastLogin":     user.LastLogin.UTC().Format(time.RFC3339),
-					},
-				})
-			} else if s.logger != nil {
-				s.logger.Warn("auth: failed to auto-disable inactive account",
-					slog.String("user_uuid", user.UUID),
-					slog.String("error", uerr.Error()))
-			}
-		}
-	}
+	s.autoDisableIfInactive(ctx, user, in.IP)
 
 	if !user.IsActive {
 		s.dummyVerify(in.Password) // this branch used to be measurably cheaper
@@ -2325,6 +2297,52 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.
 		s.notifyNewDeviceLogin(ctx, user, doc, in.DeviceID, in.Platform, in.IPAddress, in.UserAgent)
 	}
 	return nil
+}
+
+// countryBlocked reports whether geoBlockCountries refuses a sign-in from
+// ip. It fails open — no policy, no resolver (geoip off), an unresolvable
+// (private/loopback) address or a lookup error all answer false — so a
+// geoip outage cannot lock everyone out. Shared by every sign-in method.
+func (s *PasswordAuthService) countryBlocked(ctx context.Context, ip string) bool {
+	if s.policy == nil || s.geoResolver == nil || ip == "" {
+		return false
+	}
+	loc, err := s.geoResolver.Lookup(ctx, ip)
+	return err == nil && loc != nil && loc.Country != "" && s.policy.CountryBlocked(ctx, loc.Country)
+}
+
+// autoDisableIfInactive flips isActive=false on a user whose lastLogin is
+// older than inactiveAccountAutoDisableDays (users who never signed in are
+// skipped) and audits auth.account.auto_disabled. Every sign-in method runs
+// it before its IsActive check: a method that skipped it would both let a
+// dormant account in and, by stamping lastLogin, clear the condition for
+// every later sign-in.
+func (s *PasswordAuthService) autoDisableIfInactive(ctx context.Context, user *iface.User, ip string) {
+	if days := s.inactiveAccountThresholdDays(ctx); days > 0 && user.LastLogin != nil {
+		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+		if user.LastLogin.Before(threshold) && user.IsActive {
+			isActive := false
+			if _, uerr := s.userService.UpdateUser(ctx, user.UUID, &iface.UpdateUserInput{IsActive: &isActive}); uerr == nil {
+				user.IsActive = false
+				s.emitAudit(ctx, iface.AuditEvent{
+					ActorUserID: user.UUID,
+					ActorEmail:  user.Email,
+					ActorType:   "system",
+					Action:      "auth.account.auto_disabled",
+					Outcome:     "success",
+					IPAddress:   ip,
+					Metadata: map[string]any{
+						"thresholdDays": days,
+						"lastLogin":     user.LastLogin.UTC().Format(time.RFC3339),
+					},
+				})
+			} else if s.logger != nil {
+				s.logger.Warn("auth: failed to auto-disable inactive account",
+					slog.String("user_uuid", user.UUID),
+					slog.String("error", uerr.Error()))
+			}
+		}
+	}
 }
 
 // inactiveAccountThresholdDays is a small wrapper that returns 0 when

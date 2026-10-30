@@ -20,6 +20,11 @@ type PINEnrollmentCode struct {
 	Hash string `json:"h"`
 	Via  string `json:"via"`
 	By   string `json:"by"`
+	// PIN fingerprints the PIN the code was issued for (pinFingerprint):
+	// redemption refuses a code whose PIN has since been removed or
+	// replaced, so an outstanding code never enrolls a device for a newer
+	// PIN.
+	PIN string `json:"p,omitempty"`
 }
 
 // PINEnrollmentCodeStore holds at most one live device enrollment code per

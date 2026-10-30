@@ -495,6 +495,8 @@ func mapPINError(err error) error {
 		return errcode.Unauthorized(errcode.AuthInvalidCredentials, "Invalid username, PIN or device")
 	case errors.Is(err, services.ErrLoginDisabled):
 		return errcode.Forbidden(errcode.AuthLoginDisabled, "Sign-in is temporarily disabled.")
+	case errors.Is(err, services.ErrCountryBlocked):
+		return errcode.Forbidden(errcode.AuthCountryBlocked, "Access from your country is not permitted.")
 	case errors.Is(err, services.ErrAccountLocked):
 		return lockoutError(services.RetryAfterFor(err))
 	case errors.Is(err, services.ErrAuthPolicyUnavailable):

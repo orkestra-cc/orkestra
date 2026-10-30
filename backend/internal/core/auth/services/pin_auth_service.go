@@ -312,6 +312,7 @@ func (s *PINAuthService) IssueEnrollmentCode(ctx context.Context, actorUUID, tar
 	expires := time.Now().Add(PINEnrollmentCodeTTL)
 	if err := s.codes.Put(ctx, s.audience, user.UUID, PINEnrollmentCode{
 		Hash: hashPINSecret(normalisePINEnrollmentCode(code)), Via: via, By: actorUUID,
+		PIN: pinFingerprint(user.PINHash),
 	}, PINEnrollmentCodeTTL); err != nil {
 		return "", time.Time{}, fmt.Errorf("store enrollment code: %w", err)
 	}
@@ -396,9 +397,11 @@ func (s *PINAuthService) EnrollDevice(ctx context.Context, in PINDeviceEnrollInp
 	if ok, err := s.codes.TakeIf(ctx, s.audience, user.UUID, hash); err != nil || !ok {
 		return fail()
 	}
-	if !user.IsActive || user.PINHash == "" || s.checkEligible(ctx, user) != nil {
+	if !user.IsActive || user.PINHash == "" || stored.PIN != pinFingerprint(user.PINHash) || s.checkEligible(ctx, user) != nil {
 		// The code was genuine, so this is not a guess: no charge. The
-		// user changed after the code was minted; the answer stays generic.
+		// user changed after the code was minted (deactivated, PIN
+		// removed or replaced, no longer eligible); the answer stays
+		// generic.
 		return "", ErrInvalidCredentials
 	}
 	secret, err := newPINDeviceSecret()
@@ -462,6 +465,13 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 		return nil, err
 	}
 
+	// Geo block, as on the password route: before the peek, so a blocked
+	// country never moves a counter.
+	if s.login.countryBlocked(ctx, in.IP) {
+		s.login.emitLoginFailed(ctx, "", "", in.IP, "country_blocked")
+		return nil, ErrCountryBlocked
+	}
+
 	pinKey := AttemptKeyPIN(s.audience, username)
 	if v, locked := s.peek(ctx, in.IP, pinKey); locked {
 		s.dummyVerify(in.PIN)
@@ -487,6 +497,10 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 		}
 		return refuse(nil, "pin_unknown_user")
 	}
+	// Inactive-account auto-disable, as on the password route: without it a
+	// dormant account would sign in with a PIN, and the lastLogin stamp of
+	// that sign-in would clear the condition for every later method.
+	s.login.autoDisableIfInactive(ctx, user, in.IP)
 	if !user.IsActive {
 		return refuse(user, "pin_user_inactive")
 	}
@@ -964,4 +978,13 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
+}
+
+// pinFingerprint names a stored PIN hash without carrying it: what an
+// enrollment code records to stay bound to the PIN it was issued for.
+func pinFingerprint(pinHash string) string {
+	if pinHash == "" {
+		return ""
+	}
+	return hashPINSecret("pin-code-binding:" + pinHash)
 }

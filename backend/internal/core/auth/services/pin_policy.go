@@ -83,7 +83,9 @@ func (s *AuthPolicyService) strictBoolKey(ctx context.Context, key string, absen
 	if err != nil {
 		return false, fmt.Errorf("%w: read %s: %w", ErrAuthPolicyUnavailable, key, err)
 	}
-	if !present {
+	// An empty stored value means the default, as validatePINSettings
+	// (which accepts it at save time) reads it.
+	if !present || strings.TrimSpace(raw) == "" {
 		return absent, nil
 	}
 	v, err := StrictBool(raw)
