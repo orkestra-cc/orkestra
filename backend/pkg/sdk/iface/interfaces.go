@@ -671,6 +671,7 @@ var ErrTenantNotFound = errors.New("tenant not found")
 type TenantProvider interface {
 	GetTenant(ctx context.Context, tenantUUID string) (*Tenant, error)
 	ListUserMemberships(ctx context.Context, userUUID string) ([]TenantMembership, error)
+	// IsMember reports a current membership: one past its expiry does not count.
 	IsMember(ctx context.Context, userUUID, tenantUUID string) (bool, error)
 	// ActivateTenant transitions a tenant from `provisioning` to `active`.
 	// Idempotent: calling it on an already-active tenant is a no-op on the
