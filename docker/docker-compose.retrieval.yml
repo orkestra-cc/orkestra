@@ -8,16 +8,16 @@
 # preferably through `./orkestra.sh retrieval up`, which validates the key
 # variables, seeds the model weights and scopes the five owned services.
 #
-# Manual equivalent:
-#   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
-#     -f docker-compose.retrieval.yml --env-file .env --profile retrieval-seed \
-#     up -d --wait tei-embed-seed tei-rerank-seed      # one-off weight download
-#   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
-#     -f docker-compose.retrieval.yml --env-file .env \
-#     up -d qdrant tei-embed tei-rerank
-#   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
-#     -f docker-compose.retrieval.yml --env-file .env \
-#     up -d --no-deps backend
+# Manual equivalent (DC = docker compose -f docker-compose.infra.yml
+# -f docker-compose.dev.yml -f docker-compose.retrieval.yml --env-file .env).
+# The seeds are TEI servers, not jobs that exit: once one is healthy its model
+# is in the cache, so remove it before the next starts and before serving:
+#   for s in tei-embed-seed tei-rerank-seed; do
+#     $DC --profile retrieval-seed up -d --wait "$s" &&
+#       $DC --profile retrieval-seed rm -sf "$s"
+#   done
+#   $DC up -d --wait qdrant tei-embed tei-rerank
+#   $DC up -d --no-deps backend
 #
 # Network model (the reason there are two networks):
 #   * retrieval-net is `internal: true`. Qdrant and the serving TEI containers

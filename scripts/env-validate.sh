@@ -156,7 +156,6 @@ inference_endpoints_error() {
               ) // empty
           end;
         if type != "array" then "not a JSON array"
-        elif length == 0 then "empty list"
         else
           first(
             (to_entries[] | .key as $i | .value | entry_error($i)),

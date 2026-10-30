@@ -111,12 +111,13 @@ docker volume rm <project>_qdrant-data     # the index: see the warning above
 
 ## Backing up the index
 
-`./backup.sh` does not cover the retrieval volumes. Because this release cannot rebuild the index, copy `qdrant-data` together with the MongoDB dump, and restore the two together. Take the copy with the overlay stopped:
+`./backup.sh` does not cover the retrieval volumes. Because this release cannot rebuild the index, copy `qdrant-data` together with the MongoDB dump, and restore the two together. Take both inside the same window with the overlay stopped: once `retrieval up` runs, the worker writes newer items to Qdrant and marks them applied in MongoDB, so a dump taken afterwards would record items the saved index lacks, and a restore of that pair never replays them.
 
 ```bash
 ./orkestra.sh retrieval down
 docker run --rm -v <project>_qdrant-data:/data alpine:3.22 \
   tar czf - -C /data . > qdrant-data.tgz
+./backup.sh                  # the matching MongoDB dump, in the same stopped window
 ./orkestra.sh retrieval up
 ```
 

@@ -189,6 +189,8 @@ check "production: QDRANT_URL without a key is refused"         "1"   "$(run "${
 check "production: the refusal names the API-key rule"          "yes" "$(saw 'QDRANT_URL is set but QDRANT_API_KEY is empty')"
 check "production: a valid endpoint list passes"                "0"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_ok}")"
 check "production: a single-quoted endpoint list passes"        "0"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS='${ep_ok}'")"
+check "production: an empty endpoint list passes (Go: no endpoints)" "0" "$(run "${prod[@]}" 'RETRIEVAL_INFERENCE_ENDPOINTS=[]')"
+check "production: JSON null is refused like Go's parser"       "1"   "$(run "${prod[@]}" 'RETRIEVAL_INFERENCE_ENDPOINTS=null')"
 check "production: malformed endpoint JSON is refused"          "1"   "$(run "${prod[@]}" 'RETRIEVAL_INFERENCE_ENDPOINTS=[{"name":')"
 check "production: the refusal names the variable"              "yes" "$(saw 'RETRIEVAL_INFERENCE_ENDPOINTS is not a valid endpoint list')"
 check "production: an endpoint without revision is refused"     "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_norev}")"
