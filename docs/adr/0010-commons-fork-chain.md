@@ -67,6 +67,8 @@ Each commit made in a chain repo carries a `Prop:` git trailer naming where its 
 
 — never by re-reading diffs. D5 makes D3's scoped-commit discipline machine-checkable and removes the guesswork that risks the D4 irreversible mistake.
 
+*Enforcement (amended 2026-10-30).* In the reference instance the trailer is checked at commit time by a `commit-msg` hook that travels with the chain's hook configuration: it refuses a commit without exactly one valid `Prop:` trailer, and `Prop: upstream` on a commit that only touches addon code (the public base has no addons). The upward flow is also *measured*: a periodic whole-chain report lists, per link, the commits whose trailer says they must travel and that the target does not yet hold (by `cherry picked from` line, subject, or a simulated cherry-pick), and the trailer-less commits that touch core. Accepted exceptions — content that arrived adapted, a wrong trailer on old history — are recorded in a versioned file, each with its reason, so the report reaches zero only through explained exceptions, never a moving "since the last round" window.
+
 ### D6 — Downstream propagation is selective per fork
 
 Everything committed to commons rides downstream through the merge sync, so *which* products receive an update is a **per-sync** decision, not a per-commit one: the operator merges `commons/dev` into the chosen product forks when they choose, not into all of them automatically. A commons change therefore reaches only the forks the operator syncs — per-product isolation and release cadence stay under the operator's control.
