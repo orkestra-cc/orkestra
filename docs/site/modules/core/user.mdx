@@ -31,7 +31,7 @@ Every admin route is gated by one per-action `user.*` key, evaluated at **global
 | `user.delete` | `DELETE /v1/users/{id}` | `DELETE …/{id}` | **5 min** |
 | `user.avatar.self` | `/v1/me/avatar/presign-upload`, `/v1/me/avatar/commit`, `/v1/me/avatar/source` — on **both** tiers | | — |
 
-**Who holds what.** At global scope a platform role conveys its seeded permission set ([authz rule 2b](/modules/core/authz#how-a-decision-is-made)): `super_admin` and `administrator` everything; `manager` read, create and update — so a manager runs the operators without being a platform administrator; `operator` and `guest` read only. `system.users.admin` is no longer a gate on this surface.
+**Who holds what.** At global scope a platform role conveys its seeded permission set ([authz rule 2b](/modules/core/authz#how-a-decision-is-made)): `super_admin` and `administrator` everything; `manager` read, create and update — so a manager runs the operators without being a platform administrator; `operator` and `guest` read only. `system.users.admin` is no longer a gate on this surface. If your deployment enforces Cedar for `system.users.admin` (`CEDAR_ENFORCE_ACTIONS`), list `user.read`, `user.create`, `user.update` and `user.delete` instead: the same restrictions follow them — no user management from a public IP in production, and a second factor for the roles that can write users.
 
 **Hard mutations sit behind a step-up.** Updating or deleting a user (operator or client tier) requires an MFA proof fresher than 5 minutes, so a long-lived admin session cannot destructively mutate platform state hours after the last verification. Reads, creates and the mail triggers stay on the plain permission gate.
 

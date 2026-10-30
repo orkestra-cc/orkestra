@@ -49,6 +49,51 @@ forbid (
     principal.mfa_enrolled == false
 };
 
+// The platform user-admin keys (user.read/create/update/delete) replaced
+// system.users.admin as the gate of the /v1/users and
+// /v1/admin/client-users routes. These two forbids carry over the
+// restrictions that gate had here, so a deployment that moves its
+// CEDAR_ENFORCE_ACTIONS entry from system.users.admin to the user.* keys
+// keeps them: the user keys have no .admin suffix (so the MFA forbid
+// above never fired on them) and are not system.* literals (so the
+// public-IP forbid below did not name them).
+//
+// User management without a second factor: refused to the platform roles
+// that can write users (super_admin, administrator, manager) on every
+// user-admin key, reads included, as system.users.admin was.
+@id("abac.require_mfa_for_user_admin")
+forbid (
+    principal,
+    action,
+    resource
+) when {
+    (action == Action::"user.read" ||
+     action == Action::"user.create" ||
+     action == Action::"user.update" ||
+     action == Action::"user.delete") &&
+    principal has system_role &&
+    (principal.system_role == "super_admin" ||
+     principal.system_role == "administrator" ||
+     principal.system_role == "manager") &&
+    principal.mfa_enrolled == false
+};
+
+// User management from a public IP in production: refused like the
+// system.* actions in abac.deny_system_actions_from_public_ip_in_prod.
+@id("abac.deny_user_admin_from_public_ip_in_prod")
+forbid (
+    principal,
+    action,
+    resource
+) when {
+    (action == Action::"user.read" ||
+     action == Action::"user.create" ||
+     action == Action::"user.update" ||
+     action == Action::"user.delete") &&
+    context has env && context.env == "production" &&
+    context has ip_bucket && context.ip_bucket == "public"
+};
+
 // Deny platform-reserved system.* actions when the call originates from
 // a public IP and the deployment is production. The four actions listed
 // are the same ones named in tenant_scope.cedar's tier-aware forbids —

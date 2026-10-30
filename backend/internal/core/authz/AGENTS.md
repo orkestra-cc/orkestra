@@ -329,6 +329,8 @@ Section B item #4 of the auth roadmap (2026-04-24) plumbs attribute-based signal
 |-----|-------|------------|
 | `abac.require_mfa_for_admin_suffix` | forbid | principal.system_role ∈ {super_admin, administrator} AND context.action_suffix == "admin" AND principal.mfa_enrolled == false |
 | `abac.deny_system_actions_from_public_ip_in_prod` | forbid | action ∈ the 7 system.* literals (`system.modules.admin`, `system.tenants.admin`, `system.users.{admin,mfa_reset,password_reset,email_verify_resend,oauth_unlink}`) AND context.env == "production" AND context.ip_bucket == "public" |
+| `abac.require_mfa_for_user_admin` | forbid | action ∈ {`user.read`, `user.create`, `user.update`, `user.delete`} AND principal.system_role ∈ {super_admin, administrator, manager} AND principal.mfa_enrolled == false — carries the MFA restriction `system.users.admin` had when it gated the user routes (the `user.*` keys have no `.admin` suffix) |
+| `abac.deny_user_admin_from_public_ip_in_prod` | forbid | the same four `user.*` actions AND context.env == "production" AND context.ip_bucket == "public" — the public-IP restriction of `system.users.admin`, carried onto its replacements |
 | `retrieval.corpus_read.platform_roles` | permit | `retrieval.corpus.read` for system_role ∈ {super_admin, administrator, developer} |
 | `retrieval.corpus_admin.platform_admins` | permit | `retrieval.corpus.admin` for system_role ∈ {super_admin, administrator} |
 | `retrieval.searchlog_admin.org_admins` | permit | `retrieval.searchlog.admin` for a tenant role org_owner or org_admin on a tenant resource |
