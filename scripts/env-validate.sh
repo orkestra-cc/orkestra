@@ -396,8 +396,9 @@ validate_env_file() {
     fi
     if [ -n "$i_eps" ]; then
         if ! command -v jq > /dev/null 2>&1; then
-            print_warning "jq not found — RETRIEVAL_INFERENCE_ENDPOINTS not validated"
-            warnings=$((warnings + 1))
+            # The backend drops a bad entry with only a WARN, so an unchecked
+            # list must not pass the staging/production gate.
+            retrieval_problem "jq is required to validate RETRIEVAL_INFERENCE_ENDPOINTS (install jq, then re-run)"
         else
             ep_reason=$(inference_endpoints_error "$i_eps")
             if [ -n "$ep_reason" ]; then

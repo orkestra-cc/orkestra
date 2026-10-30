@@ -228,6 +228,27 @@ check "production: the bad prefix warning is shown"             "yes" "$(saw 'QD
 check "production: a valid collection prefix is silent"         "no"  "$(run "${prod[@]}" QDRANT_COLLECTION_PREFIX=acme-1 > /dev/null; saw 'QDRANT_COLLECTION_PREFIX')"
 check "a commented endpoint stub is not read as active"         "no"  "$(run "${prod[@]}" > /dev/null; saw 'not a valid endpoint list')"
 
+# Without jq the endpoint list cannot be checked: refused in staging and
+# production, a warning in development. PATH is rebuilt from the real one
+# with every command but jq, so the rest of the validator still runs.
+nojq="$tmp/nojq-bin"
+mkdir -p "$nojq"
+IFS=: read -r -a path_dirs <<< "$PATH"
+for d in "${path_dirs[@]}"; do
+    [ -d "$d" ] || continue
+    for c in "$d"/*; do
+        name="${c##*/}"
+        [ "$name" = jq ] || [ -e "$nojq/$name" ] || ln -s "$c" "$nojq/$name" 2> /dev/null
+    done
+done
+run_nojq() { PATH="$nojq" run "$@"; }
+check "the jq-less PATH really hides jq"                        "no"  "$(PATH="$nojq" command -v jq > /dev/null && printf yes || printf no)"
+check "production: an endpoint list without jq is refused"      "1"   "$(run_nojq "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_ok}")"
+check "production: the refusal names jq and the variable"       "yes" "$(saw 'jq is required to validate RETRIEVAL_INFERENCE_ENDPOINTS')"
+check "development: an endpoint list without jq only warns"     "0"   "$(run_nojq "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_ok}")"
+check "development: the jq warning is shown"                    "yes" "$(saw 'jq is required to validate RETRIEVAL_INFERENCE_ENDPOINTS.*tolerated in development')"
+check "production: no endpoint list needs no jq"                "0"   "$(run_nojq "${prod[@]}")"
+
 echo
 printf 'env-validate: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

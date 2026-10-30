@@ -1935,7 +1935,9 @@ retrieval_list_services() {
         for key in QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY; do
             [ -n "$(retrieval_setting "$key")" ] || missing="${missing:+$missing and }$key"
         done
-        [ -n "$missing" ] || missing="QDRANT_API_KEY and RETRIEVAL_INFERENCE_API_KEY"
+        if [ -z "$missing" ]; then
+            die "Retrieval compose validation failed (see the Compose error above); no lifecycle action was taken."
+        fi
         die "Retrieval compose validation failed — $missing must be set (make init); no lifecycle action was taken."
     fi
     if ! volumes=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
@@ -1954,6 +1956,20 @@ retrieval_list_services() {
     done
 }
 
+# ${…:?} refuses only an empty key; the docker/.env.example placeholders are
+# public strings, so up refuses them too. Only up checks: down and status must
+# keep working to clean up. Names the key, never its value.
+retrieval_refuse_placeholder_keys() {
+    local key
+    for key in QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY; do
+        case "$(retrieval_setting "$key")" in
+            REPLACE_WITH_*)
+                die "$key still holds the docker/.env.example placeholder: run make init (or set it to the output of openssl rand -hex 32); no lifecycle action was taken."
+                ;;
+        esac
+    done
+}
+
 # Active = a serving container exists (running or not), so a deploy keeps the
 # backend wired while Qdrant restarts. False when the overlay cannot render
 # (keys emptied): the backend then deploys without it.
@@ -1967,12 +1983,14 @@ retrieval_project_active() {
 
 # Download the pinned weights into the tei-weights volume through the seed
 # containers, which are healthy only once TEI has loaded the model. The seeds
-# are the only services with egress, so they are removed on every path —
-# success, failure, timeout or Ctrl-C — before a serving container starts.
-# Runs in the foreground (not with_spinner): a cold download takes minutes and
-# Compose's progress is the operator's only feedback.
+# run one after the other, each removed as soon as it is healthy: on a re-run
+# next to a live overlay only one model is loaded twice, never both. They are
+# the only services with egress, so they are removed on every path (success,
+# failure, timeout, Ctrl-C, SIGTERM or SIGHUP) before a serving container
+# starts. Runs in the foreground (not with_spinner): a cold download takes
+# minutes and Compose's progress is the operator's only feedback.
 retrieval_seed() {
-    local skip timeout rc=0 rm_rc=0 saved_int
+    local skip timeout seed rc=0 rm_rc=0 saved_traps
     skip=$(retrieval_setting RETRIEVAL_SKIP_SEED)
     if [ "$skip" = true ]; then
         p_warn "RETRIEVAL_SKIP_SEED=true — no download; the ${COMPOSE_PROJECT_NAME}_tei-weights volume must already hold the weights."
@@ -1981,19 +1999,31 @@ retrieval_seed() {
     retrieval_export_seed_timeout
     timeout=$RETRIEVAL_SEED_TIMEOUT
 
-    p_step "Seeding the model weights (first run downloads ~4.5 GB; waits up to ${timeout}s)"
-    saved_int=$(trap -p INT)
-    # Ctrl-C stops the wait (Compose gets the signal), never the removal below.
-    trap ':' INT
-    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
-        --profile retrieval-seed up -d --wait --wait-timeout "$timeout" "${RET_SEED_SERVICES[@]}" || rc=$?
-    p_step "Removing the seed containers"
-    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
-        --profile retrieval-seed rm -sf "${RET_SEED_SERVICES[@]}" || rm_rc=$?
-    if [ -n "$saved_int" ]; then
-        eval "$saved_int"
-    else
-        trap - INT
+    p_step "Seeding the model weights one model at a time (first run downloads ~4.5 GB; each waits up to ${timeout}s)"
+    saved_traps=$(trap -p INT TERM HUP)
+    # A signal stops the wait (Compose gets it), never the removal below.
+    trap ':' INT TERM HUP
+    for seed in "${RET_SEED_SERVICES[@]}"; do
+        p_step "Seeding $seed"
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+            --profile retrieval-seed up -d --wait --wait-timeout "$timeout" "$seed" || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            break
+        fi
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+            --profile retrieval-seed rm -sf "$seed" || rm_rc=$?
+        if [ "$rm_rc" -ne 0 ]; then
+            break
+        fi
+    done
+    # A failed seed: remove both, the failed one and any left by a killed run.
+    if [ "$rc" -ne 0 ]; then
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+            --profile retrieval-seed rm -sf "${RET_SEED_SERVICES[@]}" || rm_rc=$?
+    fi
+    trap - INT TERM HUP
+    if [ -n "$saved_traps" ]; then
+        eval "$saved_traps"
     fi
 
     if [ "$rm_rc" -ne 0 ]; then
@@ -2025,6 +2055,7 @@ retrieval_up() {
     retrieval_check_file
     retrieval_init_env
     retrieval_list_services
+    retrieval_refuse_placeholder_keys
     echo
     p_muted "Compose: $(basename "$RETRIEVAL_COMPOSE")"
     echo
@@ -2066,15 +2097,23 @@ retrieval_status() {
     retrieval_list_services
     echo
 
+    # The seeds are listed too: a leftover one (its shell was killed during
+    # the wait) is the only container with internet access.
     p_section "Containers"
     docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
-        ps "${RET_SERVICES[@]}"
+        --profile retrieval-seed ps -a "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}"
+    local seed_ids
+    seed_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        --profile retrieval-seed ps -a -q "${RET_SEED_SERVICES[@]}" 2>/dev/null || true)
+    if [ -n "$seed_ids" ]; then
+        p_warn "A seed container exists and it has internet access. Unless a 'retrieval up' is seeding right now, remove it with ./orkestra.sh retrieval down."
+    fi
     echo
 
     p_section "Resource usage"
     local container_ids
     container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
-        ps -q "${RET_SERVICES[@]}" 2>/dev/null)
+        --profile retrieval-seed ps -q "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}" 2>/dev/null)
     if [ -z "$container_ids" ]; then
         p_muted "No running containers — start the stack with 'retrieval up'."
         return
@@ -2112,7 +2151,7 @@ retrieval_info() {
         "  Remove the volumes (after down):" \
         "    ${c_muted}docker volume rm ${project}_tei-weights${c_reset}  (safe: up downloads it again)" \
         "    ${c_muted}docker volume rm ${project}_qdrant-data${c_reset}  (the index: NOT rebuilt" \
-        "    until delivery step 2 — see docs/site/operating/retrieval-overlay.mdx)" \
+        "    until delivery step 2; see docs/site/operating/retrieval-overlay.mdx)" \
         ""
     echo
     draw_box "Offline hosts" \
@@ -2133,12 +2172,24 @@ retrieval_info() {
 # Qdrant and TEI on retrieval-net. Extra flags follow the default fixture, so
 # a later -fixture overrides it.
 retrieval_bench() {
+    check_docker_running
+    retrieval_check_file
     retrieval_init_env
     [ "$ENV" != "production" ] || die "The benchmark does not run in production (no Go toolchain in the image)."
     retrieval_project_active || die "Start the overlay first: ./orkestra.sh retrieval up"
     stack_compose_files
-    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" exec -T backend \
+    # With a terminal, exec allocates a TTY so Ctrl-C reaches the benchmark
+    # (it then drops its scratch collection); -T only when piped or in CI.
+    local -a tty_opt=(-T)
+    if retrieval_bench_has_tty; then
+        tty_opt=()
+    fi
+    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" exec ${tty_opt[@]+"${tty_opt[@]}"} backend \
         go run ./cmd/retrieval-bench -fixture internal/core/retrieval/bench/testdata/smoke-it-en.jsonl "$@"
+}
+
+retrieval_bench_has_tty() {
+    [ -t 0 ] && [ -t 1 ]
 }
 
 # Logs through the merged stack and this project only. view_logs would parse
@@ -2521,7 +2572,7 @@ ${c_bold}OBSERVABILITY${c_reset} ${c_muted}(self-hosted OTEL stack — runs alon
 ${c_bold}RETRIEVAL${c_reset} ${c_muted}(Qdrant + TEI inference for the retrieval module — opt-in overlay, ADR-0023)${c_reset}
   ${c_accent}retrieval up${c_reset}                      Seed model weights, start Qdrant + TEI, wire the backend
   ${c_accent}retrieval down${c_reset}                    Remove containers (volumes kept), unwire the backend
-  ${c_accent}retrieval status${c_reset}                  Containers + memory usage (sizing)
+  ${c_accent}retrieval status${c_reset}                  Containers (leftover seeds included) + memory usage (sizing)
   ${c_accent}retrieval info${c_reset}                    Internal URLs, backend variables, opt-out, offline seeding
   ${c_accent}retrieval bench${c_reset} [flags]           Benchmark keyword/dense/hybrid/rerank in the backend container (dev/staging)
   ${c_accent}retrieval logs${c_reset} <svc> [flags]      View logs for a retrieval service (seeds included)
@@ -2668,6 +2719,8 @@ cli_dispatch() {
                 down) retrieval_down ;;
                 status) retrieval_status ;;
                 info)
+                    check_docker_running
+                    retrieval_check_file
                     retrieval_init_env
                     retrieval_info
                     ;;
