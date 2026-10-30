@@ -236,6 +236,7 @@ ret_log="$(mktemp)"
 ret_out="$(mktemp)"
 ret_env_log="$(mktemp)"
 export RET_ENV_FILE="$ret_env_file" RET_LOG="$ret_log" RET_ENV_LOG="$ret_env_log"
+unset RET_FAIL RET_SIGNAL RET_SIGNAL_NAME RET_SEED_LEFT
 printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
 
 # ret_run <cmd...> — runs cmd in a subshell against a stubbed Docker that logs
@@ -269,6 +270,12 @@ ret_run() {
             printenv RETRIEVAL_SEED_TIMEOUT >> "$RET_ENV_LOG" || echo unset >> "$RET_ENV_LOG"
             if [ -n "${RET_FAIL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$RET_FAIL"; then
                 return 1
+            fi
+            # RET_SIGNAL (an ERE) signals this shell during the matching call,
+            # which then succeeds: a signal sent to the script alone, while
+            # Compose finishes its wait.
+            if [ -n "${RET_SIGNAL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$RET_SIGNAL"; then
+                kill -"${RET_SIGNAL_NAME:-TERM}" "$BASHPID"
             fi
             case " $* " in
                 *" config --services "*)
@@ -398,9 +405,19 @@ check "a failed second seed removes both seeds and serves nothing" "1/yes/yes/no
 RET_FAIL='rm -sf tei-embed-seed$' ret_run retrieval_up; rc=$?
 check "a seed that cannot be removed stops up and points at retrieval down" "1/no/no/yes" \
     "$rc/$(has "$ret_log" ' up .*tei-rerank-seed$')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_out" 'run ./orkestra.sh retrieval down')"
+# A stop signal sent to the script alone (timeout(1), kill) ends the up after
+# the cleanup, even though the Compose wait itself succeeds.
+for ret_signame in TERM HUP INT; do
+    RET_SIGNAL='up -d --wait .* tei-embed-seed$' RET_SIGNAL_NAME=$ret_signame ret_run retrieval_up; rc=$?
+    check "SIG$ret_signame during a seed: cleanup, then die, nothing started" "1/yes/yes/no/no/no" \
+        "$rc/$(has "$ret_out" 'Interrupted: the seeds were removed and nothing was started')/$(has "$ret_log" 'rm -sf tei-embed-seed tei-rerank-seed$')/$(has "$ret_log" ' up .*tei-rerank-seed$')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" 'up -d --no-deps backend$')"
+done
+RET_SIGNAL='up -d --wait .* tei-rerank-seed$' ret_run retrieval_up; rc=$?
+check "a signal during the last seed still stops the up" "1/yes/no/no" \
+    "$rc/$(has "$ret_out" 'Interrupted:')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" 'up -d --no-deps backend$')"
 # The seed trap covers INT, TERM and HUP and restores the caller's traps.
 check "the seed step traps INT, TERM and HUP" "yes" \
-    "$(declare -f retrieval_seed | grep -q "trap ':' INT TERM HUP" && printf yes || printf no)"
+    "$(declare -f retrieval_seed | grep -q "trap 'ret_sig=1' INT TERM HUP" && printf yes || printf no)"
 ret_traps="$(
     trap 'echo caller-int' INT
     trap 'echo caller-term' TERM

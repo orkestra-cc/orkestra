@@ -1987,10 +1987,11 @@ retrieval_project_active() {
 # next to a live overlay only one model is loaded twice, never both. They are
 # the only services with egress, so they are removed on every path (success,
 # failure, timeout, Ctrl-C, SIGTERM or SIGHUP) before a serving container
-# starts. Runs in the foreground (not with_spinner): a cold download takes
-# minutes and Compose's progress is the operator's only feedback.
+# starts, and a stop signal ends the whole `up` there. Runs in the foreground
+# (not with_spinner): a cold download takes minutes and Compose's progress is
+# the operator's only feedback.
 retrieval_seed() {
-    local skip timeout seed rc=0 rm_rc=0 saved_traps
+    local skip timeout seed rc=0 rm_rc=0 saved_traps ret_sig=0
     skip=$(retrieval_setting RETRIEVAL_SKIP_SEED)
     if [ "$skip" = true ]; then
         p_warn "RETRIEVAL_SKIP_SEED=true — no download; the ${COMPOSE_PROJECT_NAME}_tei-weights volume must already hold the weights."
@@ -2001,13 +2002,19 @@ retrieval_seed() {
 
     p_step "Seeding the model weights one model at a time (first run downloads ~4.5 GB; each waits up to ${timeout}s)"
     saved_traps=$(trap -p INT TERM HUP)
-    # A signal stops the wait (Compose gets it), never the removal below.
-    trap ':' INT TERM HUP
+    # A signal never skips the removal below; it is recorded and ends the up
+    # after it. A signal sent to this script alone (timeout(1), kill) lets the
+    # Compose wait finish, so the flag, not Compose's exit code, must stop the
+    # loop before the next seed, the serving containers and the backend.
+    trap 'ret_sig=1' INT TERM HUP
     for seed in "${RET_SEED_SERVICES[@]}"; do
+        if [ "$ret_sig" -ne 0 ]; then
+            break
+        fi
         p_step "Seeding $seed"
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
             --profile retrieval-seed up -d --wait --wait-timeout "$timeout" "$seed" || rc=$?
-        if [ "$rc" -ne 0 ]; then
+        if [ "$rc" -ne 0 ] || [ "$ret_sig" -ne 0 ]; then
             break
         fi
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
@@ -2016,8 +2023,9 @@ retrieval_seed() {
             break
         fi
     done
-    # A failed seed: remove both, the failed one and any left by a killed run.
-    if [ "$rc" -ne 0 ]; then
+    # A failed or interrupted seed: remove both, the one that was running and
+    # any left by a killed run.
+    if [ "$rc" -ne 0 ] || [ "$ret_sig" -ne 0 ]; then
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
             --profile retrieval-seed rm -sf "${RET_SEED_SERVICES[@]}" || rm_rc=$?
     fi
@@ -2028,6 +2036,9 @@ retrieval_seed() {
 
     if [ "$rm_rc" -ne 0 ]; then
         die "Could not remove the seed containers (they have internet access): run ./orkestra.sh retrieval down."
+    fi
+    if [ "$ret_sig" -ne 0 ]; then
+        die "Interrupted: the seeds were removed and nothing was started."
     fi
     if [ "$rc" -ne 0 ]; then
         die "Model weight seeding failed (exit $rc); the seeds were removed and no serving container was started. Check access to huggingface.co, free disk space and RETRIEVAL_SEED_TIMEOUT, then re-run (a partial download resumes)."
@@ -2158,7 +2169,7 @@ retrieval_info() {
         "" \
         "  Copy a seeded ${project}_tei-weights volume in, then set" \
         "  ${c_accent}RETRIEVAL_SKIP_SEED=true${c_reset} in docker/.env. A slow link may need a" \
-        "  larger ${c_accent}RETRIEVAL_SEED_TIMEOUT${c_reset} (seconds, default 1800)." \
+        "  larger ${c_accent}RETRIEVAL_SEED_TIMEOUT${c_reset} (seconds per seed, default 1800)." \
         ""
     echo
     draw_box "Benchmark (development / staging)" \
