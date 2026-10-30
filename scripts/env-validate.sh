@@ -139,7 +139,7 @@ inference_endpoints_error() {
                   | select(. as $k | $e | optstr($k) | not) | bad($i; .)),
                 (["normalize","truncate"][] | select(. as $k | $e | optbool($k) | not) | bad($i; .)),
                 (if ($e.name // "" | test("\\A[a-z][a-z0-9_-]{0,31}\\z")) | not then bad($i; "name") else empty end),
-                (if ($e.url // "" | test("\\Ahttps?://[^/?#@:][^/?#@]*([/][^?#]*)?\\z")) | not then bad($i; "url") else empty end),
+                (if ($e.url // "" | test("\\Ahttps?://(\\[[0-9A-Fa-f:.]+\\]|[^\\s/?#@:\\[\\]%]+)(:[0-9]*)?(/([^?#%]|%[0-9A-Fa-f]{2})*)?\\z"; "i")) | not then bad($i; "url") else empty end),
                 (if ($kind | IN("embed","rerank","chat")) | not then bad($i; "kind") else empty end),
                 (if (($e.boundary // "") | IN("local","hosted")) | not then bad($i; "boundary") else empty end),
                 (if ($e.model // "" | test("\\A[A-Za-z0-9/][A-Za-z0-9._/:-]{0,199}\\z")) | not then bad($i; "model") else empty end),
@@ -403,7 +403,7 @@ validate_env_file() {
             if [ -n "$ep_reason" ]; then
                 retrieval_problem "RETRIEVAL_INFERENCE_ENDPOINTS is not a valid endpoint list: $ep_reason"
             else
-                if [ -n "$(inference_endpoints_query "$i_eps" '.[] | select(.boundary == "hosted" and (.url | startswith("http://"))) | .name')" ]; then
+                if [ -n "$(inference_endpoints_query "$i_eps" '.[] | select(.boundary == "hosted" and (.url | ascii_downcase | startswith("http://"))) | .name')" ]; then
                     retrieval_problem "RETRIEVAL_INFERENCE_ENDPOINTS has a hosted endpoint on http:// — the backend drops it in a production-like environment"
                 fi
                 # apiKeyEnv names a variable that must be non-empty AND reach the backend.

@@ -167,6 +167,10 @@ ep_noprefix_pool='[{"name":"embed","url":"http://tei-embed:80","kind":"embed","b
 ep_badname='[{"name":"Embed","url":"http://tei-embed:80","kind":"embed","boundary":"local","model":"m","revision":"r","pooling":"cls"}]'
 ep_query='[{"name":"embed","url":"http://tei-embed:80/?a=b","kind":"embed","boundary":"local","model":"m","revision":"r","pooling":"cls"}]'
 ep_userinfo='[{"name":"embed","url":"http://u:p@tei-embed:80","kind":"embed","boundary":"local","model":"m","revision":"r","pooling":"cls"}]'
+ep_url_space='[{"name":"embed","url":"http://tei embed:80","kind":"embed","boundary":"local","model":"m","revision":"r","pooling":"cls"}]'
+ep_url_port='[{"name":"embed","url":"http://h:abc","kind":"embed","boundary":"local","model":"m","revision":"r","pooling":"cls"}]'
+ep_url_pct='[{"name":"embed","url":"http://h/%zz","kind":"embed","boundary":"local","model":"m","revision":"r","pooling":"cls"}]'
+ep_url_upper='[{"name":"embed","url":"HTTP://tei-embed:80","kind":"embed","boundary":"local","model":"m","revision":"r","pooling":"cls"}]'
 ep_badmodel='[{"name":"embed","url":"http://tei-embed:80","kind":"embed","boundary":"local","model":"-m","revision":"r","pooling":"cls"}]'
 ep_badrev='[{"name":"embed","url":"http://tei-embed:80","kind":"embed","boundary":"local","model":"m","revision":"_r","pooling":"cls"}]'
 ep_norm_rr='[{"name":"rr","url":"http://tei-rerank:80","kind":"rerank","boundary":"local","model":"m","revision":"r","normalize":true}]'
@@ -202,6 +206,10 @@ check "production: an embed endpoint without pooling is refused" "1"  "$(run "${
 check "production: an invalid endpoint name is refused"         "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_badname}")"
 check "production: a URL query string is refused"               "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_query}")"
 check "production: URL userinfo is refused"                     "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_userinfo}")"
+check "production: a space in the URL host is refused"          "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_url_space}")"
+check "production: a non-numeric URL port is refused"           "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_url_port}")"
+check "production: an invalid percent escape is refused"        "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_url_pct}")"
+check "production: an uppercase URL scheme passes"              "0"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_url_upper}")"
 check "production: an invalid model is refused"                 "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_badmodel}")"
 check "production: an invalid revision is refused"              "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_badrev}")"
 check "production: normalize on a rerank endpoint is refused"   "1"   "$(run "${prod[@]}" "RETRIEVAL_INFERENCE_ENDPOINTS=${ep_norm_rr}")"
