@@ -2172,23 +2172,34 @@ retrieval_info() {
         "  larger ${c_accent}RETRIEVAL_SEED_TIMEOUT${c_reset} (seconds per seed, default 1800)." \
         ""
     echo
-    draw_box "Benchmark (development / staging)" \
+    draw_box "Benchmark (backend running from the checkout)" \
         "" \
         "  ${c_accent}./orkestra.sh retrieval bench${c_reset}   runs in the backend container" \
         ""
 }
 
 # Benchmark (ADR-0023 D14): runs backend/cmd/retrieval-bench inside the backend
-# container, which has the Go toolchain in development and staging and reaches
-# Qdrant and TEI on retrieval-net. Extra flags follow the default fixture, so
-# a later -fixture overrides it.
+# container, which reaches Qdrant and TEI on retrieval-net. `go run` needs the
+# Go toolchain and the source tree, which only a backend running from the
+# checkout has (development, and the hot-reload staging of the base). The
+# production image ships Go but not the sources (no go.mod, no fixture, a
+# read-only root), so a staging that runs it (as in forks) cannot run the
+# benchmark: the container is probed first instead of trusting ENV. Extra
+# flags follow the default fixture, so a later -fixture overrides it.
 retrieval_bench() {
     check_docker_running
     retrieval_check_file
     retrieval_init_env
-    [ "$ENV" != "production" ] || die "The benchmark does not run in production (no Go toolchain in the image)."
+    [ "$ENV" != "production" ] || die "The benchmark does not run in production (the image has no sources, and the binary refuses ENV=production)."
     retrieval_project_active || die "Start the overlay first: ./orkestra.sh retrieval up"
     stack_compose_files
+    # A Compose or daemon error (interpolation, env file) is appended to the
+    # message instead of reading as missing sources.
+    local probe_err
+    if ! probe_err=$(docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" exec -T backend \
+        sh -c 'command -v go > /dev/null && test -f cmd/retrieval-bench/main.go' 2>&1 < /dev/null); then
+        die "The running backend container has no Go toolchain or no benchmark sources (it runs a production image, or it is not running): the benchmark needs a backend that runs from the checkout (development, or the base's hot-reload staging).${probe_err:+ (docker: $probe_err)}"
+    fi
     # With a terminal, exec allocates a TTY so Ctrl-C reaches the benchmark
     # (it then drops its scratch collection); -T only when piped or in CI.
     local -a tty_opt=(-T)
@@ -2585,7 +2596,7 @@ ${c_bold}RETRIEVAL${c_reset} ${c_muted}(Qdrant + TEI inference for the retrieval
   ${c_accent}retrieval down${c_reset}                    Remove containers (volumes kept), unwire the backend
   ${c_accent}retrieval status${c_reset}                  Containers (leftover seeds included) + memory usage (sizing)
   ${c_accent}retrieval info${c_reset}                    Internal URLs, backend variables, opt-out, offline seeding
-  ${c_accent}retrieval bench${c_reset} [flags]           Benchmark keyword/dense/hybrid/rerank in the backend container (dev/staging)
+  ${c_accent}retrieval bench${c_reset} [flags]           Benchmark keyword/dense/hybrid/rerank in the backend container (dev, hot-reload staging)
   ${c_accent}retrieval logs${c_reset} <svc> [flags]      View logs for a retrieval service (seeds included)
 
 ${c_bold}LOG FLAGS${c_reset}

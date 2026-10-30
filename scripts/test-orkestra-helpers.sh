@@ -545,7 +545,8 @@ check "retrieval logs of a seed carry its profile" "yes" \
 ret_run logs_cli retrieval backend; rc=$?
 check "retrieval logs refuse a service outside the catalog" "1/no" "$rc/$(has "$ret_log" ' logs ')"
 
-# retrieval bench runs the Go benchmark in the backend container (dev/staging)
+# retrieval bench runs the Go benchmark in the backend container (a backend
+# running from the checkout: the container is probed for go and the sources)
 # against the overlay. The stubs are redefined inside the wrapper subshell
 # because ret_run's own retrieval_init_env would otherwise win.
 ret_bench() {
@@ -583,14 +584,37 @@ check "retrieval bench runs in the backend container" "0/yes" \
 # With a terminal, exec allocates a TTY so Ctrl-C reaches the benchmark.
 ret_run ret_bench_tty -k 5; rc=$?
 check "retrieval bench on a terminal runs without -T" "0/yes/no" \
-    "$rc/$(has "$ret_log" ' exec backend go run ./cmd/retrieval-bench -fixture .* -k 5$')/$(has "$ret_log" ' exec -T ')"
+    "$rc/$(has "$ret_log" ' exec backend go run ./cmd/retrieval-bench -fixture .* -k 5$')/$(has "$ret_log" ' exec -T backend go run ')"
+# The container is probed for go and the sources before the run, whatever ENV
+# says: a fork's staging on the production image has neither.
+ret_run ret_bench -k 5; rc=$?
+check "retrieval bench probes the backend before the run" "0/yes/yes" \
+    "$rc/$(has "$ret_log" ' exec -T backend sh -c command -v go > /dev/null && test -f cmd/retrieval-bench/main.go$')/$([ "$(ret_line ' exec -T backend sh -c ')" -lt "$(ret_line ' go run ./cmd/retrieval-bench ')" ] && printf yes || printf no)"
+RET_FAIL=' exec -T backend sh -c ' ret_run ret_bench -k 5; rc=$?
+check "retrieval bench refuses a backend without go or the sources" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' go run ')" = no ] && grep -q 'runs from the checkout' "$ret_out" && printf yes || printf no)"
+# A Compose error during the probe is shown, not read as missing sources.
+ret_bench_probe_err() {
+    retrieval_project_active() { return 0; }
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$RET_LOG"
+        case "$*" in
+            *' exec -T backend sh -c '*) echo 'required variable MONGO_ROOT_PASSWORD is missing a value' >&2; return 1 ;;
+        esac
+    }
+    retrieval_bench "$@"
+}
+ret_run ret_bench_probe_err; rc=$?
+check "retrieval bench shows the Compose error of a failed probe" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' go run ')" = no ] && grep -q '(docker: required variable MONGO_ROOT_PASSWORD is missing a value)' "$ret_out" && printf yes || printf no)"
 ret_run ret_bench_nodocker; rc=$?
 check "retrieval bench checks Docker first" "1/no/yes" "$rc/$(has "$ret_log" ' exec ')/$(has "$ret_out" 'docker is not running')"
 check "retrieval info checks Docker and the overlay file" "yes" \
     "$(declare -f cli_dispatch | grep -A3 '^ *info)' | grep -q 'check_docker_running' && declare -f cli_dispatch | grep -A3 '^ *info)' | grep -q 'retrieval_check_file' && printf yes || printf no)"
 
 rm -f "$ret_env_file" "$ret_log" "$ret_out" "$ret_env_log"
-unset -f ret_run ret_stack_files has ret_line ret_bench ret_bench_prod ret_bench_inactive ret_bench_tty ret_bench_nodocker
+unset -f ret_run ret_stack_files has ret_line ret_bench ret_bench_prod ret_bench_inactive ret_bench_tty ret_bench_nodocker ret_bench_probe_err
 
 
 # --- env-validate.sh: same-site host pairings (spec §8 follow-up #16) ---
