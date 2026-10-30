@@ -39,7 +39,25 @@ func (s *pinStoreFake) GetUserForPINAuth(_ context.Context, username string) (*i
 	if found == nil {
 		return nil, iface.ErrUserNotFound
 	}
-	return found, nil
+	// A copy, as the repository decodes a fresh row: the PIN service holds
+	// it across a verification while concurrent attempts write the live one.
+	c := *found
+	return &c, nil
+}
+
+// pinUsersCopying hands the PIN service copies of the fake's rows, as the
+// user module does; tests keep editing the live rows through f.users.
+type pinUsersCopying struct{ *gateUserFake }
+
+func (u pinUsersCopying) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
+	row, err := u.gateUserFake.GetUserByID(ctx, id)
+	if err != nil || row == nil {
+		return row, err
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	c := *row
+	return &c, nil
 }
 
 func (s *pinStoreFake) CountUsersByUsername(_ context.Context, username string) (int64, error) {
@@ -65,6 +83,16 @@ func (s *pinStoreFake) with(userUUID string, fn func(u *iface.User)) error {
 	return nil
 }
 
+// hashOf is the stored PIN hash of a user, "" when missing.
+func (s *pinStoreFake) hashOf(userUUID string) string {
+	s.users.mu.Lock()
+	defer s.users.mu.Unlock()
+	if u, ok := s.users.byUUID[userUUID]; ok {
+		return u.PINHash
+	}
+	return ""
+}
+
 func (s *pinStoreFake) SetPINHash(_ context.Context, userUUID, hash string) error {
 	return s.with(userUUID, func(u *iface.User) {
 		now := time.Now()
@@ -72,7 +100,10 @@ func (s *pinStoreFake) SetPINHash(_ context.Context, userUUID, hash string) erro
 	})
 }
 
-func (s *pinStoreFake) ClearPIN(_ context.Context, userUUID string) error {
+func (s *pinStoreFake) ClearPIN(_ context.Context, userUUID, expectedHash string) error {
+	if expectedHash != "" && s.hashOf(userUUID) != expectedHash {
+		return iface.ErrPINChanged
+	}
 	s.mu.Lock()
 	s.cleared = append(s.cleared, userUUID)
 	s.mu.Unlock()
@@ -90,7 +121,10 @@ func (s *pinStoreFake) RecordFailedPIN(_ context.Context, userUUID string) (int,
 	return n, err
 }
 
-func (s *pinStoreFake) LockPIN(_ context.Context, userUUID string, until time.Time) error {
+func (s *pinStoreFake) LockPIN(_ context.Context, userUUID, expectedHash string, until time.Time) error {
+	if s.hashOf(userUUID) != expectedHash {
+		return iface.ErrPINChanged
+	}
 	return s.with(userUUID, func(u *iface.User) { t := until; u.PINLockedUntil = &t })
 }
 
@@ -286,7 +320,7 @@ func newPINFixtureFor(t *testing.T, policy map[string]string, aud PolicyAudience
 		actors = newGateUserFake()
 	}
 	f.svc = NewPINAuthService(PINAuthConfig{
-		Login: login, Store: f.store, Users: f.users, Actors: actors, Devices: f.devices, Codes: f.codes,
+		Login: login, Store: f.store, Users: pinUsersCopying{f.users}, Actors: actors, Devices: f.devices, Codes: f.codes,
 		Passwords: f.pwd, Policy: login.policy, Audience: aud,
 		Attempts: f.counter, Authz: f.authz, Sessions: f.revoker, Events: f.events,
 		Logger: silentLogger(),

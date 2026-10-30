@@ -982,11 +982,11 @@ func (s *userService) SetPINHash(ctx context.Context, userUUID, hash string) err
 }
 
 // ClearPIN implements iface.PINCredentialStore.
-func (s *userService) ClearPIN(ctx context.Context, userUUID string) error {
+func (s *userService) ClearPIN(ctx context.Context, userUUID, expectedHash string) error {
 	if strings.TrimSpace(userUUID) == "" {
 		return ErrInvalidInput
 	}
-	return asUserNotFound(s.userRepo.ClearPIN(ctx, userUUID))
+	return asUserNotFound(s.userRepo.ClearPIN(ctx, userUUID, expectedHash))
 }
 
 // RecordFailedPIN implements iface.PINCredentialStore.
@@ -999,11 +999,11 @@ func (s *userService) RecordFailedPIN(ctx context.Context, userUUID string) (int
 }
 
 // LockPIN implements iface.PINCredentialStore.
-func (s *userService) LockPIN(ctx context.Context, userUUID string, until time.Time) error {
-	if userUUID == "" {
+func (s *userService) LockPIN(ctx context.Context, userUUID, expectedHash string, until time.Time) error {
+	if userUUID == "" || expectedHash == "" {
 		return ErrInvalidInput
 	}
-	return s.userRepo.LockPIN(ctx, userUUID, until)
+	return s.userRepo.LockPIN(ctx, userUUID, expectedHash, until)
 }
 
 // ClearFailedPINs implements iface.PINCredentialStore.

@@ -367,6 +367,9 @@ type AuthConfig struct {
 }
 
 type authService struct {
+	// pinSessions re-validates a PIN session on every refresh
+	// (SetPINSessionChecker); nil refuses PIN refreshes.
+	pinSessions PINSessionChecker
 	// oauthCompensationFailure counts a failed backwards compensation on
 	// the signup reservation (spec §4.8 D32 item 5). Nil records on the
 	// process-wide metrics collector; tests inject a counter.
@@ -459,6 +462,19 @@ func (s *authService) SetPolicy(p *AuthPolicyService) {
 // SetAudience records the surface this service serves so policy
 // reads can fetch audience-scoped knobs.
 func (s *authService) SetOAuthStoreGate(gate func() bool) { s.oauthStoreGate = gate }
+
+// SetPINSessionChecker wires the tier's PIN service, which every refresh
+// of a PIN session consults (CheckPINSession). Unset, a PIN session
+// cannot refresh: there is nothing to re-validate it against.
+func (s *authService) SetPINSessionChecker(c PINSessionChecker) { s.pinSessions = c }
+
+// checkPINSession re-validates a PIN session before a refresh mints.
+func (s *authService) checkPINSession(ctx context.Context, userUUID, deviceID string) error {
+	if s.pinSessions == nil {
+		return ErrRefreshSessionInactive
+	}
+	return s.pinSessions.CheckPINSession(ctx, userUUID, deviceID)
+}
 
 func (s *authService) SetAudience(a PolicyAudience) {
 	s.audience = a
@@ -1955,6 +1971,9 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	refreshTTL := s.jwtService.RefreshTokenTTL()
 	pinSession := tokenDoc.LoginMethod == models.LoginMethodPIN
 	if pinSession {
+		if err := s.checkPINSession(ctx, user.UUID, tokenDoc.DeviceID); err != nil {
+			return nil, err
+		}
 		amr, lastOTPAt, refreshTTL = s.pinSessionMint(ctx, security)
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
@@ -2182,6 +2201,9 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 	amr, lastOTPAt := carryAMR(claims.AMR, claims.LastOTPAt, claims.MFAEpoch, user.MFAEpoch)
 	expiresIn := int64(s.jwtService.AccessTokenTTL(ctx).Seconds())
 	if doc.LoginMethod == models.LoginMethodPIN {
+		if err := s.checkPINSession(ctx, user.UUID, doc.DeviceID); err != nil {
+			return nil, err
+		}
 		amr, lastOTPAt, _ = s.pinSessionMint(ctx, security)
 		expiresIn = int64(security.AccessTTL.Seconds())
 	}

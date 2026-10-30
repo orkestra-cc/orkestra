@@ -139,10 +139,10 @@ internal/core/user/repository/user_repository.go:1060:UpdateOne
 internal/core/user/repository/user_repository.go:1121:UpdateOne
 internal/core/user/repository/user_repository.go:1145:UpdateOne
 internal/core/user/repository/user_repository.go:1162:UpdateOne
-internal/core/user/repository/user_repository.go:1326:UpdateOne
-internal/core/user/repository/user_repository.go:1348:UpdateOne
-internal/core/user/repository/user_repository.go:1408:UpdateOne
-internal/core/user/repository/user_repository.go:1425:CountDocuments
+internal/core/user/repository/user_repository.go:1334:UpdateOne
+internal/core/user/repository/user_repository.go:1356:UpdateOne
+internal/core/user/repository/user_repository.go:1416:UpdateOne
+internal/core/user/repository/user_repository.go:1433:CountDocuments
 internal/core/user/repository/user_repository.go:237:FindOne
 internal/core/user/repository/user_repository.go:256:FindOne
 internal/core/user/repository/user_repository.go:309:FindOneAndUpdate

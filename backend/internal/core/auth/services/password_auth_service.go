@@ -891,6 +891,25 @@ func (s *PasswordAuthService) loadMembershipsAsAuthModel(ctx context.Context, us
 	return out
 }
 
+// loadMembershipsStrict is loadMembershipsAsAuthModel for a gate that
+// refuses privileged memberships: a failed lookup is reported instead of
+// read as "no memberships", so it can never let such a gate pass. Without
+// a tenant provider there are no memberships to read.
+func (s *PasswordAuthService) loadMembershipsStrict(ctx context.Context, userUUID string) ([]authModels.TenantMembership, error) {
+	if s.tenantProvider == nil {
+		return nil, nil
+	}
+	list, err := s.tenantProvider.ListUserMemberships(ctx, userUUID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]authModels.TenantMembership, 0, len(list))
+	for _, m := range list {
+		out = append(out, authModels.TenantMembership{TenantUUID: m.TenantUUID, TenantKind: m.TenantKind, Roles: m.Roles})
+	}
+	return out, nil
+}
+
 // SetAuditSink wires the compliance audit sink post-construction. The
 // compliance module is optional, so auth's audit-emission helpers skip
 // silently when sink is nil.

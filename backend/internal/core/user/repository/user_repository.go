@@ -71,9 +71,9 @@ type UserRepository interface {
 	GetForPINAuth(ctx context.Context, username string) (*iface.User, error)
 	CountByUsername(ctx context.Context, username string) (int64, error)
 	SetPINHash(ctx context.Context, userUUID, hash string) error
-	ClearPIN(ctx context.Context, userUUID string) error
+	ClearPIN(ctx context.Context, userUUID, expectedHash string) error
 	RecordFailedPIN(ctx context.Context, userUUID string) (int, error)
-	LockPIN(ctx context.Context, userUUID string, until time.Time) error
+	LockPIN(ctx context.Context, userUUID, expectedHash string, until time.Time) error
 	ClearFailedPINs(ctx context.Context, userUUID string) error
 
 	// MFA grace-period operations — used by the auth module when a privileged
@@ -1232,10 +1232,13 @@ func (r *mongoUserRepository) SetPINHash(ctx context.Context, userUUID, hash str
 }
 
 // ClearPIN removes the PIN credential and its failure state.
-func (r *mongoUserRepository) ClearPIN(ctx context.Context, userUUID string) error {
+func (r *mongoUserRepository) ClearPIN(ctx context.Context, userUUID, expectedHash string) error {
 	filter := bson.M{
 		"uuid":      userUUID,
 		"deletedAt": bson.M{"$exists": false},
+	}
+	if expectedHash != "" {
+		filter["pinHash"] = expectedHash
 	}
 	update := bson.M{
 		"$set":   bson.M{"updatedAt": time.Now()},
@@ -1247,7 +1250,7 @@ func (r *mongoUserRepository) ClearPIN(ctx context.Context, userUUID string) err
 		return fmt.Errorf("clear pin: %w", err)
 	}
 	if result.MatchedCount == 0 {
-		return ErrUserNotFound
+		return r.missOnPINHash(ctx, userUUID, expectedHash)
 	}
 	return nil
 }
@@ -1279,14 +1282,19 @@ func (r *mongoUserRepository) RecordFailedPIN(ctx context.Context, userUUID stri
 }
 
 // LockPIN locks the PIN method until the given time.
-func (r *mongoUserRepository) LockPIN(ctx context.Context, userUUID string, until time.Time) error {
+func (r *mongoUserRepository) LockPIN(ctx context.Context, userUUID, expectedHash string, until time.Time) error {
 	filter := bson.M{
 		"uuid":      userUUID,
 		"deletedAt": bson.M{"$exists": false},
+		"pinHash":   expectedHash,
 	}
 	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
-	if _, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"pinLockedUntil": until, "updatedAt": time.Now()}}); err != nil {
+	result, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"pinLockedUntil": until, "updatedAt": time.Now()}})
+	if err != nil {
 		return fmt.Errorf("lock pin: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return r.missOnPINHash(ctx, userUUID, expectedHash)
 	}
 	return nil
 }
@@ -1496,6 +1504,24 @@ func (r *mongoUserRepository) missOnLiveFilter(ctx context.Context, id string) e
 	}
 	if n > 0 {
 		return ErrRoleChanged
+	}
+	return ErrUserNotFound
+}
+
+// missOnPINHash classifies a PIN write whose filter matched nothing:
+// ErrPINChanged when it was bound to a hash and the live row is still
+// there, ErrUserNotFound otherwise.
+func (r *mongoUserRepository) missOnPINHash(ctx context.Context, userUUID, expectedHash string) error {
+	if expectedHash == "" {
+		return ErrUserNotFound
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	n, err := r.collection.CountDocuments(ctx, bson.M{"uuid": userUUID, "deletedAt": bson.M{"$exists": false}})
+	if err != nil {
+		return fmt.Errorf("classify pin write: %w", err)
+	}
+	if n > 0 {
+		return iface.ErrPINChanged
 	}
 	return ErrUserNotFound
 }

@@ -136,4 +136,38 @@ describe('PinMethodPanel', () => {
       screen.getByText(/switched off on this surface/i)
     ).toBeInTheDocument();
   });
+
+  it('read-only shows the state and devices without any control', () => {
+    renderWithProviders(
+      <PinMethodPanel
+        mode="admin"
+        view={{
+          ...baseView,
+          set: true,
+          devices: [
+            {
+              id: 'd1',
+              deviceId: 'tab-1',
+              deviceName: 'Tablet 1',
+              platform: 'android',
+              via: 'admin',
+              createdAt: '2026-10-01T00:00:00Z'
+            }
+          ]
+        }}
+        busy={false}
+        readOnly
+        onSet={noop}
+        onRemove={noop}
+        onIssueCode={() => Promise.resolve({ code: 'X', expiresAt: '' })}
+        onRevokeDevice={noop}
+      />
+    );
+    expect(screen.getByText('Tablet 1')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /pin/i })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /enrollment code/i })
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: /revoke/i })).toBeNull();
+  });
 });

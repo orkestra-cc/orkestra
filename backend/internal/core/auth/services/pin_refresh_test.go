@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,12 +30,20 @@ func seedPINRefresh(t *testing.T, e *orchestrationEnv, user *iface.User, loginMe
 	return token
 }
 
+// pinSessionCheckerFunc adapts a func to PINSessionChecker.
+type pinSessionCheckerFunc func(ctx context.Context, userUUID, deviceID string) error
+
+func (f pinSessionCheckerFunc) CheckPINSession(ctx context.Context, userUUID, deviceID string) error {
+	return f(ctx, userUUID, deviceID)
+}
+
 func pinRefreshEnv(t *testing.T) (*orchestrationEnv, *iface.User) {
 	t.Helper()
 	env := newOrchestrationEnv(t)
 	env.auth.(*authService).SetPolicy(NewAuthPolicyServiceForTest(map[string]string{
 		"pinAccessTokenTTL": "5m", "pinRefreshTokenTTL": "8h",
 	}))
+	env.auth.(*authService).SetPINSessionChecker(pinSessionCheckerFunc(func(context.Context, string, string) error { return nil }))
 	user := &iface.User{UUID: "u-pin-refresh", Email: "pin@example.com", Role: "operator", IsActive: true}
 	env.users.seed(user)
 	return env, user
@@ -101,5 +110,36 @@ func TestRefresh_NonPINSessionUnchanged(t *testing.T) {
 	next := env.refresh.byHash[utils.HashRefreshToken(resp.RefreshToken)]
 	if next.LoginMethod != "" || time.Until(next.ExpiresAt) < 6*24*time.Hour {
 		t.Fatalf("non-PIN row: loginMethod=%q expires in %v", next.LoginMethod, time.Until(next.ExpiresAt))
+	}
+}
+
+// A PIN session re-validates on every refresh: once the checker refuses
+// (PIN removed, device revoked, user no longer eligible) neither the
+// rotation nor the bootstrap mint issues a token, and the checker sees the
+// session's user and device.
+func TestRefresh_PINSessionRevalidated(t *testing.T) {
+	env, user := pinRefreshEnv(t)
+	var gotUser, gotDevice string
+	env.auth.(*authService).SetPINSessionChecker(pinSessionCheckerFunc(func(_ context.Context, u, d string) error {
+		gotUser, gotDevice = u, d
+		return ErrRefreshSessionInactive
+	}))
+	token := seedPINRefresh(t, env, user, authModels.LoginMethodPIN)
+	if _, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), token, nil); !errors.Is(err, ErrRefreshSessionInactive) {
+		t.Fatalf("rotation = %v, want ErrRefreshSessionInactive", err)
+	}
+	if gotUser != user.UUID || gotDevice != "tab-1" {
+		t.Fatalf("checker saw user=%q device=%q", gotUser, gotDevice)
+	}
+	again := seedPINRefresh(t, env, user, authModels.LoginMethodPIN)
+	if _, err := env.auth.MintAccessTokenFromRefresh(context.Background(), again, nil); !errors.Is(err, ErrRefreshSessionInactive) {
+		t.Fatalf("bootstrap mint = %v, want ErrRefreshSessionInactive", err)
+	}
+
+	// Without a checker a PIN session cannot refresh at all.
+	env.auth.(*authService).SetPINSessionChecker(nil)
+	third := seedPINRefresh(t, env, user, authModels.LoginMethodPIN)
+	if _, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), third, nil); !errors.Is(err, ErrRefreshSessionInactive) {
+		t.Fatalf("unwired rotation = %v, want ErrRefreshSessionInactive", err)
 	}
 }

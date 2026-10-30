@@ -68,7 +68,9 @@ func (notFoundRepo) GetForPINAuth(context.Context, string) (*iface.User, error) 
 func (notFoundRepo) SetPINHash(context.Context, string, string) error {
 	return repository.ErrUserNotFound
 }
-func (notFoundRepo) ClearPIN(context.Context, string) error { return repository.ErrUserNotFound }
+func (notFoundRepo) ClearPIN(context.Context, string, string) error {
+	return repository.ErrUserNotFound
+}
 
 // graceStampRepo answers the LOOKUP with a live user so the
 // "StartMFAGraceIfUnset (stamp)" row reaches that method's second repository
@@ -120,7 +122,7 @@ func TestDelegationsTranslateRepositoryNotFound(t *testing.T) {
 		{"BumpMFAEpoch", func() error { _, err := svc.BumpMFAEpoch(ctx, "u-1"); return err }},
 		{"GetUserForPINAuth", func() error { _, err := svc.GetUserForPINAuth(ctx, "mario"); return err }},
 		{"SetPINHash", func() error { return svc.SetPINHash(ctx, "u-1", "argon2id$hash") }},
-		{"ClearPIN", func() error { return svc.ClearPIN(ctx, "u-1") }},
+		{"ClearPIN", func() error { return svc.ClearPIN(ctx, "u-1", "") }},
 	}
 
 	for _, tc := range cases {

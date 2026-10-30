@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -86,7 +87,7 @@ func TestPINWrites_MissingOrDeletedUser(t *testing.T) {
 		if err := repo.SetPINHash(ctx, id, "h"); !errors.Is(err, ErrUserNotFound) {
 			t.Fatalf("SetPINHash(%s): got %v", id, err)
 		}
-		if err := repo.ClearPIN(ctx, id); !errors.Is(err, ErrUserNotFound) {
+		if err := repo.ClearPIN(ctx, id, ""); !errors.Is(err, ErrUserNotFound) {
 			t.Fatalf("ClearPIN(%s): got %v", id, err)
 		}
 	}
@@ -105,7 +106,7 @@ func TestPINFailures_CountLockAndClear(t *testing.T) {
 		}
 	}
 	lock := time.Now().Add(15 * time.Minute).Truncate(time.Millisecond)
-	if err := repo.LockPIN(ctx, "u-1", lock); err != nil {
+	if err := repo.LockPIN(ctx, "u-1", "h", lock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.RecordFailedPIN(ctx, "missing"); !errors.Is(err, ErrUserNotFound) {
@@ -127,11 +128,37 @@ func TestPINFailures_CountLockAndClear(t *testing.T) {
 		t.Fatalf("after clear: count=%d lock=%v hash=%q", u.PINFailedCount, u.PINLockedUntil, u.PINHash)
 	}
 
-	if err := repo.ClearPIN(ctx, "u-1"); err != nil {
+	if err := repo.ClearPIN(ctx, "u-1", ""); err != nil {
 		t.Fatal(err)
 	}
 	u, _ = repo.GetByID(ctx, "u-1")
 	if u.PINHash != "" || u.PINUpdatedAt != nil {
 		t.Fatalf("after ClearPIN: hash=%q updatedAt=%v", u.PINHash, u.PINUpdatedAt)
+	}
+}
+
+// A failure path bound to the hash it judged never touches a PIN set
+// after that attempt: ClearPIN and LockPIN answer iface.ErrPINChanged.
+func TestPINWrites_BoundToTheExpectedHash(t *testing.T) {
+	repo, cleanup := liveUserRepository(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedPINUser(t, repo, bson.M{"uuid": "u-1", "pinHash": "new"})
+
+	if err := repo.LockPIN(ctx, "u-1", "old", time.Now().Add(time.Hour)); !errors.Is(err, iface.ErrPINChanged) {
+		t.Fatalf("LockPIN on another hash = %v, want ErrPINChanged", err)
+	}
+	if err := repo.ClearPIN(ctx, "u-1", "old"); !errors.Is(err, iface.ErrPINChanged) {
+		t.Fatalf("ClearPIN on another hash = %v, want ErrPINChanged", err)
+	}
+	u, _ := repo.GetByID(ctx, "u-1")
+	if u.PINHash != "new" || u.PINLockedUntil != nil {
+		t.Fatalf("the newer PIN was touched: hash=%q lock=%v", u.PINHash, u.PINLockedUntil)
+	}
+	if err := repo.LockPIN(ctx, "missing", "new", time.Now()); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("LockPIN on a missing user = %v, want ErrUserNotFound", err)
+	}
+	if err := repo.ClearPIN(ctx, "u-1", "new"); err != nil {
+		t.Fatalf("ClearPIN on the current hash: %v", err)
 	}
 }

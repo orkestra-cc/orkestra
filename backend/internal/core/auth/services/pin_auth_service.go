@@ -50,6 +50,15 @@ type PINSessionRevoker interface {
 	RevokePINSessions(ctx context.Context, userUUID, deviceID, reason string) (int, error)
 }
 
+// PINSessionChecker re-validates a PIN session when it refreshes
+// (PINAuthService). A refresh does not re-enter the sign-in, so without it
+// a session would outlive the PIN, the device or the eligibility it was
+// opened under: ErrRefreshSessionInactive when the session may no longer
+// continue, ErrSessionEnforcementUnavailable when that cannot be decided.
+type PINSessionChecker interface {
+	CheckPINSession(ctx context.Context, userUUID, deviceID string) error
+}
+
 // PINEventRecorder persists auth_security_events rows (authService).
 type PINEventRecorder interface {
 	RecordAdminAuthEvent(ctx context.Context, eventType, actorUUID, targetUUID string, fields map[string]interface{})
@@ -209,7 +218,7 @@ func (s *PINAuthService) AdminRemovePIN(ctx context.Context, actorUUID, targetUU
 	if user.PINHash == "" {
 		return ErrPINNotSet
 	}
-	devices, err := s.clearPIN(ctx, user.UUID, "pin_removed_by_admin")
+	devices, err := s.clearPIN(ctx, user.UUID, "", "pin_removed_by_admin")
 	if err != nil {
 		return err
 	}
@@ -254,7 +263,7 @@ func (s *PINAuthService) RemoveOwnPIN(ctx context.Context, userUUID string, amr 
 	if user.PINHash == "" {
 		return ErrPINNotSet
 	}
-	devices, err := s.clearPIN(ctx, user.UUID, "pin_removed_by_user")
+	devices, err := s.clearPIN(ctx, user.UUID, "", "pin_removed_by_user")
 	if err != nil {
 		return err
 	}
@@ -524,13 +533,13 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 	if attempt > PINMaxConsecutiveFailures {
 		s.dummyVerify(in.PIN)
 		s.charge(ctx, in.IP, pinKey)
-		s.disablePIN(ctx, user.UUID, attempt-1)
+		s.disablePIN(ctx, user.UUID, user.PINHash, attempt-1)
 		s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_disabled_after_failures")
 		return nil, ErrInvalidCredentials
 	}
 	ok, err := s.passwords.Verify(in.PIN, user.PINHash)
 	if err != nil || !ok {
-		s.recordPINFailure(ctx, in.IP, pinKey, user.UUID, attempt)
+		s.recordPINFailure(ctx, in.IP, pinKey, user.UUID, user.PINHash, attempt)
 		s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_bad_pin")
 		return nil, ErrInvalidCredentials
 	}
@@ -541,6 +550,11 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 			return nil, err
 		}
 		return nil, ErrPINNotAllowed
+	}
+
+	if err := s.credentialStillCurrent(ctx, user, device); err != nil {
+		s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_changed_during_sign_in")
+		return nil, err
 	}
 
 	// The reserved attempt succeeded: the consecutive-failure run ends.
@@ -571,6 +585,77 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 		AccessTTL:   s.policy.PINAccessTokenTTL(ctx),
 		RefreshTTL:  s.policy.PINRefreshTokenTTL(ctx),
 	}, []string{authModels.AMRPIN}, 0)
+}
+
+// CheckPINSession implements PINSessionChecker: the surface still offers
+// PIN sign-in, the user is active and still holds a PIN, the device the
+// session signed in from is still enrolled (when the surface binds PINs to
+// devices), and the user is still eligible — a user promoted, or given a
+// privileged membership, since signing in must not keep refreshing a PIN
+// session that a new sign-in would refuse.
+func (s *PINAuthService) CheckPINSession(ctx context.Context, userUUID, deviceID string) error {
+	if !s.wired() {
+		return ErrRefreshSessionInactive
+	}
+	if err := s.surfaceOpen(ctx); err != nil {
+		if stderrors.Is(err, ErrPINLoginDisabled) {
+			return ErrRefreshSessionInactive
+		}
+		return ErrSessionEnforcementUnavailable
+	}
+	user, err := s.users.GetUserByID(ctx, userUUID)
+	if err != nil {
+		if stderrors.Is(err, iface.ErrUserNotFound) {
+			return ErrRefreshSessionInactive
+		}
+		return ErrSessionEnforcementUnavailable
+	}
+	if user == nil || !user.IsActive || user.PINHash == "" {
+		return ErrRefreshSessionInactive
+	}
+	requireDevice, err := s.policy.PINRequiresTrustedDevice(ctx)
+	if err != nil {
+		return ErrSessionEnforcementUnavailable
+	}
+	if requireDevice {
+		//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+		if _, err := s.devices.Find(ctx, user.UUID, deviceID); err != nil {
+			if stderrors.Is(err, repository.ErrPINDeviceNotFound) {
+				return ErrRefreshSessionInactive
+			}
+			return ErrSessionEnforcementUnavailable
+		}
+	}
+	if err := s.checkEligible(ctx, user); err != nil {
+		if stderrors.Is(err, ErrAuthPolicyUnavailable) {
+			return ErrSessionEnforcementUnavailable
+		}
+		return ErrRefreshSessionInactive
+	}
+	return nil
+}
+
+// credentialStillCurrent re-reads, just before tokens are issued, the PIN
+// and device a sign-in verified: a removal or replacement that landed
+// during the verification must not be followed by a new session.
+func (s *PINAuthService) credentialStillCurrent(ctx context.Context, user *iface.User, device *authModels.PINDeviceDoc) error {
+	fresh, err := s.users.GetUserByID(ctx, user.UUID)
+	if err != nil || fresh == nil {
+		return fmt.Errorf("%w: user re-read: %v", ErrAuthPolicyUnavailable, err)
+	}
+	if fresh.PINHash != user.PINHash || !fresh.IsActive {
+		return ErrInvalidCredentials
+	}
+	if device != nil {
+		//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+		if _, err := s.devices.Find(ctx, user.UUID, device.DeviceID); err != nil {
+			if stderrors.Is(err, repository.ErrPINDeviceNotFound) {
+				return ErrInvalidCredentials
+			}
+			return fmt.Errorf("%w: device re-read: %w", ErrAuthPolicyUnavailable, err)
+		}
+	}
+	return nil
 }
 
 // --- helpers ---
@@ -673,7 +758,12 @@ func (s *PINAuthService) checkEligible(ctx context.Context, user *iface.User) er
 	// built-in list is checked even when MFA enforcement is off
 	// (MFARequired short-circuits to false then), and the configured list
 	// on top of it.
-	memberships := s.login.loadMembershipsAsAuthModel(ctx, user.UUID)
+	// A failed lookup refuses: reading it as "no memberships" would let an
+	// org_owner through during a tenant-store outage.
+	memberships, err := s.login.loadMembershipsStrict(ctx, user.UUID)
+	if err != nil {
+		return fmt.Errorf("%w: memberships: %w", ErrAuthPolicyUnavailable, err)
+	}
 	if RoleRequiresMFA(user, memberships) || s.policy.MFARequired(user, memberships) {
 		return ErrPINNotAllowed
 	}
@@ -711,8 +801,12 @@ func (s *PINAuthService) writePIN(ctx context.Context, user *iface.User, pin str
 	return s.store.SetPINHash(ctx, user.UUID, hash)
 }
 
-func (s *PINAuthService) clearPIN(ctx context.Context, userUUID, reason string) (int64, error) {
-	if err := s.store.ClearPIN(ctx, userUUID); err != nil {
+// clearPIN removes the PIN, its devices and its sessions. A non-empty
+// expectedHash binds the removal to that hash (iface.ErrPINChanged when the
+// user has another PIN by now): the failure cap passes the hash it judged,
+// so it never removes a PIN set after the attempt.
+func (s *PINAuthService) clearPIN(ctx context.Context, userUUID, expectedHash, reason string) (int64, error) {
+	if err := s.store.ClearPIN(ctx, userUUID, expectedHash); err != nil {
 		return 0, err
 	}
 	n, err := s.devices.DeleteAllByUser(ctx, userUUID)
@@ -743,19 +837,27 @@ func (s *PINAuthService) revokePINSessions(ctx context.Context, userUUID, device
 // scopes, and the durable lock on the counter lock or on every
 // threshold-th failure. The cap itself is enforced at the next
 // reservation, before any verify.
-func (s *PINAuthService) recordPINFailure(ctx context.Context, ip, pinKey, userUUID string, attempt int) {
+func (s *PINAuthService) recordPINFailure(ctx context.Context, ip, pinKey, userUUID, hash string, attempt int) {
 	v := s.charge(ctx, ip, pinKey)
 	threshold := s.policy.LockoutThreshold(ctx)
 	if v.Locked || (threshold > 0 && attempt%threshold == 0) {
-		if err := s.store.LockPIN(ctx, userUUID, time.Now().Add(s.policy.LockoutDuration(ctx))); err != nil {
+		// Bound to the hash the attempt was verified against: an attempt
+		// that started before an administrator replaced the PIN never
+		// locks the new one.
+		err := s.store.LockPIN(ctx, userUUID, hash, time.Now().Add(s.policy.LockoutDuration(ctx)))
+		if err != nil && !stderrors.Is(err, iface.ErrPINChanged) {
 			s.logger.Warn("pin: lock not recorded", slog.String("user_uuid", userUUID), slog.String("error", err.Error()))
 		}
 	}
 }
 
-// disablePIN removes a PIN whose consecutive-failure run passed the cap.
-func (s *PINAuthService) disablePIN(ctx context.Context, userUUID string, failures int) {
-	if _, err := s.clearPIN(ctx, userUUID, "pin_disabled_after_failures"); err != nil {
+// disablePIN removes a PIN whose consecutive-failure run passed the cap,
+// only while it is still the PIN (hash) the run was counted against.
+func (s *PINAuthService) disablePIN(ctx context.Context, userUUID, hash string, failures int) {
+	if _, err := s.clearPIN(ctx, userUUID, hash, "pin_disabled_after_failures"); err != nil {
+		if stderrors.Is(err, iface.ErrPINChanged) {
+			return
+		}
 		s.logger.Error("pin: could not remove a pin after the consecutive-failure cap",
 			slog.String("user_uuid", userUUID), slog.String("error", err.Error()))
 		return

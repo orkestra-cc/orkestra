@@ -33,6 +33,10 @@ export interface PinMethodPanelProps {
   onRemove: () => Promise<void>;
   onIssueCode: () => Promise<PinEnrollmentCode>;
   onRevokeDevice: (deviceId: string) => Promise<void>;
+  // readOnly shows the state and the devices without any control: an
+  // administrator view for a caller who may read the user but not change
+  // them (user.read without user.update).
+  readOnly?: boolean;
 }
 
 /**
@@ -48,7 +52,8 @@ const PinMethodPanel = ({
   onSet,
   onRemove,
   onIssueCode,
-  onRevokeDevice
+  onRevokeDevice,
+  readOnly = false
 }: PinMethodPanelProps) => {
   const { t } = useTranslation();
   const [showSet, setShowSet] = useState(false);
@@ -161,17 +166,18 @@ const PinMethodPanel = ({
         headerProps: { className: 'text-end' },
         cellProps: { className: 'text-end' }
       },
-      cell: ({ row: { original } }: CellContext<PinDevice, unknown>) => (
-        <IconButton
-          size="sm"
-          variant="outline-secondary"
-          icon={faBan}
-          onClick={() => revoke(original.deviceId)}
-          disabled={busy}
-        >
-          {t('pinMethod.devices.revoke')}
-        </IconButton>
-      )
+      cell: ({ row: { original } }: CellContext<PinDevice, unknown>) =>
+        readOnly ? null : (
+          <IconButton
+            size="sm"
+            variant="outline-secondary"
+            icon={faBan}
+            onClick={() => revoke(original.deviceId)}
+            disabled={busy}
+          >
+            {t('pinMethod.devices.revoke')}
+          </IconButton>
+        )
     }
   ];
 
@@ -229,40 +235,42 @@ const PinMethodPanel = ({
             {t('pinMethod.weakNote')}
           </p>
         </div>
-        <div className="d-flex gap-2 flex-wrap">
-          <Button
-            variant="orkestra-default"
-            size="sm"
-            disabled={busy}
-            onClick={() => setShowSet(true)}
-          >
-            {t(view.set ? 'pinMethod.replaceButton' : 'pinMethod.setButton')}
-          </Button>
-          {view.set && (
+        {!readOnly && (
+          <div className="d-flex gap-2 flex-wrap">
             <Button
               variant="orkestra-default"
               size="sm"
               disabled={busy}
-              onClick={issueCode}
+              onClick={() => setShowSet(true)}
             >
-              {busy ? (
-                <Spinner size="sm" animation="border" />
-              ) : (
-                t('pinMethod.codeButton')
-              )}
+              {t(view.set ? 'pinMethod.replaceButton' : 'pinMethod.setButton')}
             </Button>
-          )}
-          {view.set && (
-            <Button
-              variant="outline-danger"
-              size="sm"
-              disabled={busy}
-              onClick={() => setConfirmRemove(true)}
-            >
-              {t('pinMethod.removeButton')}
-            </Button>
-          )}
-        </div>
+            {view.set && (
+              <Button
+                variant="orkestra-default"
+                size="sm"
+                disabled={busy}
+                onClick={issueCode}
+              >
+                {busy ? (
+                  <Spinner size="sm" animation="border" />
+                ) : (
+                  t('pinMethod.codeButton')
+                )}
+              </Button>
+            )}
+            {view.set && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                disabled={busy}
+                onClick={() => setConfirmRemove(true)}
+              >
+                {t('pinMethod.removeButton')}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="d-flex align-items-center mb-2">

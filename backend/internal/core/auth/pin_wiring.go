@@ -49,7 +49,7 @@ func buildPINService(
 	}
 	revoker, _ := bundle.authService.(services.PINSessionRevoker)
 	events, _ := bundle.authService.(services.PINEventRecorder)
-	return services.NewPINAuthService(services.PINAuthConfig{
+	svc := services.NewPINAuthService(services.PINAuthConfig{
 		Login:     bundle.passwordSvc,
 		Store:     store,
 		Users:     users,
@@ -65,6 +65,13 @@ func buildPINService(
 		Events:    events,
 		Logger:    logger,
 	})
+	// Every refresh of a PIN session re-validates it against this service.
+	if c, ok := bundle.authService.(interface {
+		SetPINSessionChecker(services.PINSessionChecker)
+	}); ok {
+		c.SetPINSessionChecker(svc)
+	}
+	return svc
 }
 
 // registerPINRoutes mounts one surface's public and self-service PIN
