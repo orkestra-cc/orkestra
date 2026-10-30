@@ -421,6 +421,19 @@ func (s *PINAuthService) EnrollDevice(ctx context.Context, in PINDeviceEnrollInp
 	}); err != nil {
 		return "", fmt.Errorf("store pin device: %w", err)
 	}
+	// The PIN may have been removed or replaced between the read above and
+	// the upsert: a removal deletes the devices it finds, which may not
+	// include this one yet. Read it once more and undo the enrollment if
+	// the code's PIN is no longer the user's.
+	if fresh, err := s.users.GetUserByID(ctx, user.UUID); err != nil || fresh == nil || !fresh.IsActive ||
+		fresh.PINHash == "" || pinFingerprint(fresh.PINHash) != stored.PIN {
+		//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+		if derr := s.devices.Delete(ctx, user.UUID, deviceID); derr != nil && !stderrors.Is(derr, repository.ErrPINDeviceNotFound) {
+			s.logger.Warn("pin: could not undo an enrollment whose PIN changed",
+				slog.String("user_uuid", user.UUID), slog.String("error", derr.Error()))
+		}
+		return "", ErrInvalidCredentials
+	}
 	s.reset(ctx, enrollKey)
 	// A re-enrollment replaces the device's secret: whatever the old secret
 	// opened ends with it.
@@ -588,7 +601,7 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 		Metadata:    map[string]any{"method": authModels.LoginMethodPIN, "deviceId": in.DeviceID, "platform": in.Platform},
 	})
 	platform, deviceType := pinPlatform(in.Platform)
-	return s.login.issueTokensForSession(ctx, user, LoginTokenContext{
+	resp, err := s.login.issueTokensForSession(ctx, user, LoginTokenContext{
 		SessionID:   uuid.NewString(),
 		DeviceID:    strings.TrimSpace(in.DeviceID),
 		DeviceType:  deviceType,
@@ -599,6 +612,20 @@ func (s *PINAuthService) Login(ctx context.Context, in PINLoginInput) (*authMode
 		AccessTTL:   s.policy.PINAccessTokenTTL(ctx),
 		RefreshTTL:  s.policy.PINRefreshTokenTTL(ctx),
 	}, []string{authModels.AMRPIN}, 0)
+	if err != nil {
+		return nil, err
+	}
+	// A removal or replacement that lands between the re-read above and
+	// the issuance revokes the sessions it finds, which do not include
+	// this one yet. The credential is written before that revocation runs,
+	// so reading it once more closes the gap: if it changed, this session
+	// is ended here instead.
+	if err := s.credentialStillCurrent(ctx, user, device); err != nil {
+		s.revokePINSessions(ctx, user.UUID, strings.TrimSpace(in.DeviceID), "pin_changed_during_sign_in")
+		s.login.emitLoginFailed(ctx, "", user.UUID, in.IP, "pin_changed_during_sign_in")
+		return nil, err
+	}
+	return resp, nil
 }
 
 // CheckPINSession implements PINSessionChecker: the surface still offers
@@ -647,6 +674,17 @@ func (s *PINAuthService) CheckPINSession(ctx context.Context, userUUID, deviceID
 		return ErrRefreshSessionInactive
 	}
 	return nil
+}
+
+// CanManage reports whether actor may change another user's PIN — the
+// admin PIN routes' user.update at global scope — so the console can show
+// a read-only panel to a caller who may only read the user.
+func (s *PINAuthService) CanManage(ctx context.Context, actorUUID string) bool {
+	if s.authz == nil || actorUUID == "" {
+		return false
+	}
+	ok, err := s.authz.HasPermission(ctx, actorUUID, "", "user.update")
+	return err == nil && ok
 }
 
 // credentialStillCurrent re-reads, just before tokens are issued, the PIN

@@ -7281,6 +7281,9 @@
           "available": {
             "type": "boolean"
           },
+          "canManage": {
+            "type": "boolean"
+          },
           "devices": {
             "items": {
               "$ref": "#/components/schemas/PINDeviceDoc"

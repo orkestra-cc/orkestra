@@ -207,14 +207,17 @@ func (f *pinDeviceFake) DeleteAllByUser(_ context.Context, u string) (int64, err
 
 type pinAuthzFake struct {
 	deny map[string]bool
-	err  error
+	// grants are keys other than auth.pin_login that every non-denied
+	// user holds at global scope.
+	grants map[string]bool
+	err    error
 }
 
 func (a *pinAuthzFake) HasPermission(_ context.Context, userUUID, org, perm string) (bool, error) {
 	if a.err != nil {
 		return false, a.err
 	}
-	return perm == PINLoginPermission && org == "" && !a.deny[userUUID], nil
+	return (perm == PINLoginPermission || a.grants[perm]) && org == "" && !a.deny[userUUID], nil
 }
 
 type pinRevokerFake struct {

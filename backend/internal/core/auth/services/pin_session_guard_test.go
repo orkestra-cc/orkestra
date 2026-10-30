@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -179,5 +181,89 @@ func TestPIN_EnrollmentCodeBoundToItsPIN(t *testing.T) {
 	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
 	if _, err := f.devices.Find(ctx, pinWorkerUUID, "tab-2"); err == nil {
 		t.Fatal("a device was enrolled with a code for the replaced PIN")
+	}
+}
+
+// pinFlipUsers serves the PIN service's user reads and replaces the
+// worker's PIN hash once `after` reads have gone by: a credential change
+// landing in the middle of a sign-in or an enrollment.
+type pinFlipUsers struct {
+	pinUsersCopying
+	mu    *sync.Mutex
+	reads *int
+	after int
+}
+
+func (u pinFlipUsers) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
+	u.mu.Lock()
+	*u.reads++
+	flip := *u.reads > u.after
+	u.mu.Unlock()
+	row, err := u.pinUsersCopying.GetUserByID(ctx, id)
+	if err == nil && row != nil && flip {
+		row.PINHash = "replaced-meanwhile"
+	}
+	return row, err
+}
+
+func flipUsersAfter(f *pinFixture, after int) {
+	reads := 0
+	f.svc.users = pinFlipUsers{pinUsersCopying: pinUsersCopying{f.users}, mu: &sync.Mutex{}, reads: &reads, after: after}
+}
+
+// A PIN replaced after the last pre-issue read but before the session was
+// stored: the session just minted is ended and the sign-in refused.
+func TestPIN_CredentialChangedWhileIssuing(t *testing.T) {
+	f := newPINFixture(t, nil)
+	secret := f.enrolledDevice(t)
+	flipUsersAfter(f, 1) // the pre-issue re-read sees the PIN, the post-issue one does not
+	if _, err := f.login(goodPIN, secret); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("login = %v, want ErrInvalidCredentials", err)
+	}
+	found := false
+	for _, c := range f.revoker.calls {
+		if strings.HasSuffix(c, "|pin_changed_during_sign_in") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the session minted for a replaced PIN was not revoked: %v", f.revoker.calls)
+	}
+}
+
+// A PIN replaced while an enrollment code was being redeemed: the device
+// written for it is removed and nothing is returned.
+func TestPIN_CredentialChangedWhileEnrolling(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	if err := f.svc.AdminSetPIN(ctx, "admin-1", pinWorkerUUID, goodPIN); err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := f.svc.IssueEnrollmentCode(ctx, "admin-1", pinWorkerUUID, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flipUsersAfter(f, 0)
+	if _, err := f.svc.EnrollDevice(ctx, PINDeviceEnrollInput{Username: pinWorker, Code: code, DeviceID: "tab-3", IP: "10.0.0.1"}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("enroll = %v, want ErrInvalidCredentials", err)
+	}
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	if _, err := f.devices.Find(ctx, pinWorkerUUID, "tab-3"); err == nil {
+		t.Fatal("the device enrolled for a replaced PIN was kept")
+	}
+}
+
+// The admin view's canManage is user.update at global scope.
+func TestPIN_CanManage(t *testing.T) {
+	f := newPINFixture(t, nil)
+	if f.svc.CanManage(context.Background(), "admin-1") {
+		t.Fatal("canManage without user.update")
+	}
+	f.authz.grants = map[string]bool{"user.update": true}
+	if !f.svc.CanManage(context.Background(), "admin-1") {
+		t.Fatal("no canManage with user.update")
+	}
+	if f.svc.CanManage(context.Background(), "") {
+		t.Fatal("canManage for an anonymous caller")
 	}
 }

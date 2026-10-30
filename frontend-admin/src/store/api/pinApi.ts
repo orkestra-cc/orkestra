@@ -22,6 +22,8 @@ export interface PinMethodView {
   length: number;
   devices: PinDevice[];
   requiresTrustedDevice: boolean;
+  // Administrator view only: the caller may change this PIN (user.update).
+  canManage?: boolean;
 }
 
 export interface PinEnrollmentCode {

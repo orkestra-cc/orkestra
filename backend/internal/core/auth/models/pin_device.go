@@ -45,4 +45,8 @@ type PINMethodView struct {
 	// RequiresTrustedDevice mirrors auth.pinRequiresTrustedDevice so the
 	// UI can say whether a device must be enrolled before the PIN works.
 	RequiresTrustedDevice bool `json:"requiresTrustedDevice"`
+	// CanManage is set on the administrator's view only: whether the
+	// caller may change this PIN (user.update), so a read-only caller gets
+	// the panel without controls.
+	CanManage bool `json:"canManage,omitempty"`
 }

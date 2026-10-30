@@ -233,6 +233,9 @@ func (h *PINHandler) AdminGetPIN(ctx context.Context, req *AdminPINPath) (*pinVi
 	if view == nil {
 		return nil, huma.Error404NotFound("user not found")
 	}
+	if actor, err := callerUUID(ctx); err == nil {
+		view.CanManage = h.svc.CanManage(ctx, actor)
+	}
 	return &pinViewResponse{Body: *view}, nil
 }
 

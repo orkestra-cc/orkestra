@@ -9,18 +9,6 @@ import {
   type PinTier
 } from 'store/api/pinApi';
 import PinMethodPanel from './PinMethodPanel';
-import { useAppSelector } from 'store/hooks';
-import { selectUser } from 'store/slices/authSlice';
-
-// Platform roles that hold user.update at global scope (authz rule 2b),
-// which every PIN change needs. Role names, not the key: /authz/me is
-// tenant-scoped and never lists global permissions.
-const PIN_MANAGER_ROLES = [
-  'super_admin',
-  'administrator',
-  'developer',
-  'manager'
-];
 
 interface AdminPinSectionProps {
   userId: string;
@@ -36,8 +24,6 @@ interface AdminPinSectionProps {
  */
 const AdminPinSection = ({ userId, tier }: AdminPinSectionProps) => {
   const { t } = useTranslation();
-  const currentUser = useAppSelector(selectUser);
-  const canManage = PIN_MANAGER_ROLES.includes(currentUser?.role ?? '');
   const target = { id: userId, tier };
   const { data, isLoading, error, refetch } = useGetUserPinAdminQuery(target);
   const [setPin, setState] = useSetUserPinAdminMutation();
@@ -80,7 +66,8 @@ const AdminPinSection = ({ userId, tier }: AdminPinSectionProps) => {
       mode="admin"
       view={data}
       busy={busy}
-      readOnly={!canManage}
+      // The server says whether the caller holds user.update.
+      readOnly={!data.canManage}
       onSet={pin => setPin({ ...target, pin }).unwrap()}
       onRemove={() => removePin(target).unwrap()}
       onIssueCode={() => issueCode(target).unwrap()}
