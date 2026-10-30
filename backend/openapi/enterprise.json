@@ -1025,6 +1025,33 @@
         ],
         "type": "object"
       },
+      "AllPreferencesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AllPreferencesResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/ModulePreferences"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "modules"
+        ],
+        "type": "object"
+      },
       "AssignPolicyInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -6489,6 +6516,48 @@
         ],
         "type": "object"
       },
+      "ModulePreferences": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ModulePreferences.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigField"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "module": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "module",
+          "fields",
+          "values"
+        ],
+        "type": "object"
+      },
       "NavItem": {
         "additionalProperties": false,
         "properties": {
@@ -7706,6 +7775,77 @@
         ],
         "type": "object"
       },
+      "ProfileSectionSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "labelKey": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "order": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "permission": {
+            "type": "string"
+          },
+          "surfaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "module",
+          "labelKey"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ProfileSectionsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileSectionSpec"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "surface": {
+            "enum": [
+              "self",
+              "admin"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "surface",
+          "sections"
+        ],
+        "type": "object"
+      },
       "ProvisioningPolicyOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -7772,6 +7912,31 @@
         "required": [
           "rowsDeleted",
           "rowsAnonymized"
+        ],
+        "type": "object"
+      },
+      "PutMyPreferencesRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PutMyPreferencesRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Flat key → value map; every key must be a field the module declares",
+            "type": "object"
+          }
+        },
+        "required": [
+          "values"
         ],
         "type": "object"
       },
@@ -21151,6 +21316,194 @@
         ]
       }
     },
+    "/v1/me/preferences": {
+      "get": {
+        "description": "One entry per enabled module with a preference schema: the declared fields and the caller's values, defaults filled in.",
+        "operationId": "client-list-my-preferences",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllPreferencesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List my preferences for every module that declares them",
+        "tags": [
+          "Users",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/me/preferences/{module}": {
+      "get": {
+        "description": "404 user.preferences.module_unknown when the module declares no preferences or is disabled.",
+        "operationId": "client-get-my-preferences",
+        "parameters": [
+          {
+            "description": "Module name",
+            "in": "path",
+            "name": "module",
+            "required": true,
+            "schema": {
+              "description": "Module name",
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModulePreferences"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get my preferences for one module",
+        "tags": [
+          "Users",
+          "Self-Service"
+        ]
+      },
+      "put": {
+        "description": "PUT semantics: the stored values become exactly the submitted map; absent fields fall back to their declared default. Every key must be a declared field and every value must satisfy its type, options, min/max and pattern (422 user.preferences.invalid, listing every problem).",
+        "operationId": "client-put-my-preferences",
+        "parameters": [
+          {
+            "description": "Module name",
+            "in": "path",
+            "name": "module",
+            "required": true,
+            "schema": {
+              "description": "Module name",
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutMyPreferencesRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModulePreferences"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace my preferences for one module",
+        "tags": [
+          "Users",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/me/profile-sections": {
+      "get": {
+        "description": "Declared by modules (module.HasProfileSections), filtered to enabled modules and to the sections whose permission the caller holds in the request tenant (a gated section is omitted when the request resolves no tenant).",
+        "operationId": "client-my-profile-sections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Profile sections modules contribute to my own profile",
+        "tags": [
+          "Users",
+          "Self-Service"
+        ]
+      }
+    },
     "/v1/navigation": {
       "get": {
         "description": "Returns role-filtered navigation menu for the current authenticated user",
@@ -23265,6 +23618,55 @@
           }
         ],
         "summary": "Update user",
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/v1/users/{id}/profile-sections": {
+      "get": {
+        "description": "Declared by modules (module.HasProfileSections) for the admin surface, filtered to enabled modules and to the sections whose permission the caller holds in the request tenant (a gated section is omitted when the request resolves no tenant).",
+        "operationId": "user-profile-sections",
+        "parameters": [
+          {
+            "description": "Target user UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Target user UUID",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Profile sections modules contribute to a user's admin profile",
         "tags": [
           "Users"
         ]
