@@ -1,0 +1,350 @@
+---
+title: Retrieval overlay
+sidebar_position: 6
+description: Run Qdrant and local TEI inference for the retrieval module with docker-compose.retrieval.yml — enabling, opting out, external services, sizing, offline seeding, model inventory and the benchmark.
+---
+
+# Retrieval overlay
+
+The [`retrieval`](/modules/core/retrieval) module is always loaded, but it needs a vector engine and inference servers before it can index or search. Without them it runs in its designed degraded mode and search answers `retrieval.not_configured`. The opt-in overlay [`docker/docker-compose.retrieval.yml`](https://github.com/orkestra-cc/orkestra/blob/main/docker/docker-compose.retrieval.yml) provides them inside the stack ([ADR-0023](/adrs/core-retrieval-module), D3, D4 and D9).
+
+## What the overlay runs
+
+The overlay is merged into the stack's own Compose project, like the [observability overlay](/operating/deployment). It is not a standalone Compose file: it also overrides the `backend` service.
+
+| Service | Image | Role |
+| --- | --- | --- |
+| `qdrant` | `qdrant/qdrant:v1.20.0-unprivileged` | The vector engine: one per stack, single node, API key required (D3) |
+| `tei-embed` | `text-embeddings-inference:cpu-1.9.4` | Embeddings with `BAAI/bge-m3` (dense, 1024 dimensions, `cls` pooling) |
+| `tei-rerank` | `text-embeddings-inference:cpu-1.9.4` | Reranking with `BAAI/bge-reranker-v2-m3` |
+| `tei-embed-seed`, `tei-rerank-seed` | same as their serving twin | One-off weight download (profile `retrieval-seed`), removed as soon as it ends |
+
+Both TEI containers run on the CPU, from the same image. Each TEI process loads one model at one pinned revision (D4), so every model runs as its own container.
+
+**Network.** Qdrant and the serving TEI containers join only `retrieval-net`, an `internal: true` network shared with the backend. It has no route to the internet, and no service of the overlay publishes a host port, in development included. Tenant text sent for embedding or reranking never leaves that network (D9).
+
+**Weights.** The model weights come from huggingface.co, so a serving container cannot fetch them. The two seed containers run the same image, command and volume as their serving twins, but join only `retrieval-egress`, a plain bridge network that no other service joins. `retrieval up` starts them and waits until they are healthy, which TEI reports only once the model is loaded. It then removes them on every path (success, failure, timeout or Ctrl-C) before a serving container starts. The serving containers mount the `tei-weights` volume read-only.
+
+:::note What makes the serving containers offline
+The serving containers set `HF_HUB_OFFLINE=1`, but only as declared intent: TEI 1.9.x does not read it. Two things guarantee an offline start: `retrieval-net` has no egress, and the weights are already in the cache under the pinned revision.
+:::
+
+**Volumes.** `qdrant-data` holds the index and `tei-weights` the model cache. Compose prefixes both with the project name, as in `<project>_tei-weights`. `retrieval down` keeps them.
+
+**Platform.** The TEI CPU image is published for `linux/amd64` only. On an ARM host, run inference elsewhere (see [External services](#pointing-at-external-services)).
+
+The reference models are **provisional**. ADR-0023 D4 makes them defaults only if the benchmark of D14 confirms them on a representative corpus. This repository ships the harness and a synthetic smoke fixture (see [Benchmark](#benchmark)); the representative run belongs to the fork that brings the corpus.
+
+## Before you enable it
+
+At the default limits the three containers may use up to about 19 GB of RAM (2 GiB for Qdrant, 8 GiB for the embedder, 9 GiB for the reranker). Plan for a host with **at least 24 GB of RAM free** for the overlay, on top of the rest of the stack. On a CPU, the embedder needs about 6 GB even with the smallest batching bound, so it cannot run in less. Count about 6 GB of disk for the images and the weights, plus the index. The [sizing table](#sizing) has the measured figures.
+
+Loading a model is CPU-heavy: each TEI uses about ten cores for 20 to 60 seconds while it warms up. A shared host feels that at every `retrieval up`.
+
+:::warning Reranking on a CPU is slow
+On the reference host, reranking 20 candidates took **tens of seconds per query** (see [Sizing](#sizing)), with the reranker using about 14 cores on average. Embedding a query took about a quarter of a second. If your searches have an interactive latency budget, either run the reranker on a GPU or an external inference server (declared in `RETRIEVAL_INFERENCE_ENDPOINTS` with an honest `boundary`, see [External services](#pointing-at-external-services)), or leave reranking off, which is the corpus default.
+:::
+
+## Enabling the overlay
+
+1. **Keys.** The overlay refuses to render without `QDRANT_API_KEY` and `RETRIEVAL_INFERENCE_API_KEY` in `docker/.env`. `make init` fills both on a new checkout. A `docker/.env` that predates the overlay does not have them: add both lines with a value from `openssl rand -hex 32` each. `scripts/env-validate.sh` checks them whenever they are set, and refuses a placeholder or a short value in staging and production.
+2. **Start it.**
+
+   ```bash
+   ./orkestra.sh retrieval up
+   ```
+
+   The command validates the merged Compose graph, seeds the weights (the first run downloads about 4.5 GB), starts `qdrant`, `tei-embed` and `tei-rerank`, waits until they are healthy and recreates the backend with the overlay's settings. On the reference host a cold seed of both models took 210 seconds, and a whole `retrieval up` with the weights already cached took 98 seconds, of which about 46 seconds for the serving containers to become healthy. The seeds run on every `up`; once the weights are cached they still load and warm up the models, but download nothing.
+3. **Check it.** `./orkestra.sh retrieval status` lists the three containers with their memory use against their limits. The backend logs one `llm: installation inference endpoint` INFO line per endpoint (`embed` and `rerank`, with model and revision, never the key) and no longer logs `retrieval: QDRANT_URL is not set`.
+
+The backend receives four variables and joins `retrieval-net`:
+
+| Variable | Value set by the overlay |
+| --- | --- |
+| `QDRANT_URL` | `http://qdrant:6333` |
+| `QDRANT_API_KEY` | from `docker/.env` |
+| `RETRIEVAL_INFERENCE_ENDPOINTS` | two endpoints, `embed` (`http://tei-embed:80`) and `rerank` (`http://tei-rerank:80`), both `boundary: local`, each naming the model and revision its TEI is started with |
+| `RETRIEVAL_INFERENCE_API_KEY` | from `docker/.env`; also the API key of both TEI servers |
+
+The overlay's values win over `docker/.env`. A later `./orkestra.sh deploy` keeps this wiring as long as the retrieval containers exist, and so does `observability up` or `down`.
+
+The full command set:
+
+| Command | What it does |
+| --- | --- |
+| `./orkestra.sh retrieval up` | Seed the weights, start Qdrant and TEI, wire the backend |
+| `./orkestra.sh retrieval down` | Remove the three containers (and any seed left behind), unwire the backend; volumes are kept |
+| `./orkestra.sh retrieval status` | Containers and memory use against each limit |
+| `./orkestra.sh retrieval info` | Internal endpoints, the variable names the backend gets (never their values), opt-out and offline notes |
+| `./orkestra.sh retrieval logs <svc> [-f] [-n N] [-t]` | Logs of one of the five overlay services, scoped to this stack's project |
+| `./orkestra.sh retrieval bench [flags]` | The [benchmark](#benchmark), development and staging only |
+
+## Opting out
+
+Remove the containers **first**, then empty the keys:
+
+```bash
+./orkestra.sh retrieval down
+# then, in docker/.env:
+QDRANT_API_KEY=
+RETRIEVAL_INFERENCE_API_KEY=
+```
+
+The order matters: without the keys the overlay no longer renders, so `retrieval down` cannot run and the containers would be left behind. A deploy would then also drop the backend's retrieval settings while Qdrant and TEI keep running. With both keys empty, `env-validate.sh` reports retrieval as not configured and search answers `retrieval.not_configured`.
+
+`./orkestra.sh stop --with-infra` stops the app and infra services only. Qdrant and TEI keep running, and keep their memory, until you remove them. Run `./orkestra.sh retrieval down` before it.
+
+To wipe the data as well, after `down`:
+
+```bash
+docker volume rm <project>_qdrant-data <project>_tei-weights
+```
+
+`<project>` is the stack's Compose project, `${APP_NAME}-${ENV}`. `retrieval info` prints both names for your stack. The index is derived data and the owner modules' MongoDB collections stay the source of truth (D2). In this release, though, nothing re-indexes the existing items of a corpus after a wipe: only items that change are written again, until reconciliation and rebuilds arrive with delivery step 2.
+
+## Pointing at external services
+
+The endpoints are configuration, not topology (D9). To use a GPU host, an inference server shared between stacks or an existing Qdrant, **do not run the overlay**: set the variables in `docker/.env`, and the app compose files pass them to the backend.
+
+```bash
+QDRANT_URL=https://qdrant.internal.example:6333
+QDRANT_API_KEY=<the server's API key>
+RETRIEVAL_INFERENCE_ENDPOINTS='[{"name":"embed","url":"https://tei-embed.internal.example","kind":"embed","boundary":"local","model":"BAAI/bge-m3","revision":"5617a9f61b028005a4858fdac845db406aefb181","pooling":"cls","normalize":true,"truncate":true},{"name":"rerank","url":"https://tei-rerank.internal.example","kind":"rerank","boundary":"local","model":"BAAI/bge-reranker-v2-m3","revision":"953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e","truncate":true}]'
+RETRIEVAL_INFERENCE_API_KEY=<the TEI servers' key>
+```
+
+- **TLS.** Use `https` for anything that leaves the host. The backend reaches these hosts from the stack's default network.
+- **An honest `boundary`.** `local` asserts that the service runs inside your own infrastructure; use `hosted` for a third party. A `local_only` corpus, the default, refuses a hosted endpoint, and a production-like environment drops a hosted endpoint on plain `http`. The module never infers locality from the URL.
+- **Exact identity.** `model` and `revision` must equal the server's `--model-id` and `--revision`. The `llm` module checks them against the server's `/info` before use (see [Installation inference endpoints](/modules/core/llm#installation-inference-endpoints)).
+- **One key per endpoint.** An endpoint may name its own key variable in `apiKeyEnv` (`RETRIEVAL_INFERENCE_<NAME>`). The app compose files pass only the five fixed variables, so add that variable to the backend's `environment` in your app compose file as well (`RETRIEVAL_INFERENCE_<NAME>: ${RETRIEVAL_INFERENCE_<NAME>:-}`). Otherwise the backend sees it empty and drops the endpoint. `env-validate.sh` checks that the variable is set in `docker/.env`, but it cannot see the compose file.
+- **The key in TEI's log.** TEI prints its parsed arguments, the API key included, at INFO when it starts. Run an external TEI with the same `LOG_LEVEL` filter as the overlay (see [Logs and the API key](#logs-and-the-api-key)).
+
+`env-validate.sh` checks the endpoint list with the same rules as the backend's parser (it needs `jq`). The backend only logs a warning and drops an invalid entry, so `deploy` refuses it in staging and production. It also refuses `QDRANT_URL` set with an empty `QDRANT_API_KEY`, and warns when only one of the two overlay keys is set or when `QDRANT_COLLECTION_PREFIX` does not match `^[a-z][a-z0-9-]{0,31}$`.
+
+## Operating
+
+### Sizing
+
+Measured on 2026-10-30 on the reference CPU host: an Intel Xeon Gold 6130 @ 2.10GHz with 20 vCPU (2 sockets × 10 cores), AVX-512 (`avx512f`, no VNNI), 61 GiB of RAM, no GPU, Docker 29.2.1 with userns-remap and Compose v5.0.2. The host is a shared development VM: during the benchmark its 1-minute load was 26 to 30, mostly from other workloads, so **every latency on this page was measured under contention**. The overlay ran at its defaults (`TEI_MAX_BATCH_TOKENS=2048`). The figures come from the synthetic 40-item smoke fixture; the fork's representative benchmark decides the defaults (D14).
+
+| Container | Limit (default) | Idle after start | During the benchmark | Idle after the benchmark |
+| --- | --- | --- | --- | --- |
+| `qdrant` | 2 GiB (`QDRANT_MEM_LIMIT`) | 90 MiB | 89–130 MiB | 126 MiB |
+| `tei-embed` | 8 GiB (`TEI_EMBED_MEM_LIMIT`) | 6.37 GiB | 6.93–7.00 GiB | 7.00 GiB |
+| `tei-rerank` | 9 GiB (`TEI_RERANK_MEM_LIMIT`) | 6.82 GiB | 6.81–6.85 GiB | 6.83 GiB |
+
+These are `docker stats` / `retrieval status` readings, which include the page cache. The memory the processes actually hold stayed at about 6.5 GB for the embedder and 7.0 GB for the reranker throughout; the rest is cached weight files, which the kernel reclaims. The reranker reached its 9 GiB limit through that cache during the run without being killed. Neither container was killed or restarted.
+
+| Latency (under contention) | Value |
+| --- | --- |
+| Embedding one query | about 230–260 ms |
+| Search p95, keyword / dense / hybrid | 45 ms / 353 ms / 347 ms, query embedding included |
+| Reranking 20 candidates, per call as TEI measures it | median 15.9 s, p95 47.6 s, max 82.3 s; inference alone median 3.0 s, p95 9.5 s, the rest is queueing |
+| Search p95, hybrid + rerank | 54.2 s |
+| Indexing the 40 items (embedding and upserts) | 9.8 s, 4.1 items/s |
+
+The reranker averaged about 14 cores (1367 % CPU) during the run. It runs at most 4 pairs per batch on the CPU, so the 20 candidates of one query go through about five sequential batches. A quiet host is faster, but was not measured; on a CPU, plan reranking as a batch-time feature, not an interactive one (see the warning in [Before you enable it](#before-you-enable-it)).
+
+| On disk | Size |
+| --- | --- |
+| `tei-weights` volume (both models) | 4.57 GB |
+| `qdrant-data` volume | grows with the indexed corpora; a few hundred bytes empty |
+| TEI CPU image | 685 MB |
+| Qdrant image | 193 MB |
+
+A seed holds about 4.8 GB of memory while it downloads a weight file, which fits within its serving twin's limit (the seeds share `TEI_EMBED_MEM_LIMIT` and `TEI_RERANK_MEM_LIMIT`). Both seeds can run at the same time.
+
+### Memory and the maximum input length
+
+`TEI_MAX_BATCH_TOKENS` (default 2048) is TEI's `--max-batch-tokens`. It bounds the batching memory and also caps the maximum input length: TEI truncates longer inputs to it, and the backend reads that maximum from TEI's `/info`. At 2048, keep a corpus's chunks at **1024 tokens or fewer**, half the maximum, as the [chunking rules](/modules/core/retrieval#chunking) ask. Raising the bound needs a matching raise of the memory limits:
+
+| `TEI_MAX_BATCH_TOKENS` | `tei-embed` memory | `tei-rerank` memory |
+| --- | --- | --- |
+| 512 | about 6.0 GB | not measured |
+| **2048 (default)** | about 6.5 GB | 7.0–7.7 GB |
+| 4096 | about 8.1 GB | not measured |
+| 8192 | about 14.5 GB | over 15 GB, did not finish starting |
+
+TEI fixes its own batch request count (8 for the embedder, 4 for the reranker), so that is not a knob. A container that exceeds its limit is killed (exit 137) and restarted. Under four concurrent clients sending 32 long inputs each, memory stayed flat at the 2048 bound.
+
+### Settings
+
+All of these are optional. They are read from `docker/.env`, and a variable exported in the shell wins. `.env.example` lists them as commented stubs.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `QDRANT_MEM_LIMIT` | `2g` | Qdrant container memory limit |
+| `TEI_EMBED_MEM_LIMIT` | `8g` | Embedder limit, also used by its seed |
+| `TEI_RERANK_MEM_LIMIT` | `9g` | Reranker limit, also used by its seed |
+| `TEI_MAX_BATCH_TOKENS` | `2048` | Batching bound and maximum input length, see above |
+| `RETRIEVAL_SKIP_SEED` | `false` | `true` skips the weight download; the `tei-weights` volume must already hold the weights |
+| `RETRIEVAL_SEED_TIMEOUT` | `1800` | Seconds the seeds may take; it sizes both the seeds' health window and the wait |
+| `QDRANT_COLLECTION_PREFIX` | `orkestra` | Collection name prefix, `^[a-z][a-z0-9-]{0,31}$`. `bench` is reserved for the benchmark |
+
+### Logs and the API key
+
+TEI prints its parsed arguments, `api_key` included, at INFO on its router's root target. The overlay therefore pins `LOG_LEVEL` on every TEI service to a literal filter, `info,text_embeddings_router=warn,text_embeddings_router::http=info`, which drops that line and keeps `Ready`, the per-request lines (timings only, never the text) and every warning and error. Do not override `LOG_LEVEL` on the TEI services: the backend's own `LOG_LEVEL` in `docker/.env` would bring the line back, and with the observability overlay running, Promtail would ship the key to Loki. `RUST_LOG` has no effect on TEI 1.9.x. The hardening test fails if the filter changes.
+
+The reranker's logs look alarming on every start and are harmless. The model repository ships no ONNX files, so offline TEI probes the Hub for optional files and fails, logs two errors and falls back to its candle backend. Shortened, the lines are:
+
+```text
+WARN download_artifacts: …download.rs:50: Download failed: request error: error sending request for url (https://huggingface.co/BAAI/bge-reranker-v2-m3/resolve/<rev>/1_Pooling/config.json)
+WARN download_artifacts: …download.rs:65: Download failed: … (…/config_sentence_transformers.json)
+WARN text_embeddings_router: router/src/lib.rs:216: Could not find a Sentence Transformers config
+WARN text_embeddings_router: router/src/lib.rs:227: The maximum input length is `8192` which exceeds `--max-batch-tokens=2048`. Input sequences will be truncated to `2048` tokens, …
+WARN text_embeddings_backend: backends/src/lib.rs:787: Could not download `onnx/model.onnx`: request error: …
+WARN text_embeddings_backend: backends/src/lib.rs:792: Could not download `model.onnx`: …
+WARN text_embeddings_backend: backends/src/lib.rs:801: Could not download `onnx/model.onnx_data`: …
+WARN text_embeddings_backend: backends/src/lib.rs:806: Could not download `model.onnx_data`: …
+ERROR text_embeddings_backend: backends/src/lib.rs:465: Model ONNX files not found in the repository. …
+ERROR text_embeddings_backend: backends/src/lib.rs:489: Could not start ORT backend: Could not start backend: File at `/data/models--BAAI--bge-reranker-v2-m3/snapshots/<rev>/onnx/model.onnx` does not exist
+WARN text_embeddings_backend_candle: backends/candle/src/lib.rs:229: The `config.json` contains `hidden_act=gelu` and GeLU + tanh approximation will be used instead of exact GeLU …
+WARN text_embeddings_router: router/src/lib.rs:316: Backend does not support a batch size > 4
+WARN text_embeddings_router: router/src/lib.rs:317: forcing `max_batch_requests=4`
+```
+
+The embedder logs only the truncation notice and `forcing max_batch_requests=8`. Both are expected.
+
+### Offline hosts: pre-seeding the weights
+
+On a machine with internet access, run the same overlay revision (the same pins) and let it seed, then export the volume:
+
+```bash
+./orkestra.sh retrieval up            # seeds <project>_tei-weights
+docker run --rm -v <project>_tei-weights:/data -v "$PWD":/out alpine \
+  tar czf /out/tei-weights.tgz -C /data .
+```
+
+On the offline host, bring the two pinned images over the way you move any image (`docker save` and `docker load`, or a registry mirror). Then import the archive into a volume with the name this stack uses, set `RETRIEVAL_SKIP_SEED=true` in `docker/.env` and start the overlay:
+
+```bash
+docker volume create <project>_tei-weights
+docker run --rm -v <project>_tei-weights:/data -v "$PWD":/in alpine \
+  tar xzf /in/tei-weights.tgz -C /data
+./orkestra.sh retrieval up
+```
+
+Compose may warn that the volume was not created by Compose; it uses it all the same. The project name on the offline host may differ from the seeding machine's: what matters is the name the offline stack expects. The cache is keyed by model revision, so a volume seeded at other pins does not satisfy the serving containers.
+
+## Model inventory
+
+| Component | Pin | License |
+| --- | --- | --- |
+| Qdrant | `qdrant/qdrant:v1.20.0-unprivileged@sha256:8c215051dc7bc15221b5f89c100a84a4b04d0dd8497fb73e6fa86fc948d1a41d` | Apache-2.0 |
+| Text Embeddings Inference (CPU, `linux/amd64` only) | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d` | Apache-2.0 |
+| Embedding model | `BAAI/bge-m3` at revision `5617a9f61b028005a4858fdac845db406aefb181` (dense, 1024 dimensions, `cls` pooling) | MIT |
+| Reranking model | `BAAI/bge-reranker-v2-m3` at revision `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` | Apache-2.0 |
+
+Every pin enters your supply-chain process like any other artifact (D9). To bump one:
+
+- **An image.** Resolve the digest of the new tag with `docker buildx imagetools inspect <image>:<tag>` and replace tag and digest in `docker-compose.retrieval.yml` (the TEI image is set once, in `x-tei-common`, for all four TEI services). Qdrant must stay at 1.20 or later.
+- **A model revision.** Resolve it with `curl -s https://huggingface.co/api/models/<id>/revision/main | jq -r .sha` and change it in **both** places of the overlay: the TEI command (`--revision`) and the backend's `RETRIEVAL_INFERENCE_ENDPOINTS`. Seed again (`RETRIEVAL_SKIP_SEED` must be off).
+- **Check it.** `make backend-retrieval-hardening` runs `docker/tests/retrieval-hardening.test.sh`. It fails when a pin is not a digest, when the endpoints JSON names another model or revision than the TEI command, and when a hardening property (no published port, network membership, API keys, read-only weights, `--payload-limit`, the batching bound, the log filter) is gone. It is part of `make ci-backend`.
+
+A new embedding revision is a new inference profile, so it changes the corpus's ingestion profile: the corpus becomes `profile_changed` and stops indexing until a new generation is built, which arrives with delivery step 2 (see [Changing the ingestion settings](/modules/core/retrieval#changing-the-ingestion-settings)). Treat it as a model change, not a routine update.
+
+## Benchmark
+
+`make retrieval-bench` runs the D14 benchmark against the running overlay. It is the same as `./orkestra.sh retrieval bench`, and runs `go run ./cmd/retrieval-bench` inside the backend container, the only container besides Qdrant and TEI on `retrieval-net`. It needs a development or staging stack (the production image has no Go toolchain) with the overlay up.
+
+```bash
+make retrieval-bench
+make retrieval-bench RETRIEVAL_BENCH_ARGS="-k 5 -repeat 5"
+./orkestra.sh retrieval bench -json /tmp/retrieval-bench.json
+```
+
+The run indexes a fixture into a scratch collection of its own, `bench_scratch<tag>_g1`, measures four search modes and drops the collection on every exit path. It talks to TEI and Qdrant directly: it measures the models, the engine arms and the fusion, not the `llm` gateway. It reads `RETRIEVAL_INFERENCE_ENDPOINTS` with the backend's own parser, and refuses to run when an endpoint's `/info` reports another model or revision than the one declared.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-fixture` | the smoke fixture | JSONL fixture, a path inside the backend container (the `backend/` directory is `/app`) |
+| `-k` | 10 | Results per query |
+| `-per-arm` | 50 | Candidates per search arm |
+| `-rerank-top` | 20 | Candidates sent to the reranker, at least `-k` |
+| `-repeat` | 3 | Latency samples per query and mode |
+| `-batch` | 32 | Embedding batch size |
+| `-tenant` | `t-bench` | Tenant id of the scratch data |
+| `-embed-endpoint` | `embed` | Embedding endpoint name in the endpoint list |
+| `-rerank-endpoint` | `rerank` | Reranking endpoint name; empty skips the rerank mode |
+| `-embed-url`, `-rerank-url` | — | A TEI URL instead of a declared endpoint (see below) |
+| `-json` | — | Also write the report as JSON to this path, inside the container |
+
+The exit code is 0 on success, 1 on a failed run or a visibility violation, and 2 on a usage error.
+
+### Reading the report
+
+The header names the fixture, the models and revisions as served, the vector size, and indexing: its duration, `items/s` (embedding, upserts and creating the collection) and the benchmark process's own peak RSS. The process runs in the backend container, so that figure is not TEI's memory: read TEI's with `retrieval status` or `docker stats`. Then one row per mode:
+
+- **`keyword`**, **`dense`**, **`hybrid`** (both arms with weight 1, fused in the engine) and **`hybrid+rerank`** (the hybrid candidates, at most `-rerank-top`, reordered by the reranker).
+- **`recall@k`** and **`ndcg@k`**: the mean over judged queries, from each query's first sample.
+- **`p95`**: latency over all samples (queries × `-repeat`), covering query embedding, the engine and, for the last mode, the reranker.
+- **`violations`**: returned items invisible to the query's principals, summed over every sample. The engine driver already drops out-of-scope candidates (and logs a warning), so a live run measures driver and engine together. Any value above zero fails the run.
+
+In the `-json` file, durations are integers in nanoseconds.
+
+The reference run on 2026-10-30, on the host in [Sizing](#sizing), at the defaults and **under contention** (load 26 to 30 from other workloads):
+
+```text
+fixture    internal/core/retrieval/bench/testdata/smoke-it-en.jsonl (40 items, 12 queries, k=10)
+embed      BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181 (dimensions 1024)
+rerank     BAAI/bge-reranker-v2-m3@953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+indexing   9.813s, 4.1 items/s, peak RSS 22.1 MiB
+
+mode           recall@10  ndcg@10  p95       samples  violations
+keyword        0.750      0.750    45.03ms   36       0
+dense          1.000      1.000    352.52ms  36       0
+hybrid         1.000      0.897    347.15ms  36       0
+hybrid+rerank  1.000      1.000    54.2025s  36       0
+
+violations count returned ids invisible to the query principals. The engine driver
+already drops out-of-scope candidates (and logs a warning), so a live run measures
+driver and engine together: a non-zero value means both failed.
+result: OK
+```
+
+The whole command took about 13.5 minutes, most of it in the rerank mode and part of it in `go run` compiling inside the container. These numbers come from the synthetic 40-item smoke fixture (professional profiles in Italian and English, 12 judged queries); the fork's representative benchmark decides the defaults (D14). They show that the stack works and give an order of magnitude for this host, nothing more: on so small a fixture the quality columns say little, while the rerank latency is the finding that matters for a CPU deployment.
+
+### Your own corpus and other models
+
+The representative corpus stays in the fork: it is the fork's data. A fixture is a JSONL file with one object per line:
+
+```json
+{"kind": "item", "id": "it-001", "lang": "it", "title": "…", "text": "…", "visibleTo": ["tenant:*"]}
+{"kind": "item", "id": "en-004", "lang": "en", "title": "…", "text": "…", "visibleTo": ["role:r-sales"]}
+{"kind": "query", "id": "q-it-01", "lang": "it", "text": "…", "principals": ["user:u-1", "tenant:*"], "expected": ["it-001"], "hidden": ["en-004"]}
+```
+
+An item is visible to a query when the two lists share a principal string. `expected` lists the relevant items the query's principals can see; `hidden` lists relevant items they cannot, which must never be returned. Put the file where the backend container can read it and pass `-fixture`.
+
+To compare a smaller embedding model, run one more TEI with that model on `retrieval-net` and pass `-embed-url http://<service>:80`. The bench then uses `RETRIEVAL_INFERENCE_API_KEY`, checks no declared identity (the report prints what the server serves) and sends **no query or document prefixes**. Models trained with prefixes (such as `query: ` and `passage: ` for the e5 family) score lower without them. To measure one fairly, declare it as an endpoint with `queryPrefix` and `documentPrefix` and select it with `-embed-endpoint`; the overlay's endpoint list is fixed in the overlay file, so that is a change in the fork.
+
+### An interrupted run
+
+Ctrl-C through `docker compose exec -T` may not reach the benchmark process, so an interrupted run can leave its scratch collection behind. List the collections and delete the leftover `bench_scratch…_g1` from inside the Qdrant container. Its image has neither `curl` nor `wget`, and the backend's has no `curl`, so this uses bash's `/dev/tcp`, as the Qdrant healthcheck does. The key is expanded inside the container and never printed:
+
+```bash
+# list
+docker exec <app>-qdrant-<env> bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 &&
+  printf "GET /collections HTTP/1.0\r\napi-key: %s\r\n\r\n" "$QDRANT__SERVICE__API_KEY" >&3 && cat <&3'
+# delete one
+docker exec <app>-qdrant-<env> bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 &&
+  printf "DELETE /collections/%s HTTP/1.0\r\napi-key: %s\r\n\r\n" "$1" "$QDRANT__SERVICE__API_KEY" >&3 && cat <&3' \
+  _ bench_scratch<tag>_g1
+```
+
+`<app>-qdrant-<env>` is the container name, `${APP_NAME}-qdrant-${ENV}`. The module never lists Qdrant collections, so a leftover scratch collection does not affect search; it only takes space.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `Retrieval compose validation failed — … must be set (make init)` | A key is missing from `docker/.env`. Add it (see [Enabling](#enabling-the-overlay)); nothing was changed |
+| `Model weight seeding failed (exit N)` | The seeds could not reach huggingface.co, ran out of disk or did not finish within `RETRIEVAL_SEED_TIMEOUT`. They were removed and nothing else started. Fix the cause and run `retrieval up` again; a partial download resumes. On a slow link raise `RETRIEVAL_SEED_TIMEOUT` |
+| A seed or TEI container exits with 137 and restarts | Out of memory. Check `docker inspect --format '{{.State.OOMKilled}}' <container>`, then raise `TEI_EMBED_MEM_LIMIT` / `TEI_RERANK_MEM_LIMIT` or lower `TEI_MAX_BATCH_TOKENS` |
+| `retrieval up` times out on the serving containers; `retrieval logs tei-embed` shows failed downloads | The weights for the pinned revision are not in `tei-weights` and the serving containers have no egress. Seed again with `RETRIEVAL_SKIP_SEED` off, or import a volume seeded at the same pins |
+| `Model ONNX files not found` / `Could not start ORT backend` in the reranker's logs | Expected and harmless, see [Logs and the API key](#logs-and-the-api-key) |
+| Search answers `retrieval.not_configured` | The backend has no `QDRANT_URL`: the overlay is not up, or the backend was recreated without it. Look for `retrieval: QDRANT_URL is not set` in the backend log and run `./orkestra.sh retrieval up` |
+| Module health reports `retrieval: the vector engine is unavailable` | Qdrant is down or the key differs. Check `retrieval status`; see the [module's health messages](/modules/core/retrieval#health) |
+| `embed endpoint serves …, declared …` from the benchmark | The TEI command and the endpoint list disagree on model or revision; see [Model inventory](#model-inventory) |
+
+Dev-slot wiring (one overlay per parallel development worktree) belongs to the octolabs-worktree kit, a separate repository, and is not covered here.

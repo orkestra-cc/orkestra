@@ -7,7 +7,7 @@ sidebar_position: 9
 
 Corpora and hybrid search over tenant data. Added to the always-loaded core by [ADR-0023](/adrs/core-retrieval-module) as the tenth core module: a module declares a **corpus** (a searchable collection of its own data) and the base indexes it and answers searches with a principal filter, over a vector engine behind a driver boundary. Inference is local by default: a corpus is `local_only` unless its owner declares `hosted_allowed`.
 
-The module is always loaded, but its infrastructure is optional. It boots with no Qdrant configured and stays healthy in that state, in the same spirit as `llm` booting with zero credentials.
+The module is always loaded, but its infrastructure is optional. It boots with no Qdrant configured and stays healthy in that state, in the same spirit as `llm` booting with zero credentials. To run the engine and the inference servers inside the stack, see [Retrieval overlay](/operating/retrieval-overlay).
 
 ## Status
 
@@ -19,7 +19,8 @@ Delivery step 1 is in progress. This release ships:
 - [indexing](#indexing): the transactional outbox, the index worker, chunking and the per-corpus state;
 - [search](#searching-a-corpus): `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` on the registered service, the search log and its retention;
 - [erasure and data-subject rights](#erasure-and-data-subject-rights): confirmed deletion from the index and the search log, `DeleteBySubject`, tenant offboarding and the compliance export and erasure;
-- [administration](#administration): the `/admin/retrieval` console page, the search-log view, score diagnostics, orphan cleanup and the admin HTTP API.
+- [administration](#administration): the `/admin/retrieval` console page, the search-log view, score diagnostics, orphan cleanup and the admin HTTP API;
+- the opt-in deployment overlay (Qdrant and two local TEI inference servers) and the benchmark harness of ADR-0023 D14: see [Retrieval overlay](/operating/retrieval-overlay).
 
 It adds four [permissions](#permissions-and-who-sees-what), five operator-host [HTTP routes](#http-api) and one navigation item (`/admin/retrieval`, see [Administration](#administration)). Search itself has no generic HTTP route: a module calls it in process. It adds five [settings](#configuration), three for indexing and two for search. Data-subject erasure ([`DeleteBySubject`](#erasure-and-data-subject-rights), tenant offboarding, the GDPR export and erasure through compliance) is included.
 
@@ -296,7 +297,7 @@ The search-log query takes `userUuid`, `since` and `until` (RFC 3339, both inclu
 
 ## Configuration
 
-The Qdrant settings are operator environment variables. The three worker settings (group Indexing) and the two search settings (group Search & audit) are module settings that can also be set from the environment; the worker settings are re-read on every pass and the search settings on every use, so changing them takes effect without a restart (the admin settings page shows no restart-required notice).
+The Qdrant settings are operator environment variables. The [retrieval overlay](/operating/retrieval-overlay) sets `QDRANT_URL` and `QDRANT_API_KEY` on the backend (with the inference endpoints of the `llm` module); set them in `docker/.env` only for a Qdrant you run elsewhere. The three worker settings (group Indexing) and the two search settings (group Search & audit) are module settings that can also be set from the environment; the worker settings are re-read on every pass and the search settings on every use, so changing them takes effect without a restart (the admin settings page shows no restart-required notice).
 
 | Env var | Default | Meaning |
 |---|---|---|

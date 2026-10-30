@@ -288,6 +288,8 @@ RETRIEVAL_INFERENCE_ENDPOINTS=[{"name":"embed","url":"http://tei-embed:80","kind
 RETRIEVAL_INFERENCE_API_KEY=<shared bearer key; an endpoint may name another variable in "apiKeyEnv">
 ```
 
+The [retrieval overlay](/operating/retrieval-overlay) runs both servers inside the stack and sets these two variables on the backend itself; set them in `docker/.env` only to point at servers you run elsewhere.
+
 Each endpoint states its `boundary`: `local` (inside your infrastructure) or `hosted` (a third party, which then must use `https` in a production-like environment). The `model` and `revision` must be exactly what the server was started with (`--model-id`, `--revision`).
 
 An endpoint is **verified, not trusted**. Before use, and again at most every minute, the module asks the server which model and revision it is running, and for an embedding endpoint measures the vector size. If the server now runs something else, the call is refused (`ErrLLMProfileMismatch`) rather than mixing vectors of two models (a swap to a model with the same vector size is only detected at the next re-verification, up to one minute later); an unreachable server is `ErrLLMProviderUnavailable`. Each endpoint has an immutable profile ID derived from its model, revision and settings, so moving a model to another host keeps its ID.
@@ -317,7 +319,7 @@ Foundations and the gateway are delivered ([ADR-0022](/adrs/core-llm-module)): t
 Installation-level inference for the `retrieval` module ([ADR-0023](/adrs/core-retrieval-module)) is delivered as the first step of that module: operator-declared TEI embedding and reranking endpoints, verified against the server, with no route and no console page of their own.
 
 :::note Known limitations
-TEI's default `--payload-limit` is 2,000,000 bytes, while one embedding request may carry up to 32 inputs of 64 KiB each. An oversized batch is answered with HTTP 413 and surfaces as `ErrLLMInvalidRequest`; the deployment overlay sets `--payload-limit` accordingly.
+TEI's default `--payload-limit` is 2,000,000 bytes, while one embedding request may carry up to 32 inputs of 64 KiB each. An oversized batch is answered with HTTP 413 and surfaces as `ErrLLMInvalidRequest`. The [retrieval overlay](/operating/retrieval-overlay) starts its TEI servers with `--payload-limit 16777216`; set the same on a TEI you run yourself.
 
 Editing a model's grants or a budget's extra recipients in the console also needs `system.tenants.admin`, because both pickers list the organization's members through the tenant API. Without it the editor shows a hint instead of the members. The usage report grouped by user shows user IDs, not names.
 :::

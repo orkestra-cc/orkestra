@@ -11,7 +11,7 @@ Lets modules declare **corpora** (searchable collections of their own data), ind
 
 ## What it owns
 
-PR 3 delivered the registry, the engine contract, the Qdrant driver and the conformance suite; PR 4 added indexing (outbox, worker, corpus state, chunking); PR 5 added search (gate, pinned generation, hybrid arms, erasure veto and source check, rerank, the search log and its retention); PR 6 added erasure finalization, data-subject rights and the compliance wiring; PR 7 added the admin surface (see [Administration](#administration)): four permissions, five operator-host routes under `/v1/admin/retrieval`, one nav item, three Cedar permits and the `/admin/retrieval` console page. Search still has no generic route (ADR D15); `ConfigSchema` holds five keys in two groups: `indexing` (three) and `search` (two).
+PR 3 delivered the registry, the engine contract, the Qdrant driver and the conformance suite; PR 4 added indexing (outbox, worker, corpus state, chunking); PR 5 added search (gate, pinned generation, hybrid arms, erasure veto and source check, rerank, the search log and its retention); PR 6 added erasure finalization, data-subject rights and the compliance wiring; PR 7 added the admin surface (see [Administration](#administration)): four permissions, five operator-host routes under `/v1/admin/retrieval`, one nav item, three Cedar permits and the `/admin/retrieval` console page; PR 8 added the deployment overlay `docker/docker-compose.retrieval.yml` with `./orkestra.sh retrieval …` (see [Deployment](#deployment)), the `bench` package and the `backend/cmd/retrieval-bench` command (see [Benchmark (D14)](#benchmark-d14)). Search still has no generic route (ADR D15); `ConfigSchema` holds five keys in two groups: `indexing` (three) and `search` (two).
 
 | File | Purpose |
 |---|---|
@@ -25,6 +25,8 @@ PR 3 delivered the registry, the engine contract, the Qdrant driver and the conf
 | `engine/` | Engine-neutral contract: `Engine`, `Point`, `Query`, `Filter`, `Selector`, `Runtime`, `PointID`, sentinels |
 | `engine/qdrant/` | Qdrant REST driver (`New(Config{URL, APIKey, Timeout, MaxResponseBytes, HTTPClient, Logger})`) |
 | `enginetest/` | Conformance suite `Run(t, newEngine)`: 22 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, `UpsertReplacesPayload`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
+| `bench/` | D14 benchmark library (no Mongo, no routes): `LoadFixture` (JSONL items and judged queries with principals), `RecallAtK`/`NDCGAtK`/`P95`, `TEIClient` (`/info`, `/embed`, `/rerank`; same request bodies as the production `tei` adapter), `Run` (scratch collection `bench_scratch<tag>_g1`, four modes, dropped on every exit path with `context.WithoutCancel` + 30 s) and `Report` (`WriteText`, `OK`). Test data `testdata/smoke-it-en.jsonl` (40 items, 12 queries) |
+| `backend/cmd/retrieval-bench/` (outside this directory) | The benchmark CLI: flags, `QDRANT_*` and `RETRIEVAL_INFERENCE_*` from the environment, endpoints resolved with `installation.Parse`, declared model/revision checked against `/info`, exit 0/1/2 |
 | `filter/` | `Validate`s a public `iface.RetrievalFilter` against a corpus's declared fields and `Compile`s it into `engine.Filter` (imports `engine`, `iface`). `engine.Range` is float64, so both refuse an integer-field range bound beyond ±2^53 (`isExactRangeInteger`) instead of rounding it; `eq`/`in` keep the exact `int64`, matching what indexing stores (`ingest.go` takes any int64, and a float only when integral within ±2^53) |
 
 Later: the tenant-level reconciliation (`retrieval.tenant.admin`, delivery step 2).
@@ -47,11 +49,13 @@ Later: the tenant-level reconciliation (`retrieval.tenant.admin`, delivery step 
 
 `Init` reads the operator environment with `os.Getenv` (trimmed). It never contacts Qdrant or `llm` and never returns an error: a core Init error is fatal, so missing infrastructure is a log line.
 
-| Variable | Meaning | When absent or bad |
-|---|---|---|
-| `QDRANT_URL` | `http(s)` URL of the Qdrant node | INFO "QDRANT_URL is not set..."; engine nil, search answers `ErrRetrievalNotConfigured` |
-| `QDRANT_API_KEY` | Qdrant API key | WARN "QDRANT_API_KEY is not set" (URL still used) |
-| `QDRANT_COLLECTION_PREFIX` | Collection name prefix, `^[a-z][a-z0-9-]{0,31}$` (no `_`: corpus names may hold one, so `a_b`+`c` would collide with `a`+`b_c`) | Default `orkestra`; an invalid value logs a WARN and uses the default |
+| Variable | Meaning | Where it comes from | When absent or bad |
+|---|---|---|---|
+| `QDRANT_URL` | `http(s)` URL of the Qdrant node | `docker-compose.retrieval.yml` sets `http://qdrant:6333`; without the overlay, `docker/.env` through the app compose file (empty default) | INFO "QDRANT_URL is not set..."; engine nil, search answers `ErrRetrievalNotConfigured` |
+| `QDRANT_API_KEY` | Qdrant API key | `docker/.env` (`make init`, `openssl rand -hex 32`), passed by the overlay or the app file; `env-validate.sh` refuses `QDRANT_URL` without it | WARN "QDRANT_API_KEY is not set" (URL still used) |
+| `QDRANT_COLLECTION_PREFIX` | Collection name prefix, `^[a-z][a-z0-9-]{0,31}$` (no `_`: corpus names may hold one, so `a_b`+`c` would collide with `a`+`b_c`) | `docker/.env` through the app file; the overlay does not set it. `bench` is refused by the benchmark (its scratch prefix) | Default `orkestra`; an invalid value logs a WARN (and an `env-validate.sh` warning) and uses the default |
+
+The inference endpoints (`RETRIEVAL_INFERENCE_ENDPOINTS`, `RETRIEVAL_INFERENCE_API_KEY`) are read by `llm`, not here (see `../llm/AGENTS.md`); the overlay sets both, naming the two TEI services `embed` and `rerank`.
 
 An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured; the value is never logged, nor is the key. When not configured, `Init` passes an **untyped nil** engine to `services.New` (a typed-nil driver inside the interface would defeat `Service.Engine()`'s `== nil` check).
 
@@ -265,7 +269,7 @@ Cedar (`authz/cedar/policies/retrieval.cedar`, `TestRetrievalPolicies`): three p
 
 ## Engine contract
 
-- Import direction: `engine` -> `iface`, `uuid`, stdlib; `engine/qdrant` -> `engine`, `iface`; `enginetest` -> `engine`, `iface`; `filter` -> `engine`, `iface`; `services` -> `engine`, `filter`, `models`, `iface`; `module.go` -> `services`, `engine`, `engine/qdrant`, `repository`. `engine` never imports a driver, and consumers outside this module never import `engine`.
+- Import direction: `engine` -> `iface`, `uuid`, stdlib; `engine/qdrant` -> `engine`, `iface`; `enginetest` -> `engine`, `iface`; `filter` -> `engine`, `iface`; `services` -> `engine`, `filter`, `models`, `iface`; `module.go` -> `services`, `engine`, `engine/qdrant`, `repository`; `bench` -> `engine`, `iface`, stdlib. `engine` never imports a driver, and consumers outside this module never import `engine`, with one documented exception: the module's own tool `backend/cmd/retrieval-bench` -> `bench`, `engine`, `engine/qdrant`, `iface` and `llm/installation` (it must parse `RETRIEVAL_INFERENCE_ENDPOINTS` with the backend's own parser, so it measures the endpoints the backend would load).
 - Values: keyword `string`, keyword[] `[]string`, integer `int64`, float `float64`, bool `bool`, datetime `int64` Unix **milliseconds** UTC (`Point.Fields`) and `float64` milliseconds (`Range`). Datetime fields get an integer payload index, so range compilation needs no field-type lookup.
 - Payload: `_rt` = module-only runtime fields plus `_rt.text` (the indexed text); `f` = declared filter fields. A user filter field is always rendered as `f.<name>`, never a raw key.
 - `Upsert` replaces a point's whole payload (a field the new write omits is gone; conformance `UpsertReplacesPayload`). `UpdatePayload` (the payload-only path) **merges into `_rt`**: the driver sends Qdrant `set_payload` with `"key": "_rt"` (a top-level `set_payload` of `_rt` would replace the object and drop `_rt.text`, the indexed text; verified on Qdrant 1.20) and replaces `f` whole with a second `set_payload`, both filtered on the point id, the stored `_rt.contentHash` and `_rt.sourceRevision <= ` the incoming one. A merge never clears a key it omits, so the driver sends every `_rt` field, `page` included, through its own shape without `omitempty` (ruling R1).
@@ -283,6 +287,25 @@ Cedar (`authz/cedar/policies/retrieval.cedar`, `TestRetrievalPolicies`): three p
 - **BM25 statistics** are tenant-scoped via `params.idf.corpus` on the keyword arm; collections use one shard so statistics stay exact.
 - **Conditional upsert**: a write applies only when the stored `_rt.sourceRevision` is <= the incoming one, so a request carries a single revision (groups are sent in order; a failure in a later group leaves earlier groups written). Limitation: a point that does not exist is inserted whatever its revision, so a stale writer racing a delete can recreate a point; detection is by revision on read (ADR D11).
 
+## Deployment
+
+The opt-in overlay `docker/docker-compose.retrieval.yml` (ADR D9) runs `qdrant`, `tei-embed` (`BAAI/bge-m3`) and `tei-rerank` (`BAAI/bge-reranker-v2-m3`) on `retrieval-net` (`internal: true`, shared with the backend, no host port in any environment); two seed services (profile `retrieval-seed`) download the weights over `retrieval-egress` and are removed before the serving containers start. Lifecycle is `./orkestra.sh retrieval up|down|status|info|logs|bench`; compose details, the hardening test and the variables are in `docker/AGENTS.md` ("Retrieval overlay"), the operator guide in `docs/site/operating/retrieval-overlay.mdx`. What matters to this module:
+
+- The overlay sets `QDRANT_URL`, `QDRANT_API_KEY`, `RETRIEVAL_INFERENCE_ENDPOINTS` and `RETRIEVAL_INFERENCE_API_KEY` on the backend; nothing here reads a compose file, so `Init` behaves the same with an external Qdrant/TEI set in `docker/.env`.
+- TEI runs with `--max-batch-tokens ${TEI_MAX_BATCH_TOKENS:-2048}`, which TEI also applies as the max input length (`/info` `max_input_length`, the profile's `MaxInputTokens`). At the default, a corpus's `fixed` chunks stay at `MaxTokens <= 1024` ([Chunking](#chunking-and-the-token-approximation)).
+- The reference models are provisional until the representative D14 benchmark (ADR D4); the overlay pins them by revision, and the hardening test fails when the endpoints JSON and the TEI command disagree.
+- CPU rerank is slow: the 2026-10-30 smoke run (reference host, contended) measured TEI rerank calls of 20 candidates at median 15.9 s / p95 47.6 s and a hybrid+rerank search p95 of 54 s, against ~350 ms for hybrid. Keep rerank off (the corpus default) unless the rerank endpoint is a GPU or external server; the operator page has the full table.
+
+## Benchmark (D14)
+
+`bench/` + `backend/cmd/retrieval-bench`, run with `make retrieval-bench` (= `./orkestra.sh retrieval bench [flags]`: `go run` inside the backend container, development and staging only, overlay up; `RETRIEVAL_BENCH_ARGS` passes flags). It talks to TEI over HTTP and to Qdrant through the `engine/qdrant` driver, not through the `llm` gateway (which would need MongoDB and ledger rows): it measures the models, the engine arms and fusion.
+
+- **Endpoints.** `-embed-endpoint`/`-rerank-endpoint` (defaults `embed`/`rerank`) are resolved with `installation.Parse(raw, getenv, ENV in {staging, production})`, so prefixes, `normalize`, `truncate` and `apiKeyEnv` are exactly the backend's; the run exits 1 when `/info` reports another `model_id`/`model_sha` than declared. `-embed-url`/`-rerank-url` synthesize `{URL, RETRIEVAL_INFERENCE_API_KEY, Normalize, Truncate}` with no declared identity and **no prefixes** (an e5-style model needs them: declare it as an endpoint instead).
+- **Scratch data.** One collection `engine.CollectionName("bench", "scratch"+tag, 1)`, tag `^[a-z0-9]{1,24}$` (default base-36 UnixNano), single tenant (`-tenant`, default `t-bench`); `QDRANT_COLLECTION_PREFIX=bench` is refused. The drop is deferred before `EnsureCollection` and runs under `context.WithoutCancel` + 30 s; an interrupt that never reaches the process (`compose exec -T`) can leave one behind (the operator page shows how to delete it).
+- **Text.** Indexed and embedded text is `Title + "\n\n" + Text` (the production chunk shape); `DocumentPrefix`/`QueryPrefix` go only into the embedding input.
+- **Report.** recall@k and nDCG@k from the first sample of each judged query; p95 over queries × `-repeat`; `VisibilityViolations` summed over every sample and checking principals only (the driver's own backstop drops out-of-scope candidates, so live it must be 0); `ItemsPerSecond` includes `EnsureCollection`; `PeakRSSBytes` is the bench process's VmHWM, not TEI's. `-json` (mode 0600) marshals durations as nanosecond integers. Exit 0 ok, 1 run error or violations, 2 usage.
+- **Logging.** Output goes to stdout/stderr through `fmt`, never `slog` (logscope).
+
 ## Invariants
 
 - The admin surface is exactly the four permissions, five operator-host routes, three Cedar permits and one nav item of [Administration](#administration); search has no generic route (ADR D15). The Qdrant settings are operator environment only (ADR D4/D9). `ConfigSchema` has the three indexing keys and the two search keys.
@@ -297,9 +320,15 @@ Cedar (`authz/cedar/policies/retrieval.cedar`, `TestRetrievalPolicies`): three p
 # unit (live tests skip without QDRANT_TEST_URL)
 cd backend && go test ./internal/core/retrieval/... ./cmd/server/ && go vet ./internal/core/retrieval/...
 
+# benchmark CLI (the bench package is covered above), still from backend/
+go test ./cmd/retrieval-bench/
+
 # live conformance against a Qdrant v1.20.0 with an API key
 QDRANT_TEST_URL=http://127.0.0.1:6333 QDRANT_TEST_API_KEY=<key> \
   go test ./internal/core/retrieval/engine/qdrant/ -count=1 -v
+
+# overlay hardening, from the repo root: pins, networks, keys, endpoints JSON vs TEI command
+make backend-retrieval-hardening
 ```
 
 Throwaway server: `docker run -d --name qdrant-pr3-test -p 127.0.0.1:16333:6333 -e QDRANT__SERVICE__API_KEY=<key> qdrant/qdrant:v1.20.0` (CI pins the image by digest), then use `QDRANT_TEST_URL=http://127.0.0.1:16333`; remove the container afterwards. A green run without `QDRANT_TEST_URL` proves nothing about the driver.

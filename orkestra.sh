@@ -2107,7 +2107,8 @@ retrieval_info() {
         "" \
         "  ${c_accent}./orkestra.sh retrieval down${c_reset}  removes the containers, keeps the volumes;" \
         "  run it before ${c_accent}./orkestra.sh stop --with-infra${c_reset}." \
-        "  Opt out for good: empty QDRANT_API_KEY and RETRIEVAL_INFERENCE_API_KEY." \
+        "  Opt out for good: run retrieval down first, then empty QDRANT_API_KEY" \
+        "  and RETRIEVAL_INFERENCE_API_KEY: without the keys, down cannot run." \
         "  Wipe the data (after down):" \
         "    ${c_muted}docker volume rm ${project}_qdrant-data${c_reset}" \
         "    ${c_muted}docker volume rm ${project}_tei-weights${c_reset}" \
