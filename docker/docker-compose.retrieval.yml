@@ -1,0 +1,245 @@
+# ADR-0023: self-hosted retrieval stack. Qdrant is the search engine; two
+# Text Embeddings Inference (TEI) containers serve the reference models
+# (BAAI/bge-m3 embeddings, BAAI/bge-reranker-v2-m3 reranking). Layers on top of
+# docker-compose.infra.yml + docker-compose.dev.yml (or staging/prod).
+#
+# This is intentionally not a standalone Compose file: `backend` below is a
+# partial override. Always merge infra + the selected app file + this overlay,
+# preferably through `./orkestra.sh retrieval up`, which validates the key
+# variables, seeds the model weights and scopes the five owned services.
+#
+# Manual equivalent (DC = docker compose -f docker-compose.infra.yml
+# -f docker-compose.dev.yml -f docker-compose.retrieval.yml --env-file .env).
+# The seeds are TEI servers, not jobs that exit: once one is healthy its model
+# is in the cache, so remove it before the next starts and before serving:
+#   for s in tei-embed-seed tei-rerank-seed; do
+#     $DC --profile retrieval-seed up -d --wait "$s" &&
+#       $DC --profile retrieval-seed rm -sf "$s"
+#   done
+#   $DC up -d --wait qdrant tei-embed tei-rerank
+#   $DC up -d --no-deps backend
+#
+# Network model (the reason there are two networks):
+#   * retrieval-net is `internal: true`. Qdrant and the serving TEI containers
+#     live only there, together with the backend: no route to the internet and
+#     no published host port. Tenant text sent for embedding never leaves it.
+#   * Model weights come from huggingface.co, so the weights are fetched by two
+#     short-lived "seed" containers (profile `retrieval-seed`, same image, same
+#     command, same volume) that are the ONLY services on retrieval-egress.
+#     They are stopped and removed once the download finishes. An air-gapped
+#     host copies the `tei-weights` volume in instead (RETRIEVAL_SKIP_SEED).
+#   * HF_HUB_OFFLINE=1 on the serving containers is declared intent only: TEI
+#     1.9.x does not read it. What guarantees an offline start is retrieval-net
+#     having no egress plus the weights already being in the cache under the
+#     pinned revision. The weights are mounted read-only when serving.
+#
+# One engine per stack: one Qdrant, one embedder and one reranker serve every
+# tenant (tenant isolation is a filter inside the engine, see the retrieval
+# module AGENTS.md). Images are pinned by digest; bump tag, digest and the
+# model revisions together, and the endpoints JSON below must keep naming the
+# model and revision each TEI is started with (docker/tests/retrieval-hardening
+# .test.sh pins that). The TEI CPU image is linux/amd64 only. The TEI port is 80
+# (the reference endpoints use http://tei-embed:80); if a userns-remapped daemon
+# refuses the bind under cap_drop, move it to 8080 in --port, the endpoint URLs
+# and the healthchecks together.
+
+x-tei-common: &tei-common
+  image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+  labels:
+    orkestra.stack: ${APP_NAME}-${ENV}
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  healthcheck:
+    # /health is public; the image ships curl.
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 300s
+
+# YAML merge is shallow, so the seeds restate the whole healthcheck. A cold
+# download is up to ~4.5 GB, hence the long start_period. It is the same
+# RETRIEVAL_SEED_TIMEOUT (seconds, default 1800) that bounds orkestra.sh's
+# `up --wait`: a seed must not turn unhealthy while the wait still allows a
+# slow link to finish, so raising the timeout widens both together.
+x-tei-seed-healthcheck: &tei-seed-healthcheck
+  test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/health"]
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: ${RETRIEVAL_SEED_TIMEOUT:-1800}s
+
+# --payload-limit: the contract allows 32 inputs of 64 KiB per batch and JSON
+# escaping can expand them up to 6x; the TEI default (2 MB) would answer 413.
+# --max-batch-tokens bounds TEI's batching memory AND caps the max input length
+# (TEI truncates to it; the backend reads it from /info as MaxInputTokens, so
+# chunks must be <= half of it, i.e. <= 1024 tokens at 2048). Measured on CPU:
+# embed ~6.5 GB anon at 2048, ~8.1 GB at 4096, 14.5 GB at 8192; rerank ~7.0-7.7
+# GB at 2048. Raising it needs a matching mem_limit raise. --max-batch-requests
+# is not a knob (TEI forces 8 on ORT, 4 on candle).
+x-tei-embed-command: &tei-embed-command
+  - --model-id
+  - BAAI/bge-m3
+  - --revision
+  - 5617a9f61b028005a4858fdac845db406aefb181
+  - --pooling
+  - cls
+  - --auto-truncate
+  - --max-batch-tokens
+  - "${TEI_MAX_BATCH_TOKENS:-2048}"
+  - --payload-limit
+  - "16777216"
+  - --hostname
+  - 0.0.0.0
+  - --port
+  - "80"
+
+x-tei-rerank-command: &tei-rerank-command
+  - --model-id
+  - BAAI/bge-reranker-v2-m3
+  - --revision
+  - 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+  - --auto-truncate
+  - --max-batch-tokens
+  - "${TEI_MAX_BATCH_TOKENS:-2048}"
+  - --payload-limit
+  - "16777216"
+  - --hostname
+  - 0.0.0.0
+  - --port
+  - "80"
+
+# TEI logs its parsed Args, api_key included, at INFO on the router root
+# target. This filter drops that target to warn and keeps `::http` request
+# lines, Ready and every WARN/ERROR. It is a literal on purpose: never
+# `${LOG_LEVEL}` (docker/.env carries LOG_LEVEL=info for the backend, which
+# would re-enable the key-printing line) and never RUST_LOG (TEI 1.9.4
+# ignores it, measured).
+x-tei-log-level: &tei-log-level
+  LOG_LEVEL: info,text_embeddings_router=warn,text_embeddings_router::http=info
+
+services:
+  # Point the backend at the local engine and inference servers. Networks
+  # merge as a union with the app file's (default, pdf-net), so only the new
+  # one is listed. Both keys are required: the overlay fails closed.
+  backend:
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY is not set — run make init}
+      RETRIEVAL_INFERENCE_ENDPOINTS: '[{"name":"embed","url":"http://tei-embed:80","kind":"embed","boundary":"local","model":"BAAI/bge-m3","revision":"5617a9f61b028005a4858fdac845db406aefb181","pooling":"cls","normalize":true,"truncate":true},{"name":"rerank","url":"http://tei-rerank:80","kind":"rerank","boundary":"local","model":"BAAI/bge-reranker-v2-m3","revision":"953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e","truncate":true}]'
+      RETRIEVAL_INFERENCE_API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
+    networks:
+      - retrieval-net
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0-unprivileged@sha256:8c215051dc7bc15221b5f89c100a84a4b04d0dd8497fb73e6fa86fc948d1a41d
+    container_name: ${APP_NAME}-qdrant-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${QDRANT_MEM_LIMIT:-2g}
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY is not set — run make init}
+      QDRANT__SERVICE__ENABLE_STATIC_CONTENT: "false"
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - retrieval-net
+    # The image has neither curl nor wget; bash /dev/tcp reaches /readyz,
+    # which is not behind the API key.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /readyz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # mem_limit 8g / 9g is the measured floor plus headroom: the embed model needs
+  # ~6 GB even at a 512-token bound, so the old 4g could never run on CPU.
+  tei-embed:
+    <<: *tei-common
+    container_name: ${APP_NAME}-tei-embed-${ENV}
+    restart: unless-stopped
+    mem_limit: ${TEI_EMBED_MEM_LIMIT:-8g}
+    command: *tei-embed-command
+    environment:
+      <<: *tei-log-level
+      HUGGINGFACE_HUB_CACHE: /data
+      HF_HUB_OFFLINE: "1"
+      API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
+    volumes:
+      - tei-weights:/data:ro
+    networks:
+      - retrieval-net
+
+  tei-rerank:
+    <<: *tei-common
+    container_name: ${APP_NAME}-tei-rerank-${ENV}
+    restart: unless-stopped
+    mem_limit: ${TEI_RERANK_MEM_LIMIT:-9g}
+    command: *tei-rerank-command
+    environment:
+      <<: *tei-log-level
+      HUGGINGFACE_HUB_CACHE: /data
+      HF_HUB_OFFLINE: "1"
+      API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
+    volumes:
+      - tei-weights:/data:ro
+    networks:
+      - retrieval-net
+
+  # One-off weight download: the same image, command and volume as the serving
+  # twin, but with egress and a writable cache. TEI downloads, loads the model
+  # and starts serving (healthy = weights are complete); nobody else joins
+  # retrieval-egress, so the API key is not reachable from any other service.
+  tei-embed-seed:
+    <<: *tei-common
+    profiles: [retrieval-seed]
+    container_name: ${APP_NAME}-tei-embed-seed-${ENV}
+    restart: "no"
+    mem_limit: ${TEI_EMBED_MEM_LIMIT:-8g}
+    command: *tei-embed-command
+    environment:
+      <<: *tei-log-level
+      HUGGINGFACE_HUB_CACHE: /data
+      API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
+    healthcheck: *tei-seed-healthcheck
+    volumes:
+      - tei-weights:/data
+    networks:
+      - retrieval-egress
+
+  tei-rerank-seed:
+    <<: *tei-common
+    profiles: [retrieval-seed]
+    container_name: ${APP_NAME}-tei-rerank-seed-${ENV}
+    restart: "no"
+    mem_limit: ${TEI_RERANK_MEM_LIMIT:-9g}
+    command: *tei-rerank-command
+    environment:
+      <<: *tei-log-level
+      HUGGINGFACE_HUB_CACHE: /data
+      API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
+    healthcheck: *tei-seed-healthcheck
+    volumes:
+      - tei-weights:/data
+    networks:
+      - retrieval-egress
+
+volumes:
+  qdrant-data:
+    driver: local
+  tei-weights:
+    driver: local
+
+networks:
+  retrieval-net:
+    internal: true
+  retrieval-egress: {}

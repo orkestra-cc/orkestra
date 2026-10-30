@@ -173,6 +173,10 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
   # no published port and no network egress, but a shipped literal here
   # would still be a public secret in the git history.
   pdf_secret=$(openssl rand -hex 16)
+  # Retrieval overlay: Qdrant API key and the TEI inference key. Both services
+  # sit on an internal network, but a shipped literal is still a public secret.
+  qdrant_key=$(openssl rand -hex 32)
+  inference_key=$(openssl rand -hex 32)
 
   tmp_env="${ENV_FILE}.tmp.$$"
   # sed delimiter `|` so the hex secrets don't collide with `/`.
@@ -185,6 +189,8 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
     -e "s|REPLACE_WITH_RANDOM_HEX_32_REDIS_PASSWORD|${redis_pw}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_STORAGE_SECRET|${storage_secret}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_PDF_RENDERER_SECRET|${pdf_secret}|" \
+    -e "s|REPLACE_WITH_RANDOM_HEX_64_QDRANT_API_KEY|${qdrant_key}|" \
+    -e "s|REPLACE_WITH_RANDOM_HEX_64_RETRIEVAL_INFERENCE_KEY|${inference_key}|" \
     "$ENV_FILE" > "$tmp_env"
 
   # Sanity: every placeholder got replaced (otherwise the backend boot will
@@ -198,7 +204,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
 
   mv "$tmp_env" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / LLM_SECRET_ENCRYPTION_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY / PDF_RENDERER_PASSWORD"
+  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / LLM_SECRET_ENCRYPTION_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY / PDF_RENDERER_PASSWORD / QDRANT_API_KEY / RETRIEVAL_INFERENCE_API_KEY"
   muted "chmod 600 applied — .env now contains live secrets"
 
   # Seed a non-colliding port block so a second Orkestra stack on this host

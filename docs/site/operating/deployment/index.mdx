@@ -27,6 +27,7 @@ Regardless of shape, you'll be reading one or more of these compose files. They 
 | `docker-compose.staging.yml` | Staging-like behavior + AIR hot reload — long-lived dev VMs |
 | `docker-compose.prod.yml` | Optimized production stack — pulls a pre-built image from GHCR (`ghcr.io/orkestra-cc/orkestra/backend:latest` or `:<sha>`) |
 | `docker-compose.observability.yml` | Optional: self-hosted Tempo + Prometheus + Loki + Grafana |
+| `docker-compose.retrieval.yml` | Optional: Qdrant + two TEI inference servers for the `retrieval` module, on an internal network — see [Retrieval overlay](/operating/retrieval-overlay) |
 
 ## What lives in `.env` vs `/admin/modules`
 

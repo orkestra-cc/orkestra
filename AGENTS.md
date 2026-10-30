@@ -133,7 +133,7 @@ ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 > empty token and a puzzling 401. Substitute that address for `localhost`, or
 > derive it with `sed -n 's/^HOST_BIND_ADDRESS=//p' docker/.env`.
 
-One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`), plus an opt-in `docker-compose.observability.yml` overlay (ADR-0005). The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; override the base via the `GO_BASE` build-arg for a Chainguard image). The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
+One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`), plus opt-in `docker-compose.observability.yml` (ADR-0005) and `docker-compose.retrieval.yml` (Qdrant + TEI for `retrieval`, ADR-0023; `./orkestra.sh retrieval up`, see [docs/site/operating/retrieval-overlay.mdx](docs/site/operating/retrieval-overlay.mdx)) overlays. The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; override the base via the `GO_BASE` build-arg for a Chainguard image). The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
 
 ## Assistant Rules
 
