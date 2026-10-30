@@ -249,3 +249,38 @@ describe('useUserTable row actions', () => {
     expect(submit).toBeDisabled();
   });
 });
+
+describe('useUserTable for a manager', () => {
+  beforeEach(() => {
+    server.use(listHandler());
+  });
+
+  it('hides the actions a manager does not hold', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserTable />, {
+      preloadedState: {
+        auth: {
+          ...preloadedAuthState.auth,
+          user: {
+            ...preloadedAuthState.auth.user,
+            id: 'mgr-1',
+            role: 'manager'
+          }
+        }
+      }
+    });
+    await waitFor(() => expect(screen.getByText('Op Two')).toBeInTheDocument());
+    await openActionsForRow(user, 'Op Two');
+
+    // user.update: activation stays.
+    expect(await screen.findByText('Deactivate')).toBeInTheDocument();
+    for (const label of [
+      'Reset MFA',
+      'Resend Verification',
+      'Send Password Reset',
+      'Delete User'
+    ]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+});
