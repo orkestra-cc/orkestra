@@ -45,6 +45,8 @@ When asked to build something new, consult these directories in order:
 
 A module can contribute UI to a slot another module owns (a detail-page tab, a panel) without either importing the other: the contributor declares `contributions: { '<slot id>': [SlotContribution] }` in its manifest, the owner reads `useSlotContributions('<slot id>')` and renders the results with the props it publishes. Keys must be prefixed `<module>.`; only active modules contribute (admin module list, or navigation visibility for non-admins); an optional `permission` hides a contribution from callers without it. See `types.ts`, `slotContributions.ts` and `useSlotContributions.ts`.
 
+Core slots: the user pages publish `user.profile.sections`, `user.adminProfile.sections` and `user.settings.sections` (`src/pages/user/profileSlots.ts`); a contribution there renders as a card titled with its `labelKey` in the contributor's namespace. Per-user preferences need no component at all: the backend module declares `UserPreferenceFields()` and `/user/settings` renders them with the generic config form (`ModulePreferencesCards`); read them in your pages with `hooks/useModulePreferences`.
+
 ## Navigation is backend-driven
 
 The sidebar menu is **not** defined in the frontend. The React app fetches it from `/v1/navigation` (via the `navigationApi` RTK Query slice and the `useRoleBasedNavigation` hook). Each backend module declares its own `NavItems()` in its `module.go`, and the navigation core module aggregates them filtered by the user's role.

@@ -243,7 +243,7 @@ export const widgetsManifest: ModuleManifest = {
 };
 ```
 
-The key must start with `widgets.`; `labelKey` lives in the `widgets` namespace; the tab's props are the ones the owner publishes — declare a structurally identical type under `pages/widgets/` instead of importing the owner's code. The owner renders it via `useSlotContributions('reports.detail.tabs')`, only while `widgets` is active.
+Real slot ids you can target today: the core user pages' `user.profile.sections`, `user.adminProfile.sections`, `user.settings.sections` (`pages/user/profileSlots.ts`). The key must start with `widgets.`; `labelKey` lives in the `widgets` namespace; the tab's props are the ones the owner publishes — declare a structurally identical type under `pages/widgets/` instead of importing the owner's code. The owner renders it via `useSlotContributions('reports.detail.tabs')`, only while `widgets` is active.
 
 ### 7. Verify
 

@@ -108,6 +108,8 @@ var goldenCodes = map[string]string{
 	"UserRoleEscalationForbidden":            "user.role_escalation_forbidden",
 	"UserTargetTierForbidden":                "user.target_tier_forbidden",
 	"UserTargetChanged":                      "user.target_changed",
+	"UserPreferencesModuleUnknown":           "user.preferences.module_unknown",
+	"UserPreferencesInvalid":                 "user.preferences.invalid",
 	"UserRoleLookupUnavailable":              "user.role_lookup_unavailable",
 	"LoggingLogProviderUnavailable":          "logging.log_provider_unavailable",
 	"LoggingLogPreviewInvalid":               "logging.log_preview_invalid",

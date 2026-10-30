@@ -760,6 +760,17 @@
         "toastCopied": "Token copiato negli appunti",
         "errorUnknown": "errore sconosciuto"
       }
+    },
+    "modulePreferences": {
+      "title": "Preferenze dei moduli",
+      "description": "Impostazioni che ogni modulo conserva per te. Seguono il tuo account, non l'organizzazione.",
+      "save": "Salva",
+      "saving": "Salvataggio…",
+      "saved": "Preferenze salvate",
+      "saveFailed": "Impossibile salvare le preferenze: {{error}}",
+      "empty": "Nessun modulo dichiara preferenze.",
+      "lastSaved": "Ultimo salvataggio {{when}}",
+      "unknownError": "Errore sconosciuto"
     }
   },
   "adminTenants": {

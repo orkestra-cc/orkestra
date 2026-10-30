@@ -13,8 +13,11 @@
 // are migrated to org_* names.
 //
 // Principal attribute used here: tenant_roles — a Set<String> listing
-// the role names the user holds in the acting tenant. The Cedar engine
-// layer populates it from iface.TenantMembership.Roles.
+// the role names the user holds in the acting tenant. For a check about
+// the caller in the request tenant it comes from iface.TenantMembership.Roles
+// (the request context); for a check about another user, or another tenant,
+// from that user's bindings there, catalog roles only (authz
+// services.boundRoleNames).
 
 // ----- Org-role permits (post-split) ---------------------------------
 

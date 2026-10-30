@@ -205,6 +205,12 @@ const (
 	// own subscriptions_activity log.
 	ServiceSubscriptionService ServiceKey = "subscriptions.service"
 
+	// ServiceUserPreferenceRegistry is the boot-time catalog of per-user
+	// preference schemas and profile sections declared by modules
+	// (*UserPreferenceRegistry, user_preferences.go). Created and
+	// registered by the module registry before Init, populated after.
+	ServiceUserPreferenceRegistry ServiceKey = "user.preference_registry"
+
 	// ServicePIIProducerRegistry is the boot-time catalog of PII
 	// producers. Pre-created in cmd/server/main.go before InitAll so
 	// producer modules can Register themselves during their own Init.
