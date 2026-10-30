@@ -365,13 +365,18 @@ func (m *UserModule) RegisterRoutes(ri *module.RouteInfo) {
 	}
 
 	// Self-service preferences and profile-section discovery — both
-	// audiences, like the avatar, on the per-action key `user.self`
-	// (conveyed by the .self suffix rule to every platform role but guest
-	// and to org members). The store is user-keyed, so the one handler
-	// serves both tiers.
+	// audiences, on the per-action key `user.self`. The store is
+	// user-keyed, so the one handler serves both tiers. On the operator
+	// mount the key is checked at GLOBAL scope: a platform role conveys
+	// `.self` there (authz rule 2b, every platform role but guest) and
+	// nowhere inside a tenant, so a tenant-scoped check would refuse staff
+	// who hold no role in the selected tenant. Client users hold it
+	// through their org membership, so the client mount stays tenant-scoped.
+	// Section permissions are still checked in the request tenant by the
+	// handler.
 	if m.preferenceHandler != nil {
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.Operator.AuthMW.RequirePermission("user.self"))
+			r.Use(ri.Operator.AuthMW.RequireSystemPermission("user.self"))
 			api := humachi.New(r, ri.APIConfig)
 			handlers.RegisterSelfPreferenceRoutes(api, m.preferenceHandler, "operator-")
 		})

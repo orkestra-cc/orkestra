@@ -1,6 +1,7 @@
 package module
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -171,5 +172,47 @@ func TestModuleRegistryCollectsUserPreferences(t *testing.T) {
 	}
 	if s := reg.Sections(); len(s) != 1 || s[0].Key != "crm.activity" {
 		t.Errorf("Sections() = %+v, want crm.activity only", s)
+	}
+}
+
+// The settings form hides a field whose DependsOn is unmet while
+// ValidateValues judges every field, so a conditional field is refused at
+// registration instead of becoming a required field nobody can fill.
+func TestRegisterFieldsRefusesDependsOn(t *testing.T) {
+	reg := NewUserPreferenceRegistry()
+	err := reg.RegisterFields("crm", []ConfigField{
+		{Key: "digest", Type: FieldBool},
+		{Key: "digestDay", Type: FieldString, Required: true,
+			DependsOn: []FieldCondition{{Key: "digest", In: []string{"true"}}}},
+	})
+	if err == nil {
+		t.Fatal("a field with dependsOn must be refused")
+	}
+	if _, ok := reg.Fields("crm"); ok {
+		t.Error("a refused schema must not be stored")
+	}
+}
+
+// A module recovered by RetryInit after a failed boot gets its preference
+// schema and profile sections, which InitAll collected only at boot.
+func TestRetryInitRegistersUserPreferences(t *testing.T) {
+	registry := NewModuleRegistry(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	services := NewServiceRegistry()
+	reg := NewUserPreferenceRegistry()
+	services.Register(ServiceUserPreferenceRegistry, reg)
+	registry.deps = &Dependencies{Services: services}
+	m := prefTestModule{minimalModule: minimalModule{name: "crm"}, fields: prefSchema(),
+		sections: []ProfileSectionSpec{{Key: "crm.activity", LabelKey: "profile.activity"}}}
+	registry.moduleByName["crm"] = m
+	registry.failed["crm"] = errors.New("boot failure")
+
+	if err := registry.RetryInit("crm"); err != nil {
+		t.Fatalf("RetryInit: %v", err)
+	}
+	if _, ok := reg.Fields("crm"); !ok {
+		t.Error("the recovered module's preference schema is missing")
+	}
+	if s := reg.Sections(); len(s) != 1 || s[0].Key != "crm.activity" {
+		t.Errorf("Sections() = %+v, want crm.activity", s)
 	}
 }

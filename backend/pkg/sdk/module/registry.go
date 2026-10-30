@@ -249,30 +249,41 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 func (r *ModuleRegistry) registerUserPreferences(reg *UserPreferenceRegistry) {
 	fields, sections := 0, 0
 	for _, m := range r.initialized {
-		if f := UserPreferenceFieldsOf(m); f != nil {
-			if err := reg.RegisterFields(m.Name(), f); err != nil {
-				r.logger.Warn("user preference schema rejected",
-					slog.String("module", m.Name()),
-					slog.String("error", err.Error()),
-				)
-			} else {
-				fields++
-			}
-		}
-		if s := ProfileSectionsOf(m); s != nil {
-			if err := reg.RegisterSections(m.Name(), s); err != nil {
-				r.logger.Warn("profile sections rejected",
-					slog.String("module", m.Name()),
-					slog.String("error", err.Error()),
-				)
-			} else {
-				sections += len(s)
-			}
-		}
+		f, s := r.registerModulePreferences(reg, m)
+		fields += f
+		sections += s
 	}
 	r.logger.Info("Registered user preference catalog",
 		slog.Int("modules_with_preferences", fields),
 		slog.Int("profile_sections", sections))
+}
+
+// registerModulePreferences adds one module's preference schema and profile
+// sections to reg, returning how many of each it accepted (the schema
+// counts once). InitAll calls it for every initialized module, RetryInit
+// for a module recovered after a failed boot.
+func (r *ModuleRegistry) registerModulePreferences(reg *UserPreferenceRegistry, m Module) (fields, sections int) {
+	if f := UserPreferenceFieldsOf(m); f != nil {
+		if err := reg.RegisterFields(m.Name(), f); err != nil {
+			r.logger.Warn("user preference schema rejected",
+				slog.String("module", m.Name()),
+				slog.String("error", err.Error()),
+			)
+		} else {
+			fields = 1
+		}
+	}
+	if s := ProfileSectionsOf(m); s != nil {
+		if err := reg.RegisterSections(m.Name(), s); err != nil {
+			r.logger.Warn("profile sections rejected",
+				slog.String("module", m.Name()),
+				slog.String("error", err.Error()),
+			)
+		} else {
+			sections = len(s)
+		}
+	}
+	return fields, sections
 }
 
 // registerCapabilities collects Capabilities() from every initialized module
@@ -625,6 +636,12 @@ func (r *ModuleRegistry) RetryInit(name string) error {
 	// retried into service after a failed boot must still get its
 	// templates seeded, not silently skipped for the life of the process.
 	r.registerNotificationTemplates()
+
+	// And its preference schema and profile sections, which InitAll only
+	// collected from the modules that initialized at boot.
+	if reg, ok := GetTyped[*UserPreferenceRegistry](r.deps.Services, ServiceUserPreferenceRegistry); ok {
+		r.registerModulePreferences(reg, m)
+	}
 
 	return nil
 }

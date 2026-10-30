@@ -131,6 +131,12 @@ func (r *UserPreferenceRegistry) RegisterFields(moduleName string, fields []Conf
 		if f.Type == FieldEnum && len(f.Options) == 0 {
 			return fmt.Errorf("user preferences %q: enum field %q declares no options", moduleName, f.Key)
 		}
+		// The settings form hides a field whose DependsOn is unmet, while
+		// ValidateValues judges every field: a hidden required field could
+		// never be filled, so conditional fields are refused here.
+		if len(f.DependsOn) > 0 {
+			return fmt.Errorf("user preferences %q: field %q declares dependsOn, not supported in preferences", moduleName, f.Key)
+		}
 		if f.Pattern != "" {
 			if _, err := regexp.Compile(f.Pattern); err != nil {
 				return fmt.Errorf("user preferences %q: field %q pattern: %w", moduleName, f.Key, err)

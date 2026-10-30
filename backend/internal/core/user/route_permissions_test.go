@@ -174,7 +174,8 @@ func TestRouteGroups_NoOperationRegisteredTwice(t *testing.T) {
 }
 
 // The self-service preference routes are mounted per audience under
-// RequirePermission("user.self"), outside the admin groups: none of them may
+// user.self (global scope on the operator mount, tenant scope on the client
+// mount), outside the admin groups: none of them may
 // appear in routeGroups, and the registrar mounts exactly the four self ops.
 func TestSelfPreferenceRoutes_AreNotInTheAdminGroupsAndMountFourOps(t *testing.T) {
 	for g, list := range operationsPerGate(t) {
