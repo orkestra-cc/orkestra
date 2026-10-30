@@ -57,6 +57,8 @@ type fakeEngine struct {
 	mu               sync.Mutex
 	ensured          []engine.CollectionSpec
 	dropped          []string
+	dropCtxErr       []error
+	dropDeadline     []time.Duration // time left to the drop context's deadline; 0 without one
 	queries          []engine.Query
 	block            bool
 	ignorePrincipals bool
@@ -74,6 +76,12 @@ func (f *fakeEngine) EnsureCollection(ctx context.Context, spec engine.Collectio
 func (f *fakeEngine) DropCollection(ctx context.Context, name string) error {
 	f.mu.Lock()
 	f.dropped = append(f.dropped, name)
+	f.dropCtxErr = append(f.dropCtxErr, ctx.Err())
+	var left time.Duration
+	if dl, ok := ctx.Deadline(); ok {
+		left = time.Until(dl)
+	}
+	f.dropDeadline = append(f.dropDeadline, left)
 	f.mu.Unlock()
 	return f.Engine.DropCollection(ctx, name)
 }
@@ -344,6 +352,7 @@ func TestRun_DropsCollectionOnCancel(t *testing.T) {
 	fake.block = true
 	emb := newTEI(t, "e", "s", teiOpts{})
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	go func() {
 		for {
 			fake.mu.Lock()
@@ -353,7 +362,11 @@ func TestRun_DropsCollectionOnCancel(t *testing.T) {
 				cancel()
 				return
 			}
-			time.Sleep(time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Millisecond):
+			}
 		}
 	}()
 	_, err := Run(ctx, baseCfg(fake, emb, nil), fx, "smoke")
@@ -362,6 +375,13 @@ func TestRun_DropsCollectionOnCancel(t *testing.T) {
 	}
 	if len(fake.dropped) != 1 {
 		t.Fatalf("dropped = %v", fake.dropped)
+	}
+	// The drop must outlive the cancelled run and stay bounded.
+	if fake.dropCtxErr[0] != nil {
+		t.Errorf("drop context was already done: %v", fake.dropCtxErr[0])
+	}
+	if d := fake.dropDeadline[0]; d <= 0 || d > 30*time.Second {
+		t.Errorf("drop deadline left = %v, want within (0, 30s]", d)
 	}
 }
 
