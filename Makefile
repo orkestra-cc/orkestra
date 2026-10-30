@@ -44,7 +44,7 @@ help:
 	@echo "  make frontend-admin-*    - build / test / preview / type-check / deps / clean"
 	@echo "  make frontend-client-*   - build / typecheck / clean"
 	@echo ""
-	@echo "Retrieval benchmark (needs ./orkestra.sh retrieval up on dev/staging):"
+	@echo "Retrieval benchmark (needs ./orkestra.sh retrieval up; backend running from the checkout):"
 	@echo "  make retrieval-bench     - Benchmark keyword/dense/hybrid/rerank (RETRIEVAL_BENCH_ARGS=\"-k 5\")"
 	@echo ""
 	@echo "Database shells (require infra running):"

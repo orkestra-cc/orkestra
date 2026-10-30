@@ -79,7 +79,7 @@ The full command set:
 | `./orkestra.sh retrieval status` | Containers and memory use against each limit; a leftover seed, the only container with internet access, is listed and flagged (remove it with `retrieval down`) |
 | `./orkestra.sh retrieval info` | Internal endpoints, the variable names the backend gets (never their values), opt-out and offline notes |
 | `./orkestra.sh retrieval logs <svc> [-f] [-n N] [-t]` | Logs of one of the five overlay services, scoped to this stack's project |
-| `./orkestra.sh retrieval bench [flags]` | The [benchmark](#benchmark), development and staging only |
+| `./orkestra.sh retrieval bench [flags]` | The [benchmark](#benchmark), on a backend that runs from the checkout (development, hot-reload staging) |
 
 ## Opting out
 
@@ -285,7 +285,7 @@ A new embedding revision is a new inference profile, so it changes the corpus's 
 
 ## Benchmark
 
-`make retrieval-bench` runs the D14 benchmark against the running overlay. It is the same as `./orkestra.sh retrieval bench`, and runs `go run ./cmd/retrieval-bench` inside the backend container, the only container besides Qdrant and TEI on `retrieval-net`. It needs a development or staging stack (the production image has no Go toolchain) with the overlay up; the command itself also refuses `ENV=production`.
+`make retrieval-bench` runs the D14 benchmark against the running overlay. It is the same as `./orkestra.sh retrieval bench`, and runs `go run ./cmd/retrieval-bench` inside the backend container, the only container besides Qdrant and TEI on `retrieval-net`. It needs the overlay up and a backend that runs from the checkout, with the Go toolchain and the source tree: development, or the hot-reload staging of the base. A staging that runs the production image, as some forks do, cannot run it. The production image has no source tree, and may have no Go toolchain either. Before running, the command checks that the backend container has `go` and the benchmark sources, and stops with a message when they are missing. It refuses `ENV=production` outright.
 
 ```bash
 make retrieval-bench
