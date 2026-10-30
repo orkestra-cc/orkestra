@@ -2109,9 +2109,10 @@ retrieval_info() {
         "  run it before ${c_accent}./orkestra.sh stop --with-infra${c_reset}." \
         "  Opt out for good: run retrieval down first, then empty QDRANT_API_KEY" \
         "  and RETRIEVAL_INFERENCE_API_KEY: without the keys, down cannot run." \
-        "  Wipe the data (after down):" \
-        "    ${c_muted}docker volume rm ${project}_qdrant-data${c_reset}" \
-        "    ${c_muted}docker volume rm ${project}_tei-weights${c_reset}" \
+        "  Remove the volumes (after down):" \
+        "    ${c_muted}docker volume rm ${project}_tei-weights${c_reset}  (safe: up downloads it again)" \
+        "    ${c_muted}docker volume rm ${project}_qdrant-data${c_reset}  (the index: NOT rebuilt" \
+        "    until delivery step 2 — see docs/site/operating/retrieval-overlay.mdx)" \
         ""
     echo
     draw_box "Offline hosts" \
