@@ -27,9 +27,10 @@ EOT
 dc() { env -u QDRANT_URL -u QDRANT_API_KEY -u QDRANT_COLLECTION_PREFIX \
   -u RETRIEVAL_INFERENCE_ENDPOINTS -u RETRIEVAL_INFERENCE_API_KEY \
   -u QDRANT_MEM_LIMIT -u TEI_EMBED_MEM_LIMIT -u TEI_RERANK_MEM_LIMIT \
-  -u RETRIEVAL_SEED_TIMEOUT \
+  -u RETRIEVAL_SEED_TIMEOUT -u TEI_MAX_BATCH_TOKENS \
   docker compose "$@"; }
 
+tei_log_level="info,text_embeddings_router=warn,text_embeddings_router::http=info"
 serving="tei-embed tei-rerank"
 seeds="tei-embed-seed tei-rerank-seed"
 all="qdrant $serving $seeds"
@@ -126,6 +127,21 @@ for app in docker-compose.dev.yml docker-compose.staging.yml docker-compose.prod
     [[ "$pl" =~ ^[0-9]+$ ]] && [ "$pl" -ge 13000000 ] || bad "$app $svc --payload-limit = '$pl' (want >= 13000000)"
   done
 
+  # TEI memory: --max-batch-tokens bounds batching memory and the max input
+  # (default 2048, never above the model's 8192); LOG_LEVEL is the literal
+  # filter that keeps the API key out of TEI's startup log (RUST_LOG is ignored
+  # by TEI 1.9.4); the limits render in bytes (8g, 9g, qdrant 2g).
+  for svc in $serving $seeds; do
+    mbt=$(flag "$svc" --max-batch-tokens)
+    [[ "$mbt" =~ ^[1-9][0-9]*$ ]] && [ "$mbt" -le 8192 ] || bad "$app $svc --max-batch-tokens = '$mbt' (want 1..8192)"
+    [ "$mbt" = "2048" ] || bad "$app $svc --max-batch-tokens default = '$mbt' (want 2048)"
+    [ "$(s "$svc" '.environment.LOG_LEVEL')" = "$tei_log_level" ] || bad "$app $svc LOG_LEVEL = '$(s "$svc" '.environment.LOG_LEVEL')'"
+    [ "$(s "$svc" '.environment|has("RUST_LOG")|tostring')" = "false" ] || bad "$app $svc sets RUST_LOG (TEI ignores it)"
+  done
+  for pair in tei-embed:8589934592 tei-embed-seed:8589934592 tei-rerank:9663676416 tei-rerank-seed:9663676416 qdrant:2147483648; do
+    [ "$(s "${pair%%:*}" .mem_limit)" = "${pair##*:}" ] || bad "$app ${pair%%:*} mem_limit = '$(s "${pair%%:*}" .mem_limit)' (want ${pair##*:})"
+  done
+
   # Endpoints JSON must describe what each TEI serves.
   ep=$(s backend '.environment.RETRIEVAL_INFERENCE_ENDPOINTS')
   jq -e 'type=="array" and length==2' <<<"$ep" >/dev/null 2>&1 || { bad "$app endpoints JSON is not a 2-entry array"; continue; }
@@ -177,6 +193,16 @@ got=$(env -u QDRANT_URL -u QDRANT_API_KEY -u QDRANT_COLLECTION_PREFIX -u RETRIEV
   --profile retrieval-seed config --format json 2>/dev/null | seed_windows)
 [ "$got" = "1h30m0s 1h30m0s 5m0s 5m0s" ] || bad "shell RETRIEVAL_SEED_TIMEOUT=5400 renders start_period '$got'"
 rm -f "$timeout_env"
+
+# The backend's LOG_LEVEL (docker/.env carries LOG_LEVEL=info) must not leak
+# into TEI: an interpolated filter would bring back the line that prints the key.
+# This one render keeps the variable exported, bypassing dc()'s unset list.
+m=$(LOG_LEVEL=info docker compose --env-file "$env_file" -f docker-compose.infra.yml -f docker-compose.dev.yml \
+  -f docker-compose.retrieval.yml --profile retrieval-seed config --format json 2>/dev/null) || m=""
+for svc in $serving $seeds; do
+  [ "$(jq -r --arg n "$svc" '.services[$n].environment.LOG_LEVEL // empty' <<<"$m")" = "$tei_log_level" ] \
+    || bad "$svc LOG_LEVEL follows the process LOG_LEVEL (would print the API key)"
+done
 
 # Fail-closed: the overlay refuses to render without either key.
 for key in QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY; do

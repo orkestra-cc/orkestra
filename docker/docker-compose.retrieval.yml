@@ -73,6 +73,12 @@ x-tei-seed-healthcheck: &tei-seed-healthcheck
 
 # --payload-limit: the contract allows 32 inputs of 64 KiB per batch and JSON
 # escaping can expand them up to 6x; the TEI default (2 MB) would answer 413.
+# --max-batch-tokens bounds TEI's batching memory AND caps the max input length
+# (TEI truncates to it; the backend reads it from /info as MaxInputTokens, so
+# chunks must be <= half of it, i.e. <= 1024 tokens at 2048). Measured on CPU:
+# embed ~6.5 GB anon at 2048, ~8.1 GB at 4096, 14.5 GB at 8192; rerank ~7.0-7.7
+# GB at 2048. Raising it needs a matching mem_limit raise. --max-batch-requests
+# is not a knob (TEI forces 8 on ORT, 4 on candle).
 x-tei-embed-command: &tei-embed-command
   - --model-id
   - BAAI/bge-m3
@@ -81,6 +87,8 @@ x-tei-embed-command: &tei-embed-command
   - --pooling
   - cls
   - --auto-truncate
+  - --max-batch-tokens
+  - "${TEI_MAX_BATCH_TOKENS:-2048}"
   - --payload-limit
   - "16777216"
   - --hostname
@@ -94,12 +102,23 @@ x-tei-rerank-command: &tei-rerank-command
   - --revision
   - 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
   - --auto-truncate
+  - --max-batch-tokens
+  - "${TEI_MAX_BATCH_TOKENS:-2048}"
   - --payload-limit
   - "16777216"
   - --hostname
   - 0.0.0.0
   - --port
   - "80"
+
+# TEI logs its parsed Args, api_key included, at INFO on the router root
+# target. This filter drops that target to warn and keeps `::http` request
+# lines, Ready and every WARN/ERROR. It is a literal on purpose: never
+# `${LOG_LEVEL}` (docker/.env carries LOG_LEVEL=info for the backend, which
+# would re-enable the key-printing line) and never RUST_LOG (TEI 1.9.4
+# ignores it, measured).
+x-tei-log-level: &tei-log-level
+  LOG_LEVEL: info,text_embeddings_router=warn,text_embeddings_router::http=info
 
 services:
   # Point the backend at the local engine and inference servers. Networks
@@ -142,13 +161,16 @@ services:
       retries: 5
       start_period: 30s
 
+  # mem_limit 8g / 9g is the measured floor plus headroom: the embed model needs
+  # ~6 GB even at a 512-token bound, so the old 4g could never run on CPU.
   tei-embed:
     <<: *tei-common
     container_name: ${APP_NAME}-tei-embed-${ENV}
     restart: unless-stopped
-    mem_limit: ${TEI_EMBED_MEM_LIMIT:-4g}
+    mem_limit: ${TEI_EMBED_MEM_LIMIT:-8g}
     command: *tei-embed-command
     environment:
+      <<: *tei-log-level
       HUGGINGFACE_HUB_CACHE: /data
       HF_HUB_OFFLINE: "1"
       API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
@@ -161,9 +183,10 @@ services:
     <<: *tei-common
     container_name: ${APP_NAME}-tei-rerank-${ENV}
     restart: unless-stopped
-    mem_limit: ${TEI_RERANK_MEM_LIMIT:-4g}
+    mem_limit: ${TEI_RERANK_MEM_LIMIT:-9g}
     command: *tei-rerank-command
     environment:
+      <<: *tei-log-level
       HUGGINGFACE_HUB_CACHE: /data
       HF_HUB_OFFLINE: "1"
       API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
@@ -181,9 +204,10 @@ services:
     profiles: [retrieval-seed]
     container_name: ${APP_NAME}-tei-embed-seed-${ENV}
     restart: "no"
-    mem_limit: ${TEI_EMBED_MEM_LIMIT:-4g}
+    mem_limit: ${TEI_EMBED_MEM_LIMIT:-8g}
     command: *tei-embed-command
     environment:
+      <<: *tei-log-level
       HUGGINGFACE_HUB_CACHE: /data
       API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
     healthcheck: *tei-seed-healthcheck
@@ -197,9 +221,10 @@ services:
     profiles: [retrieval-seed]
     container_name: ${APP_NAME}-tei-rerank-seed-${ENV}
     restart: "no"
-    mem_limit: ${TEI_RERANK_MEM_LIMIT:-4g}
+    mem_limit: ${TEI_RERANK_MEM_LIMIT:-9g}
     command: *tei-rerank-command
     environment:
+      <<: *tei-log-level
       HUGGINGFACE_HUB_CACHE: /data
       API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:?RETRIEVAL_INFERENCE_API_KEY is not set — run make init}
     healthcheck: *tei-seed-healthcheck

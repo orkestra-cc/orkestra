@@ -2056,7 +2056,8 @@ retrieval_down() {
 }
 
 # Memory usage against each container's limit is the sizing source for
-# QDRANT_MEM_LIMIT / TEI_EMBED_MEM_LIMIT / TEI_RERANK_MEM_LIMIT.
+# QDRANT_MEM_LIMIT / TEI_EMBED_MEM_LIMIT / TEI_RERANK_MEM_LIMIT (raise them
+# together with TEI_MAX_BATCH_TOKENS).
 retrieval_status() {
     page_header "Retrieval · Status"
     check_docker_running
