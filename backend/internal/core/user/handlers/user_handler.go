@@ -413,11 +413,13 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 			return nil, err
 		}
 	}
-	user, err := h.userService.UpdateUser(ctx, req.ID, &req.Body)
+	user, err := h.userService.UpdateUser(expectTargetRole(ctx, previous), req.ID, &req.Body)
 	if err != nil {
 		switch err {
 		case services.ErrUserNotFound:
 			return nil, huma.Error404NotFound("User not found", err)
+		case services.ErrTargetRoleChanged:
+			return nil, targetChangedError()
 		case services.ErrEmailNotUnique:
 			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case services.ErrInvalidInput:
@@ -623,10 +625,12 @@ func (h *UserHandler) DeleteUser(ctx context.Context, req *DeleteUserRequest) (*
 		}
 		return nil, err
 	}
-	if err := h.userService.SoftDeleteAndAliasEmail(ctx, req.ID); err != nil {
+	if err := h.userService.SoftDeleteAndAliasEmail(expectTargetRole(ctx, previous), req.ID); err != nil {
 		switch err {
 		case services.ErrUserNotFound:
 			return nil, huma.Error404NotFound("User not found", err)
+		case services.ErrTargetRoleChanged:
+			return nil, targetChangedError()
 		case services.ErrInvalidInput:
 			return nil, huma.Error400BadRequest("Invalid user ID", err)
 		default:
@@ -955,6 +959,25 @@ func guardTargetTier(ctx context.Context, h tierGuardHost, previous *iface.UserM
 			"You cannot modify a user whose role is higher than your own")
 	}
 	return callerRole, nil
+}
+
+// expectTargetRole binds the write that follows guardTargetTier to the role
+// the guard read (services.WithExpectedRole), so a promotion landing
+// between the read and the write refuses the write instead of letting a
+// lower tier modify a user it now ranks below. A nil or role-less
+// snapshot sets no condition.
+func expectTargetRole(ctx context.Context, previous *iface.UserManagementResponse) context.Context {
+	if previous == nil || previous.Role == "" {
+		return ctx
+	}
+	return services.WithExpectedRole(ctx, previous.Role)
+}
+
+// targetChangedError is the answer to a write whose target changed role
+// after the target-tier guard read it.
+func targetChangedError() error {
+	return errcode.Conflict(errcode.UserTargetChanged,
+		"The user's role changed while the request was processed. Reload the user and retry.")
 }
 
 // isPrivilegedSystemRole reports whether a role is a privileged system role

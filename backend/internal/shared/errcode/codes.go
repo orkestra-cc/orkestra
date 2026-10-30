@@ -326,6 +326,13 @@ const UserRoleLookupUnavailable = "user.role_lookup_unavailable"
 // code "user.target_tier_forbidden"; HTTP 403.
 const UserTargetTierForbidden = "user.target_tier_forbidden"
 
+// UserTargetChanged signals that the target's system role changed between
+// the target-tier guard's read and the write it guarded (a concurrent
+// promotion or demotion): the write is refused rather than applied to a
+// user the guard did not check. Wire code "user.target_changed"; HTTP 409.
+// The caller reloads the user and retries.
+const UserTargetChanged = "user.target_changed"
+
 // --- marketing ---
 
 // MarketingCardCodeCollision signals that the card-emit path

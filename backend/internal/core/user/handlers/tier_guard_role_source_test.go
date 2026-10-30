@@ -605,3 +605,60 @@ func TestUpdateClientUserAdmin_DevTokenCallerIsInertWhenProductionLike(t *testin
 		t.Errorf("target role = %q, want it unchanged", got)
 	}
 }
+
+// --- write bound to the guarded role ---------------------------------
+
+// The write that follows the target-tier guard carries the role the guard
+// read, so a promotion landing in between refuses it (409) instead of
+// letting a manager modify the user it now ranks below.
+func TestUpdateUser_WriteIsBoundToTheGuardedRole(t *testing.T) {
+	t.Parallel()
+	users := newUserStore(nil)
+	users.seed("actor-1", "manager")
+	users.seed("op-1", "operator")
+	write := users.svc.updateUserFn
+	var bound string
+	users.svc.updateUserFn = func(ctx context.Context, id string, in *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+		bound = services.ExpectedRole(ctx)
+		return write(ctx, id, in)
+	}
+	h := NewUserHandler(users.svc)
+
+	if _, err := h.UpdateUser(claimCtx("actor-1", "manager"), &UpdateUserRequest{
+		ID: "op-1", Body: iface.UpdateUserInput{FullName: "Renamed"},
+	}); err != nil {
+		t.Fatalf("a manager renaming an operator must pass: %v", err)
+	}
+	if bound != "operator" {
+		t.Errorf("write precondition = %q, want the guarded role %q", bound, "operator")
+	}
+
+	users.svc.updateUserFn = func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+		return nil, services.ErrTargetRoleChanged
+	}
+	_, err := h.UpdateUser(claimCtx("actor-1", "manager"), &UpdateUserRequest{
+		ID: "op-1", Body: iface.UpdateUserInput{FullName: "Again"},
+	})
+	assertStatus(t, err, http.StatusConflict)
+	assertErrCode(t, err, errcode.UserTargetChanged)
+}
+
+func TestDeleteUser_WriteIsBoundToTheGuardedRole(t *testing.T) {
+	t.Parallel()
+	users := newUserStore(nil)
+	users.seed("actor-1", "manager")
+	users.seed("op-1", "operator")
+	var bound string
+	users.svc.softDeleteAndAliasFn = func(ctx context.Context, _ string) error {
+		bound = services.ExpectedRole(ctx)
+		return services.ErrTargetRoleChanged
+	}
+	h := NewUserHandler(users.svc)
+
+	_, err := h.DeleteUser(claimCtx("actor-1", "manager"), &DeleteUserRequest{ID: "op-1"})
+	assertStatus(t, err, http.StatusConflict)
+	assertErrCode(t, err, errcode.UserTargetChanged)
+	if bound != "operator" {
+		t.Errorf("delete precondition = %q, want the guarded role %q", bound, "operator")
+	}
+}

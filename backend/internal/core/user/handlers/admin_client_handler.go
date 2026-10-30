@@ -375,10 +375,12 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 		Role:     req.Body.Role,
 		IsActive: req.Body.IsActive,
 	}
-	if _, err := h.clientUserService.UpdateUser(ctx, req.ID, input); err != nil {
+	if _, err := h.clientUserService.UpdateUser(expectTargetRole(ctx, previous), req.ID, input); err != nil {
 		switch {
 		case errors.Is(err, services.ErrUserNotFound):
 			return nil, huma.Error404NotFound("Client user not found", err)
+		case errors.Is(err, services.ErrTargetRoleChanged):
+			return nil, targetChangedError()
 		case errors.Is(err, services.ErrEmailNotUnique):
 			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case errors.Is(err, services.ErrInvalidInput):
@@ -521,9 +523,12 @@ func (h *AdminClientUserHandler) DeleteClientUserAdmin(ctx context.Context, req 
 	if _, err := guardTargetTier(ctx, h, previous, previousErr, "client_user", "user.delete.refused", req.ID, "delete", ""); err != nil {
 		return nil, err
 	}
-	if err := h.clientUserService.SoftDeleteAndAliasEmail(ctx, req.ID); err != nil {
+	if err := h.clientUserService.SoftDeleteAndAliasEmail(expectTargetRole(ctx, previous), req.ID); err != nil {
 		if errors.Is(err, services.ErrInvalidInput) {
 			return nil, huma.Error400BadRequest("Invalid user id", err)
+		}
+		if errors.Is(err, services.ErrTargetRoleChanged) {
+			return nil, targetChangedError()
 		}
 		return nil, huma.Error500InternalServerError("Failed to delete client user", err)
 	}
