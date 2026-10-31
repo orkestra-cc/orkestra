@@ -457,14 +457,14 @@ type Attachment struct {
 const FailureAttachmentRejected = "attachment_rejected"
 
 // FailureTransient classifies a send that provably did NOT reach the
-// provider's queue and is expected to clear on its own: a throttling or
-// gateway answer (HTTP 429/502/503/504), an SMTP 4xx temporary rejection, a
-// connection that was never established, or a store the send depends on
-// (opt-out list, unsubscribe tokens, sender config) briefly unreadable. A
-// caller may retry it under a NEW idempotency key — the failed attempt's key
-// replays the failure. Ambiguous outcomes (a timeout or a 500 after the
-// request was written) are deliberately not transient: the provider may have
-// accepted the message, and a retry could deliver it twice.
+// provider's queue and is expected to clear on its own: an HTTP 429 or 503
+// from the vendor itself, an SMTP 4xx temporary rejection, a connection that
+// was never established, or a store the send depends on (opt-out list,
+// unsubscribe tokens, sender config) briefly unreadable. A caller may retry
+// it under a NEW idempotency key — the failed attempt's key replays the
+// failure. Ambiguous outcomes are deliberately not transient: after a
+// timeout, an HTTP 500 or a gateway 502/504 the provider may have accepted
+// the message, and a retry could deliver it twice.
 const FailureTransient = "transient"
 
 type NotificationRequest struct {

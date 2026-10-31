@@ -20,9 +20,11 @@ func TestIsTransientSendFailure(t *testing.T) {
 		want bool
 	}{
 		{"http 429", vendorEnvelopeError("smtp2go", 429, "error", ""), true},
-		{"http 502", vendorBodyError("smtp2go", 502, bodyUnparseable, 10, "text/html"), true},
+		// A gateway 502/504 can come back AFTER the vendor accepted the
+		// message: retrying it could deliver twice, so it is final.
+		{"http 502 is ambiguous", vendorBodyError("smtp2go", 502, bodyUnparseable, 10, "text/html"), false},
 		{"http 503", vendorEnvelopeError("smtp2go", 503, "error", ""), true},
-		{"http 504", vendorBodyError("smtp2go", 504, bodyTooLarge, 0, ""), true},
+		{"http 504 is ambiguous", vendorBodyError("smtp2go", 504, bodyTooLarge, 0, ""), false},
 		{"http 500 is ambiguous", vendorEnvelopeError("smtp2go", 500, "error", ""), false},
 		{"http 400 is a verdict", vendorEnvelopeError("smtp2go", 400, "error", "E_ApiResponseCodes.ENDPOINT_PERMISSION_DENIED"), false},
 		{"http 401", vendorEnvelopeError("smtp2go", 401, "error", ""), false},

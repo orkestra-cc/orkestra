@@ -298,8 +298,11 @@ func isTransientSendFailure(err error) bool {
 	}
 	switch {
 	case se.HTTP > 0:
+		// 429 and 503 are the vendor itself refusing the request. A gateway
+		// 502/504 can come back after the vendor accepted the message, so
+		// it stays final like a 500.
 		switch se.HTTP {
-		case 429, 502, 503, 504:
+		case 429, 503:
 			return true
 		}
 		return false
