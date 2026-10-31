@@ -7,6 +7,7 @@ import { useUpdateCurrentUserMutation } from 'store/api/authApi';
 import { useAppSelector } from 'store/hooks';
 import { selectUser } from 'store/slices/authSlice';
 import { createCookie } from 'helpers/utils';
+import { config } from 'config/environment';
 
 // Phase 5 — Language picker in user preferences.
 //
@@ -14,7 +15,7 @@ import { createCookie } from 'helpers/utils';
 // PATCHes /v1/auth/operator/me. On failure we revert both sides and
 // surface a toast. useLanguageSync stays the source of truth on
 // subsequent loads (driven by the persisted user.language).
-const LANG_COOKIE_NAME = 'orkestra_admin_lang';
+const LANG_COOKIE_NAME = config.langCookieName;
 const LANG_COOKIE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const SUPPORTED_LANGUAGES = ['en', 'it'] as const;

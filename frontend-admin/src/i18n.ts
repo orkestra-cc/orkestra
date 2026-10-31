@@ -11,6 +11,7 @@
 import i18n from 'i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import { initReactI18next } from 'react-i18next';
+import { config } from 'config/environment';
 
 import en from './locales/en.json';
 import it from './locales/it.json';
@@ -35,7 +36,9 @@ void i18n
       caches: ['cookie'],
       // Distinct from the client SPA's `orkestra_client_lang` so the
       // two surfaces can diverge per browser without bleeding state.
-      lookupCookie: 'orkestra_admin_lang',
+      // `orkestra_admin_lang` unless the runtime config names another
+      // (a second stack on the host, so side-by-side consoles stay independent).
+      lookupCookie: config.langCookieName,
       cookieMinutes: 60 * 24 * 30
     }
   });
