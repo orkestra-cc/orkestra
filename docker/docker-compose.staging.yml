@@ -82,10 +82,13 @@ services:
 
       # Cookie Configuration (production-like)
       COOKIE_SECRET: ${COOKIE_SECRET}
-      # Refresh-cookie name — the only cookie set in the browser (the access
-      # token lives in SPA memory, so there is no access-token cookie).
-      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
-      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-orkestra_did}
+      # Cookie names. Two stacks on one host share cookies by name, whatever
+      # their ports, so each sets its own COOKIE_NAME_PREFIX (default
+      # orkestra_); the explicit names below override single cookies and
+      # default, empty, to the prefixed name.
+      COOKIE_NAME_PREFIX: ${COOKIE_NAME_PREFIX:-}
+      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-}
+      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Set
       # OPERATOR_COOKIE_DOMAIN to console.<env>.orkestra.cc and
       # CLIENT_COOKIE_DOMAIN to api.<env>.orkestra.cc. An empty value mints
@@ -316,6 +319,8 @@ services:
       APP_NAME: ${APP_NAME:-orkestra}
       ORKESTRA_CLONE_VERSION: ${ORKESTRA_CLONE_VERSION:-dev}
       ORKESTRA_BUILD_COMMIT: ${ORKESTRA_BUILD_COMMIT:-}
+      # The console's cookies follow the backend's prefix.
+      ORKESTRA_COOKIE_PREFIX: ${COOKIE_NAME_PREFIX:-}
       NODE_OPTIONS: "--max-old-space-size=4096"
       npm_config_cache: /app/.npm-cache
     volumes:
@@ -355,7 +360,8 @@ services:
           appName: "$${APP_NAME}",
           cloneVersion: "$${ORKESTRA_CLONE_VERSION}",
           buildCommit: "$${ORKESTRA_BUILD_COMMIT}",
-          startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')"
+          startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')",
+          cookiePrefix: "$${ORKESTRA_COOKIE_PREFIX}"
         };
         EOF
         npm install && npm run dev -- --host 0.0.0.0

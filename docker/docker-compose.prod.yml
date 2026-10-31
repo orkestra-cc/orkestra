@@ -69,10 +69,13 @@ services:
 
       # Cookie Configuration (maximum security)
       COOKIE_SECRET: ${COOKIE_SECRET}
-      # Refresh-cookie name — the only cookie set in the browser (the access
-      # token lives in SPA memory, so there is no access-token cookie).
-      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
-      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-orkestra_did}
+      # Cookie names. Two stacks on one host share cookies by name, whatever
+      # their ports, so each sets its own COOKIE_NAME_PREFIX (default
+      # orkestra_); the explicit names below override single cookies and
+      # default, empty, to the prefixed name.
+      COOKIE_NAME_PREFIX: ${COOKIE_NAME_PREFIX:-}
+      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-}
+      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Operators
       # MUST set both — an empty value mints the cookie without a Domain
       # attribute (scoped to the minting host). The host mux already rejects
@@ -247,6 +250,8 @@ services:
       ORKESTRA_APP_NAME: ${APP_NAME:-orkestra}
       ORKESTRA_CLONE_VERSION: ${ORKESTRA_CLONE_VERSION:-dev}
       ORKESTRA_BUILD_COMMIT: ${ORKESTRA_BUILD_COMMIT:-}
+      # The console's cookies follow the backend's prefix.
+      ORKESTRA_COOKIE_PREFIX: ${COOKIE_NAME_PREFIX:-}
     container_name: ${APP_NAME}-frontend-admin-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}

@@ -28,10 +28,23 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/config"
 )
 
-// OAuthStateCookieName carries the per-flow CSRF nonce.
+// OAuthStateCookieName is the default name of the cookie carrying the
+// per-flow CSRF nonce; COOKIE_NAME_PREFIX renames it (see
+// oauthStateCookieName).
 const OAuthStateCookieName = "orkestra_oauth_state"
+
+// oauthStateCookieName is the state cookie's configured name. Two stacks on
+// one host share cookies by name whatever their ports, so each names its
+// own; a config that names none keeps the default.
+func oauthStateCookieName(cfg *config.Config) string {
+	if cfg != nil && cfg.Auth.Cookie.OAuthStateName != "" {
+		return cfg.Auth.Cookie.OAuthStateName
+	}
+	return OAuthStateCookieName
+}
 
 // oauthStateCookieMaxAge matches the 10-minute state TTL. A stale cookie
 // is worthless anyway once the Redis row expires.
@@ -46,9 +59,9 @@ var ErrOAuthStateNotBound = errors.New("oauth state is not bound to this browser
 // buildOAuthStateCookie renders the Set-Cookie value for a starting
 // flow. Lax rather than Strict: the callback arrives as a top-level
 // redirect from the identity provider, which Strict would suppress.
-func buildOAuthStateCookie(csrf string, secure bool) string {
+func buildOAuthStateCookie(name, csrf string, secure bool) string {
 	c := &http.Cookie{
-		Name:     OAuthStateCookieName,
+		Name:     name,
 		Value:    csrf,
 		Path:     "/",
 		MaxAge:   oauthStateCookieMaxAge,
@@ -61,9 +74,9 @@ func buildOAuthStateCookie(csrf string, secure bool) string {
 
 // clearOAuthStateCookie renders the Set-Cookie that evicts the nonce
 // once a flow completes, so a second callback cannot reuse it.
-func clearOAuthStateCookie(secure bool) string {
+func clearOAuthStateCookie(name string, secure bool) string {
 	c := &http.Cookie{
-		Name:     OAuthStateCookieName,
+		Name:     name,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -88,7 +101,7 @@ func clearOAuthStateCookie(secure bool) string {
 // cookie is missing or names another flow. A cross-host callback is never
 // simply accepted: before v4.3 it was, which made the "exception" the client
 // tier's normal path and left login CSRF open there.
-func verifyOAuthStateBinding(r *http.Request, claims *services.OAuthStateClaims) (deferred bool, err error) {
+func verifyOAuthStateBinding(r *http.Request, cookieName string, claims *services.OAuthStateClaims) (deferred bool, err error) {
 	if claims == nil || claims.CSRF == "" {
 		return false, ErrOAuthStateNotBound
 	}
@@ -104,7 +117,7 @@ func verifyOAuthStateBinding(r *http.Request, claims *services.OAuthStateClaims)
 		return true, nil
 	}
 
-	cookie, cerr := r.Cookie(OAuthStateCookieName)
+	cookie, cerr := r.Cookie(cookieName)
 	if cerr != nil || cookie.Value == "" {
 		return false, fmt.Errorf("%w: no state cookie presented on the starting host", ErrOAuthStateNotBound)
 	}
@@ -119,11 +132,11 @@ func verifyOAuthStateBinding(r *http.Request, claims *services.OAuthStateClaims)
 // verifyRelayBinding is the relay endpoint's check: it runs on the host
 // that set the state cookie at start, so the cookie is REQUIRED and must
 // equal the relay record's nonce. Fails closed on every other shape.
-func verifyRelayBinding(r *http.Request, csrf string) error {
+func verifyRelayBinding(r *http.Request, cookieName, csrf string) error {
 	if csrf == "" {
 		return ErrOAuthStateNotBound
 	}
-	cookie, err := r.Cookie(OAuthStateCookieName)
+	cookie, err := r.Cookie(cookieName)
 	if err != nil || cookie.Value == "" {
 		return fmt.Errorf("%w: no state cookie presented to the relay", ErrOAuthStateNotBound)
 	}

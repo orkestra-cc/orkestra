@@ -129,11 +129,75 @@ func TestValidateRejectsInvalidDeviceCookieName(t *testing.T) {
 			t.Errorf("DeviceName %q: want an error naming DEVICE_COOKIE_NAME, got %v", bad, err)
 		}
 	}
-	for _, ok := range []string{"", "orkestra_did", "owt_0a1b-2c3d_did", "a.b!c~"} {
+	for _, ok := range []string{"", "orkestra_did", "stack-2_did", "a.b!c~"} {
 		c := &Config{}
 		c.Auth.Cookie.DeviceName = ok
 		if err := c.Validate(); err != nil && strings.Contains(err.Error(), "DEVICE_COOKIE_NAME") {
 			t.Errorf("DeviceName %q must be valid, got %v", ok, err)
+		}
+	}
+}
+
+// Two stacks on one host share every cookie by name, so COOKIE_NAME_PREFIX
+// names them all at once; unset, the names are the historical ones.
+func TestCookieNamesDefaultToTheOrkestraPrefix(t *testing.T) {
+	for _, key := range []string{"COOKIE_NAME_PREFIX", "COOKIE_NAME_REFRESH", "DEVICE_COOKIE_NAME"} {
+		t.Setenv(key, "")
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c := cfg.Auth.Cookie
+	if c.Name != "orkestra_cookie" || c.DeviceName != "orkestra_did" || c.OAuthStateName != "orkestra_oauth_state" {
+		t.Errorf("names = %q, %q, %q; want orkestra_cookie, orkestra_did, orkestra_oauth_state",
+			c.Name, c.DeviceName, c.OAuthStateName)
+	}
+}
+
+func TestCookieNamePrefixNamesEveryCookie(t *testing.T) {
+	t.Setenv("COOKIE_NAME_PREFIX", "stack-2_")
+	t.Setenv("COOKIE_NAME_REFRESH", "")
+	t.Setenv("DEVICE_COOKIE_NAME", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c := cfg.Auth.Cookie
+	if c.Name != "stack-2_cookie" || c.DeviceName != "stack-2_did" || c.OAuthStateName != "stack-2_oauth_state" {
+		t.Errorf("names = %q, %q, %q; want every name under the prefix", c.Name, c.DeviceName, c.OAuthStateName)
+	}
+}
+
+func TestExplicitCookieNamesOverrideThePrefix(t *testing.T) {
+	t.Setenv("COOKIE_NAME_PREFIX", "stack2_")
+	t.Setenv("COOKIE_NAME_REFRESH", "custom_rt")
+	t.Setenv("DEVICE_COOKIE_NAME", "custom_did")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c := cfg.Auth.Cookie
+	if c.Name != "custom_rt" || c.DeviceName != "custom_did" || c.OAuthStateName != "stack2_oauth_state" {
+		t.Errorf("names = %q, %q, %q; want the explicit names and the prefixed state cookie",
+			c.Name, c.DeviceName, c.OAuthStateName)
+	}
+}
+
+func TestValidateRejectsInvalidCookieNamePrefix(t *testing.T) {
+	for _, bad := range []string{"bad prefix_", "a;b_", "a=b_", `q"_`, "a!b_", "a~b_"} {
+		c := &Config{}
+		c.Auth.Cookie.Prefix = bad
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "COOKIE_NAME_PREFIX") {
+			t.Errorf("Prefix %q: want an error naming COOKIE_NAME_PREFIX, got %v", bad, err)
+		}
+	}
+	for _, ok := range []string{"", "orkestra_", "stack-2_", "stack.2_"} {
+		c := &Config{}
+		c.Auth.Cookie.Prefix = ok
+		if err := c.Validate(); err != nil && strings.Contains(err.Error(), "COOKIE_NAME_PREFIX") {
+			t.Errorf("Prefix %q must be valid, got %v", ok, err)
 		}
 	}
 }

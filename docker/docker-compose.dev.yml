@@ -58,10 +58,13 @@ services:
 
       # Cookie Configuration
       COOKIE_SECRET: ${COOKIE_SECRET}
-      # Refresh-cookie name — the only cookie set in the browser (the access
-      # token lives in SPA memory, so there is no access-token cookie).
-      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
-      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-orkestra_did}
+      # Cookie names. Two stacks on one host share cookies by name, whatever
+      # their ports, so each sets its own COOKIE_NAME_PREFIX (default
+      # orkestra_); the explicit names below override single cookies and
+      # default, empty, to the prefixed name.
+      COOKIE_NAME_PREFIX: ${COOKIE_NAME_PREFIX:-}
+      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-}
+      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Default EMPTY
       # in dev so the cookie is host-only (no Domain attribute), scoped to
       # whatever host minted it — which round-trips on localhost, *.localhost,
@@ -278,6 +281,8 @@ services:
       APP_NAME: ${APP_NAME:-orkestra}
       ORKESTRA_CLONE_VERSION: ${ORKESTRA_CLONE_VERSION:-dev}
       ORKESTRA_BUILD_COMMIT: ${ORKESTRA_BUILD_COMMIT:-}
+      # The console's cookies follow the backend's prefix.
+      ORKESTRA_COOKIE_PREFIX: ${COOKIE_NAME_PREFIX:-}
       NODE_OPTIONS: "--max-old-space-size=4096"
       # npm's cache defaults to ~/.npm in the image FS, which is unwritable
       # under a userns-remap daemon + userns_mode:host (image layers are
@@ -315,7 +320,8 @@ services:
           appName: "$${APP_NAME}",
           cloneVersion: "$${ORKESTRA_CLONE_VERSION}",
           buildCommit: "$${ORKESTRA_BUILD_COMMIT}",
-          startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')"
+          startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')",
+          cookiePrefix: "$${ORKESTRA_COOKIE_PREFIX}"
         };
         EOF
         sh /opt/orkestra/frontend-deps.sh && npm run dev -- --host 0.0.0.0

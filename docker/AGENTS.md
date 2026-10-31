@@ -150,7 +150,8 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | Boot identity (`APP_NAME`, `ENV`, `PORT`, host/port mappings) | process | ✅ yes |
 | Database connections (`MONGO_URI`, `REDIS_URL`, credentials) | process | ✅ yes |
 | JWT keys, cookies, CORS, rate limits, observability | process | ✅ yes |
-| `COOKIE_NAME_REFRESH` / `DEVICE_COOKIE_NAME` | process — refresh and device-id cookie names (defaults `orkestra_cookie`, `orkestra_did`). Cookies are shared by name across ports on one host, so stacks sharing a host set distinct values; `DEVICE_COOKIE_NAME` must be an RFC 6265 token or `config.Validate()` refuses to boot. | ✅ yes |
+| `COOKIE_NAME_PREFIX` | process — prefix of every cookie name (default `orkestra_`): refresh (`cookie`), device (`did`), OAuth state (`oauth_state`) and, through `config.js` `cookiePrefix`, the console's language cookie (`admin_lang`). Cookies are shared by name across ports on one host, so stacks sharing a host set distinct prefixes. Letters, digits, `.`, `_` and `-` only, or `config.Validate()` refuses to boot. | ✅ yes |
+| `COOKIE_NAME_REFRESH` / `DEVICE_COOKIE_NAME` | process — single-cookie overrides; empty means the prefix + `cookie` / `did`. An explicit value wins over the prefix, so a `docker/.env` that still carries the old example's `COOKIE_NAME_REFRESH=orkestra_cookie` keeps that name when `COOKIE_NAME_PREFIX` is set: delete the line. `DEVICE_COOKIE_NAME` must be an RFC 6265 token or `config.Validate()` refuses to boot. | ✅ yes |
 | `LOKI_QUERY_URL` / `GRAFANA_URL` | process — trusted Tier-1 log-preview upstream + optional browser deep-link base; never derived from request data | ✅ yes |
 | Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, `LLM_SECRET_ENCRYPTION_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService; the LLM key seals provider credentials when no KMS is wired (ADR-0022); the backend boots without it (a missing/malformed key only disables secret writes, WARN) but staging/production `env-validate` refuses a missing, placeholder or non-64-hex key | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |
@@ -185,11 +186,11 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 | HTTPS Required | No | Yes | Yes |
 | Observability | Disabled | Enabled | Enabled |
 
-> **`COOKIE_SAME_SITE` is a dead key.** `config.go:339` reads it into
+> **`COOKIE_SAME_SITE` is a dead key.** `config.go:383` reads it into
 > `CookieConfig.SameSite` and nothing ever reads it back — every mint path writes
-> `http.SameSiteLaxMode` as a Go literal (`utils/http.go:62,77,127,150`,
-> `middleware/device.go:68`, `setup/routes.go:442`,
-> `oauth_state_binding.go:56,71`, `password_handler.go:421`). So the SameSite row
+> `http.SameSiteLaxMode` as a Go literal (`utils/http.go:62,77`,
+> `middleware/device.go:75`, `setup/routes.go:440`,
+> `oauth_state_binding.go:70,85`, `password_handler.go:532`). So the SameSite row
 > above is `lax` in all three columns, and there is **no configuration path to
 > `SameSite=None`** without a code change. Do not reach for this key to fix a
 > cross-site cookie problem — fix the host layout instead (below).
@@ -461,9 +462,9 @@ The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) indexes
 
 `CLIENT_API_HOST` is not a free choice. Every client-tier cookie the backend mints
 is `SameSite=Lax` with an **empty `Domain`** (host-only) — the refresh cookie
-(`password_handler.go:411-424`, `utils/http.go:53-64`), the OAuth state cookie
-(`oauth_state_binding.go:56,71`) and the device cookie
-(`middleware/device.go:61-69`). A `SameSite=Lax` cookie is neither stored from nor
+(`password_handler.go:522-535`, `utils/http.go:53-64`), the OAuth state cookie
+(`oauth_state_binding.go:70,85`) and the device cookie
+(`middleware/device.go:68-76`). A `SameSite=Lax` cookie is neither stored from nor
 sent on a **cross-site** subresource request, and the client SPA reaches its API
 exclusively through `fetch(..., {credentials: "include"})`.
 

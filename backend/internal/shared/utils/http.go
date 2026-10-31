@@ -114,43 +114,6 @@ func GetAllRefreshTokensFromCookies(r *http.Request, cookieName string) []string
 	return out
 }
 
-// SetStateCookie sets a secure OAuth state cookie
-func SetStateCookie(w http.ResponseWriter, state string, domain string, secure bool) {
-	SetSecureCookie(w, &CookieOptions{
-		Name:     "oauth_state",
-		Value:    state,
-		Path:     "/auth",
-		Domain:   domain,
-		MaxAge:   600, // 10 minutes
-		Secure:   secure,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, // Allow cross-site for OAuth redirects
-	})
-}
-
-// GetStateFromCookie extracts OAuth state from HTTP cookie
-func GetStateFromCookie(r *http.Request) (string, error) {
-	cookie, err := r.Cookie("oauth_state")
-	if err != nil {
-		return "", fmt.Errorf("OAuth state cookie not found: %w", err)
-	}
-	return cookie.Value, nil
-}
-
-// ClearStateCookie clears the OAuth state cookie
-func ClearStateCookie(w http.ResponseWriter, domain string, secure bool) {
-	SetSecureCookie(w, &CookieOptions{
-		Name:     "oauth_state",
-		Value:    "",
-		Path:     "/auth",
-		Domain:   domain,
-		MaxAge:   -1,
-		Secure:   secure,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
-}
-
 // Token extraction utilities
 
 // ExtractBearerToken extracts Bearer token from Authorization header
