@@ -189,3 +189,32 @@ func TestMongo_OptoutDeleteIfAtLegacyRowWithoutLastAt(t *testing.T) {
 		t.Fatalf("legacy row deletable by at: ok=%v err=%v", ok, err)
 	}
 }
+
+// A real E11000 cannot be forced deterministically, so this races writers on
+// one new address: none may fail, and because the loser retries, the final
+// lastAt is the maximum of all of them whichever writer won the insert.
+func TestMongo_OptoutUpsertConcurrentWritersConverge(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+	base := time.UnixMilli(1_700_000_000_000)
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			errs <- repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "race@example.test", At: base.Add(time.Duration(i) * time.Second)})
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("a racing writer failed: %v", err)
+		}
+	}
+	got, err := repo.Get(ctx, "race@example.test")
+	if err != nil || got == nil {
+		t.Fatalf("Get: %v %v", got, err)
+	}
+	if want := base.Add((n - 1) * time.Second); !got.LastAt.Equal(want) {
+		t.Fatalf("lastAt = %v, want the maximum %v", got.LastAt, want)
+	}
+}

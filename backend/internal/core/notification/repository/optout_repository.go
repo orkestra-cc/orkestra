@@ -51,35 +51,44 @@ func (r *marketingOptoutRepo) Upsert(ctx context.Context, doc models.MarketingOp
 	if addr == "" {
 		return nil
 	}
-	//tenantscope:allow system: opt-outs are keyed by address and apply platform-wide — a recipient does not opt out one tenant at a time, and scoping this per tenant would make the opt-out trivially bypassable
-	_, err := r.col().UpdateOne(ctx,
-		bson.M{"address": addr},
-		bson.M{
-			"$setOnInsert": bson.M{
-				"address":         addr,
-				"category":        doc.Category,
-				"at":              doc.At,
-				"sourceTokenUuid": doc.SourceTokenUUID,
+	update := func() error {
+		//tenantscope:allow system: opt-outs are keyed by address and apply platform-wide — a recipient does not opt out one tenant at a time, and scoping this per tenant would make the opt-out trivially bypassable
+		_, err := r.col().UpdateOne(ctx,
+			bson.M{"address": addr},
+			bson.M{
+				"$setOnInsert": bson.M{
+					"address":         addr,
+					"category":        doc.Category,
+					"at":              doc.At,
+					"sourceTokenUuid": doc.SourceTokenUUID,
+				},
+				"$set": bson.M{
+					"tenantId":      doc.TenantID,
+					"sourceContext": doc.SourceContext,
+				},
+				"$max": bson.M{"lastAt": doc.At},
 			},
-			"$set": bson.M{
-				"tenantId":      doc.TenantID,
-				"sourceContext": doc.SourceContext,
-			},
-			"$max": bson.M{"lastAt": doc.At},
-		},
-		options.Update().SetUpsert(true),
-	)
+			options.Update().SetUpsert(true),
+		)
+		return err
+	}
+	err := update()
 	if err != nil && mongo.IsDuplicateKeyError(err) {
 		// The unique address index (module.go's Collections()) means this
-		// UpdateOne+$setOnInsert+upsert does not converge silently under
-		// concurrency: two callers racing the same address can both miss
-		// the filter and both attempt the insert, and the loser lands here
-		// with E11000. That loser's desired state — an opt-out document
-		// exists for this address — is already true, because the winner
-		// just created it. Treat it as success: the public one-click
-		// unsubscribe endpoint built on this must render its generic
-		// response, never a 5xx, on a race it did nothing wrong to cause.
-		return nil
+		// UpdateOne+upsert does not converge silently under concurrency: two
+		// callers racing the same new address can both miss the filter and
+		// both attempt the insert, and the loser lands here with E11000. The
+		// winner just created the row, so the loser's opt-out fact is already
+		// true, but its $set/$max did not run. Retry once: the filter now
+		// matches the winner's row, so lastAt and the attribution of the
+		// later writer apply to it. A second E11000 is still a success (the
+		// row exists); the public one-click unsubscribe endpoint built on
+		// this must render its generic response, never a 5xx, on a race it
+		// did nothing wrong to cause.
+		err = update()
+		if err != nil && mongo.IsDuplicateKeyError(err) {
+			return nil
+		}
 	}
 	return err
 }

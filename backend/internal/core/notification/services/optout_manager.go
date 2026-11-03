@@ -67,7 +67,7 @@ func (m *optoutManager) LookupMarketingOptout(ctx context.Context, address strin
 		case !errors.Is(terr, repository.ErrNotFound):
 			// Attribution is best effort: the opt-out itself is the answer.
 			m.logger.Warn("notification: opt-out source token not readable",
-				slog.String("tokenUuid", doc.SourceTokenUUID), slog.String("error", scrubAddress(terr.Error(), address)))
+				slog.String("error", scrubAddress(terr.Error(), address)))
 		}
 	}
 	return info, nil
