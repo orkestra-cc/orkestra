@@ -731,8 +731,11 @@ func (s *NotificationService) failSend(ctx context.Context, logDoc *models.Notif
 	logDoc.Error = de.Reason
 	// The classified cause rides beside the bounded Error so the idempotent
 	// replay can return it (NotificationResult.FailureReason).
-	if errors.Is(err, ErrAttachmentRejected) {
+	switch {
+	case errors.Is(err, ErrAttachmentRejected):
 		logDoc.FailureReason = iface.FailureAttachmentRejected
+	case isTransientSendFailure(err):
+		logDoc.FailureReason = iface.FailureTransient
 	}
 	_ = s.logRepo.Create(ctx, logDoc)
 	s.logger.Warn("notification: send failed",

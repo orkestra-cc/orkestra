@@ -456,6 +456,17 @@ type Attachment struct {
 // message log and returned again by an idempotent replay.
 const FailureAttachmentRejected = "attachment_rejected"
 
+// FailureTransient classifies a send that provably did NOT reach the
+// provider's queue and is expected to clear on its own: an HTTP 429 or 503
+// from the vendor itself, an SMTP 4xx temporary rejection, a connection that
+// was never established, or a store the send depends on (opt-out list,
+// unsubscribe tokens, sender config) briefly unreadable. A caller may retry
+// it under a NEW idempotency key — the failed attempt's key replays the
+// failure. Ambiguous outcomes are deliberately not transient: after a
+// timeout, an HTTP 500 or a gateway 502/504 the provider may have accepted
+// the message, and a retry could deliver it twice.
+const FailureTransient = "transient"
+
 type NotificationRequest struct {
 	Channel        string
 	Type           string // "transactional" | "marketing"
