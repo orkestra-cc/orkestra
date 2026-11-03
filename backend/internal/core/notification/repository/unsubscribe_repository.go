@@ -17,6 +17,9 @@ import (
 type UnsubscribeRepository interface {
 	Create(ctx context.Context, doc *models.UnsubscribeTokenDoc) error
 	GetByHash(ctx context.Context, hash string) (*models.UnsubscribeTokenDoc, error)
+	// GetByUUID reads a token by its uuid (ErrNotFound when gone or expired
+	// away). It is never reachable from a token an anonymous client holds.
+	GetByUUID(ctx context.Context, uuid string) (*models.UnsubscribeTokenDoc, error)
 
 	// ClaimToken is the consuming read: it decides, atomically, which of two
 	// concurrent clicks gets to consume the token, and marks the work that
@@ -67,6 +70,19 @@ func (r *unsubscribeRepository) GetByHash(ctx context.Context, hash string) (*mo
 	var doc models.UnsubscribeTokenDoc
 	//tenantscope:allow system: an unsubscribe token is keyed by its own hash and arrives from an anonymous mail client following a link — there is no tenant in the request context, and scoping this read by one would make a valid unsubscribe look unknown
 	err := r.coll.FindOne(ctx, bson.M{"tokenHash": hash}).Decode(&doc)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+func (r *unsubscribeRepository) GetByUUID(ctx context.Context, uuid string) (*models.UnsubscribeTokenDoc, error) {
+	var doc models.UnsubscribeTokenDoc
+	//tenantscope:allow system: a token is addressed by its own uuid, which an opt-out document records for support; the row carries no tenant
+	err := r.coll.FindOne(ctx, bson.M{"uuid": uuid}).Decode(&doc)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrNotFound
 	}

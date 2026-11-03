@@ -107,3 +107,37 @@ func TestMongo_IsOptedOut(t *testing.T) {
 		})
 	}
 }
+
+func TestMongo_OptoutGetAndDeleteIfAt(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+
+	if d, err := repo.Get(ctx, "ada@example.test"); d != nil || err != nil {
+		t.Fatalf("Get on an empty collection = %v, %v; want nil, nil", d, err)
+	}
+	at := time.UnixMilli(1_700_000_000_000)
+	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "Ada@example.test", At: at, TenantID: "t1", SourceContext: "ctx-1"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, err := repo.Get(ctx, "  ADA@example.test ")
+	if err != nil || got == nil {
+		t.Fatalf("Get: %v %v", got, err)
+	}
+	if !got.At.Equal(at) || got.TenantID != "t1" || got.SourceContext != "ctx-1" {
+		t.Fatalf("unexpected doc: %+v", got)
+	}
+
+	if ok, err := repo.DeleteIfAt(ctx, "ada@example.test", at.Add(time.Millisecond)); err != nil || ok {
+		t.Fatalf("wrong instant: ok=%v err=%v", ok, err)
+	}
+	if d, _ := repo.Get(ctx, "ada@example.test"); d == nil {
+		t.Fatal("the row must be kept when the instant differs")
+	}
+	if ok, err := repo.DeleteIfAt(ctx, "ADA@example.test", got.At); err != nil || !ok {
+		t.Fatalf("right instant: ok=%v err=%v", ok, err)
+	}
+	if d, _ := repo.Get(ctx, "ada@example.test"); d != nil {
+		t.Fatal("the row must be gone")
+	}
+}

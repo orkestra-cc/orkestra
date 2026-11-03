@@ -7,6 +7,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -259,5 +260,23 @@ func TestMongo_PendingFlagsRoundTrip(t *testing.T) {
 	}
 	if stored.PrefPending {
 		t.Fatal("prefPending had to go down once the preference was written")
+	}
+}
+
+func TestMongo_UnsubscribeGetByUUID(t *testing.T) {
+	repo, done := newTestUnsubscribeRepo(t)
+	defer done()
+	ctx := context.Background()
+
+	if _, err := repo.GetByUUID(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown uuid: err = %v, want ErrNotFound", err)
+	}
+	doc := &models.UnsubscribeTokenDoc{UUID: "tok-1", TokenHash: "h1", Address: "ada@example.test", Context: "ref-1", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := repo.Create(ctx, doc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := repo.GetByUUID(ctx, "tok-1")
+	if err != nil || got.Context != "ref-1" || got.TokenHash != "h1" {
+		t.Fatalf("GetByUUID = %+v, %v", got, err)
 	}
 }

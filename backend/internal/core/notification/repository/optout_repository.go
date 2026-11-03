@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,6 +16,11 @@ import (
 type MarketingOptoutRepository interface {
 	Upsert(ctx context.Context, doc models.MarketingOptoutDoc) error
 	IsOptedOut(ctx context.Context, address, category string) (bool, error)
+	// Get returns the opt-out for an address, or (nil, nil) when none.
+	Get(ctx context.Context, address string) (*models.MarketingOptoutDoc, error)
+	// DeleteIfAt removes the opt-out only while it still carries instant at,
+	// so a lift never deletes an opt-out recorded again in the meantime.
+	DeleteIfAt(ctx context.Context, address string, at time.Time) (bool, error)
 }
 
 type marketingOptoutRepo struct{ db *mongo.Database }
@@ -49,6 +56,8 @@ func (r *marketingOptoutRepo) Upsert(ctx context.Context, doc models.MarketingOp
 				"category":        doc.Category,
 				"at":              doc.At,
 				"sourceTokenUuid": doc.SourceTokenUUID,
+				"tenantId":        doc.TenantID,
+				"sourceContext":   doc.SourceContext,
 			},
 		},
 		options.Update().SetUpsert(true),
@@ -87,4 +96,39 @@ func (r *marketingOptoutRepo) IsOptedOut(ctx context.Context, address, category 
 		return false, err
 	}
 	return n > 0, nil
+}
+
+// Get returns the stored opt-out, or (nil, nil) when the address has none.
+func (r *marketingOptoutRepo) Get(ctx context.Context, address string) (*models.MarketingOptoutDoc, error) {
+	addr := NormalizeOptoutAddress(address)
+	if addr == "" {
+		return nil, nil
+	}
+	var doc models.MarketingOptoutDoc
+	//tenantscope:allow system: same reason as Upsert — an opt-out is a platform-wide fact keyed by address, not a tenant one
+	err := r.col().FindOne(ctx, bson.M{"address": addr}).Decode(&doc)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+// DeleteIfAt deletes the row only when both the address and the opt-out
+// instant match, and reports whether it did. The instant is the guard: a
+// caller that read the opt-out, decided to lift it, and lost a race against a
+// fresh opt-out must not delete the newer fact.
+func (r *marketingOptoutRepo) DeleteIfAt(ctx context.Context, address string, at time.Time) (bool, error) {
+	addr := NormalizeOptoutAddress(address)
+	if addr == "" {
+		return false, nil
+	}
+	//tenantscope:allow system: same reason as Upsert — an opt-out is a platform-wide fact keyed by address, not a tenant one
+	res, err := r.col().DeleteOne(ctx, bson.M{"address": addr, "at": at})
+	if err != nil {
+		return false, err
+	}
+	return res.DeletedCount > 0, nil
 }

@@ -1711,6 +1711,37 @@ type MarketingUnsubscribeSinkSetter interface {
 	SetMarketingUnsubscribeSink(MarketingUnsubscribeSink)
 }
 
+// MarketingOptoutInfo is what LookupMarketingOptout reveals about a durable
+// marketing opt-out. It carries no address and no token.
+type MarketingOptoutInfo struct {
+	At            time.Time
+	TenantID      string // attribution only, "" when unknown
+	SourceContext string // producer context of the unsubscribe that created it, "" when unknown
+}
+
+// OptoutEvidence is the audit trail a caller supplies when it lifts or
+// records an opt-out.
+type OptoutEvidence struct {
+	TenantID  string // attribution stamped on a recorded opt-out, and on the audit event
+	Source    string // e.g. "crm.consent_request"
+	Reference string // e.g. a response uuid
+}
+
+// MarketingOptoutManager is the audited seam over the durable marketing
+// opt-out, for a consumer that collects consent itself. Resolved lazily via
+// module.ServiceMarketingOptoutManager. It never touches the suppression
+// list and never fires the MarketingUnsubscribeSink.
+type MarketingOptoutManager interface {
+	// LookupMarketingOptout returns (nil, nil) when the address has none.
+	LookupMarketingOptout(ctx context.Context, address string) (*MarketingOptoutInfo, error)
+	// LiftMarketingOptout deletes the opt-out only if it is still the one the
+	// caller saw (its instant equals expectAt) and reports whether it did.
+	LiftMarketingOptout(ctx context.Context, address string, expectAt time.Time, ev OptoutEvidence) (bool, error)
+	// RecordMarketingOptout records an opt-out the caller collected (no-op on
+	// an address that already has one).
+	RecordMarketingOptout(ctx context.Context, address string, ev OptoutEvidence) error
+}
+
 // TemplateView is a read projection of a notification template (campaign preview).
 type TemplateView struct {
 	TemplateID string

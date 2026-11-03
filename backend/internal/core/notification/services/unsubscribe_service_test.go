@@ -203,3 +203,7 @@ func TestIssueTokenStoresContext(t *testing.T) {
 		t.Fatalf("want context ctx-123, got %q", doc.Context)
 	}
 }
+
+func (f *fakeUnsubRepo) GetByUUID(context.Context, string) (*models.UnsubscribeTokenDoc, error) {
+	return nil, repository.ErrNotFound
+}
