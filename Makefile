@@ -471,8 +471,13 @@ ci-frontend-admin: admin-lockcheck admin-typecheck admin-lint admin-test admin-a
 admin-lockcheck:
 	@$(call npm-lockcheck,frontend-admin)
 
+# tsc peaks above Node's default heap on a CI runner (about 2 GB there, more
+# on a large host): pin 4 GB for the targets that run it (typecheck, and build
+# through `tsc && vite build`) so they behave the same on both.
+ADMIN_TSC_NODE_OPTIONS = NODE_OPTIONS="--max-old-space-size=4096 $${NODE_OPTIONS:-}"
+
 admin-typecheck:
-	@cd frontend-admin && npm run typecheck
+	@cd frontend-admin && $(ADMIN_TSC_NODE_OPTIONS) npm run typecheck
 
 admin-lint:
 	@cd frontend-admin && npx eslint src/ --ext .js,.jsx,.ts,.tsx --max-warnings 0
@@ -488,7 +493,7 @@ admin-audit:
 	@cd frontend-admin && npm audit --omit=dev --audit-level=high
 
 admin-build:
-	@cd frontend-admin && npm run build
+	@cd frontend-admin && $(ADMIN_TSC_NODE_OPTIONS) npm run build
 
 # ---- Frontend Client ----
 

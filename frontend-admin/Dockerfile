@@ -54,7 +54,9 @@ RUN cp -n public/config.example.js public/config.js
 RUN node postinstall.js
 
 # Build the application, and fail it if TinyMCE did not make it into dist/.
-RUN npm run build && test -f dist/tinymce/tinymce.min.js
+# The build's tsc peaks above Node's default heap on a CI runner (about 2 GB
+# there): pin 4 GB, as the Makefile's ADMIN_TSC_NODE_OPTIONS does.
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build && test -f dist/tinymce/tinymce.min.js
 
 # ============================================
 # Stage 2: Production
