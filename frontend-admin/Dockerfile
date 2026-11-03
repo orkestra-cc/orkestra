@@ -108,7 +108,8 @@ window.__ORKESTRA_CONFIG__ = {\n\
   appName: "${ORKESTRA_APP_NAME:-orkestra}",\n\
   cloneVersion: "${ORKESTRA_CLONE_VERSION:-dev}",\n\
   buildCommit: "${ORKESTRA_BUILD_COMMIT:-}",\n\
-  startedAt: "$(date -u +'\''%%Y-%%m-%%d %%H:%%MZ'\'')"\n\
+  startedAt: "$(date -u +'\''%%Y-%%m-%%d %%H:%%MZ'\'')",\n\
+  cookiePrefix: "${ORKESTRA_COOKIE_PREFIX:-}"\n\
 };\n\
 EOF\n\
 ' > /docker-entrypoint.d/10-write-config.sh \

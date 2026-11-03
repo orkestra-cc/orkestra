@@ -81,6 +81,20 @@ func TestInitiateOAuthLogin_UsableProviderStartsFlowFromResolvedConfig(t *testin
 	}
 }
 
+func TestInitiateOAuthLogin_StateCookieTakesTheConfiguredName(t *testing.T) {
+	hx := newCallbackHarness(t)
+	hx.operator.config.Auth.Cookie.OAuthStateName = "stack2_oauth_state"
+	req := &OAuthLoginRequest{}
+	req.Body.Provider = models.OAuthProviderGoogle
+	resp, err := hx.operator.InitiateOAuthLogin(startCtx("console.example"), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(resp.SetCookie, "stack2_oauth_state=") {
+		t.Fatalf("state cookie must carry the configured name: %q", resp.SetCookie)
+	}
+}
+
 func TestInitiateOAuthLogin_PerProviderDefectIs403(t *testing.T) {
 	hx := newCallbackHarness(t)
 	hx.resolver.usable = false

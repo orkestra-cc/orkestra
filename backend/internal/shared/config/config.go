@@ -176,16 +176,23 @@ type JWTConfig struct {
 
 type CookieConfig struct {
 	Secret string
-	// Name is the refresh-token cookie name — the only cookie Orkestra
-	// sets in the browser (the SPA holds the access token in memory, so
-	// there is no access-token cookie). Read from `COOKIE_NAME_REFRESH`,
-	// defaulting to `orkestra_cookie`.
+	// Prefix names every cookie the backend sets, read from
+	// `COOKIE_NAME_PREFIX` and defaulting to `orkestra_`. Two stacks on one
+	// host share cookies by name (the port is not part of a cookie's
+	// identity), so each sets its own prefix; letters, digits, `.`, `_` and
+	// `-` only, the set the console accepts too (checked in Validate).
+	Prefix string
+	// Name is the refresh-token cookie name — the SPA holds the access
+	// token in memory, so there is no access-token cookie. Read from
+	// `COOKIE_NAME_REFRESH`, defaulting to Prefix + `cookie`.
 	Name string
 	// DeviceName is the device-id cookie name. Read from
-	// `DEVICE_COOKIE_NAME`, defaulting to `orkestra_did`; must be an
-	// RFC 6265 token (checked in Validate). Two stacks on one host share
-	// cookies by name, so each sets its own.
+	// `DEVICE_COOKIE_NAME`, defaulting to Prefix + `did`; must be an
+	// RFC 6265 token (checked in Validate).
 	DeviceName string
+	// OAuthStateName is the OAuth state-binding cookie name, always
+	// Prefix + `oauth_state`.
+	OAuthStateName string
 	// OperatorDomain scopes refresh-token cookies minted on the operator
 	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`.
 	OperatorDomain string
@@ -349,12 +356,15 @@ func Load() (*Config, error) {
 		jwtConfig.KeysLoaded = true
 	}
 
+	cookiePrefix := getEnv("COOKIE_NAME_PREFIX", "orkestra_")
 	config.Auth = AuthConfig{
 		JWT: jwtConfig,
 		Cookie: CookieConfig{
-			Secret:     getEnv("COOKIE_SECRET", "default-cookie-secret"),
-			Name:       getEnv("COOKIE_NAME_REFRESH", "orkestra_cookie"),
-			DeviceName: getEnv("DEVICE_COOKIE_NAME", "orkestra_did"),
+			Secret:         getEnv("COOKIE_SECRET", "default-cookie-secret"),
+			Prefix:         cookiePrefix,
+			Name:           getEnv("COOKIE_NAME_REFRESH", cookiePrefix+"cookie"),
+			DeviceName:     getEnv("DEVICE_COOKIE_NAME", cookiePrefix+"did"),
+			OAuthStateName: cookiePrefix + "oauth_state",
 			// ADR-0003 PR-D D-9: per-audience cookie domains. BOTH default
 			// to "" in every environment since bdcbb7ab — see
 			// defaultOperatorCookieDomain / defaultClientCookieDomain below.
@@ -473,11 +483,19 @@ func Load() (*Config, error) {
 	return config, nil
 }
 
-// deviceCookieNameRE is the RFC 6265 cookie-name token.
-var deviceCookieNameRE = regexp.MustCompile("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
+// cookieNameRE is the RFC 6265 cookie-name token.
+var cookieNameRE = regexp.MustCompile("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
+
+// cookiePrefixRE is the subset of the token the console also accepts for
+// its own cookies (frontend-admin/src/config/environment.ts), so a prefix
+// the backend boots with never makes the console fall back to the default.
+var cookiePrefixRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 func (c *Config) Validate() error {
-	if n := c.Auth.Cookie.DeviceName; n != "" && !deviceCookieNameRE.MatchString(n) {
+	if p := c.Auth.Cookie.Prefix; p != "" && !cookiePrefixRE.MatchString(p) {
+		return fmt.Errorf("COOKIE_NAME_PREFIX %q is not a valid cookie-name prefix (letters, digits, '.', '_' and '-')", p)
+	}
+	if n := c.Auth.Cookie.DeviceName; n != "" && !cookieNameRE.MatchString(n) {
 		return fmt.Errorf("DEVICE_COOKIE_NAME %q is not a valid cookie name (RFC 6265 token)", n)
 	}
 

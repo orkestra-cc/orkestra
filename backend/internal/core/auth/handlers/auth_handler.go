@@ -605,7 +605,7 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 	authURL := provider.GetAuthURL(signedState, codeChallenge, backendCallbackURL)
 
 	return &OAuthLoginResponse{
-		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),
+		SetCookie: buildOAuthStateCookie(oauthStateCookieName(h.config), csrf, h.config.Auth.Cookie.Secure),
 		Body: struct {
 			AuthURL string `json:"authUrl" doc:"URL to redirect the user for OAuth authentication"`
 			State   string `json:"state" doc:"OAuth state parameter for security"`
@@ -709,7 +709,7 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 	authURL := providerSvc.GetAuthURL(signedState, codeChallenge, backendCallbackURL)
 
 	return &OAuthLoginResponse{
-		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),
+		SetCookie: buildOAuthStateCookie(oauthStateCookieName(h.config), csrf, h.config.Auth.Cookie.Secure),
 		Body: struct {
 			AuthURL string `json:"authUrl" doc:"URL to redirect the user for OAuth authentication"`
 			State   string `json:"state" doc:"OAuth state parameter for security"`
@@ -784,7 +784,7 @@ func (h *AuthHandler) resolveStateForCallback(ctx context.Context, raw string, p
 	if !ok || r == nil {
 		return nil, fmt.Errorf("%w: no request available to verify against", ErrOAuthStateNotBound)
 	}
-	deferred, err := verifyOAuthStateBinding(r, claims)
+	deferred, err := verifyOAuthStateBinding(r, oauthStateCookieName(h.config), claims)
 	if err != nil {
 		return nil, err
 	}

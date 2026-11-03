@@ -192,9 +192,9 @@ Orkestra sets three cookies, all HttpOnly. None is readable by script.
 
 | Cookie | Set by | Lifetime | Purpose |
 |---|---|---|---|
-| `orkestra_cookie` (name from `COOKIE_NAME_REFRESH`) | login / refresh | 7d | The refresh token. The only credential cookie; the SPA holds the access token in memory. |
-| `orkestra_did` (default; the name is set by `DEVICE_COOKIE_NAME`) | `shared/middleware.DeviceMiddleware` on first sight of a browser | 1y | Server-minted random device identifier. **Not a credential** — it identifies a device, it does not authenticate one. Replaces the old MD5-of-headers id, which any caller could reproduce. Native apps send `X-Device-ID` instead. |
-| `orkestra_oauth_state` | OAuth start endpoints | 10m | Per-flow CSRF nonce that binds an OAuth callback to the browser that started it. Cleared on callback. |
+| `orkestra_cookie` (default; `COOKIE_NAME_REFRESH`, else `COOKIE_NAME_PREFIX` + `cookie`) | login / refresh | 7d | The refresh token. The only credential cookie; the SPA holds the access token in memory. |
+| `orkestra_did` (default; `DEVICE_COOKIE_NAME`, else `COOKIE_NAME_PREFIX` + `did`) | `shared/middleware.DeviceMiddleware` on first sight of a browser | 1y | Server-minted random device identifier. **Not a credential** — it identifies a device, it does not authenticate one. Replaces the old MD5-of-headers id, which any caller could reproduce. Native apps send `X-Device-ID` instead. |
+| `orkestra_oauth_state` (default; `COOKIE_NAME_PREFIX` + `oauth_state`) | OAuth start endpoints | 10m | Per-flow CSRF nonce that binds an OAuth callback to the browser that started it. Cleared on callback. |
 
 ## Client IP resolution (trusted proxies)
 
