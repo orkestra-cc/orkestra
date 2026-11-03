@@ -25,11 +25,12 @@ type MarketingOptoutDoc struct {
 	// support questions. It is never the token itself, only its uuid.
 	SourceTokenUUID string `bson:"sourceTokenUuid,omitempty" json:"-"`
 	// TenantID is attribution only ("" when unknown): the opt-out stays
-	// platform-wide whatever it says. Latest writer wins on every Upsert,
-	// "" included: an unattributed later opt-out makes the row unattributable.
+	// platform-wide whatever it says. "Agree or unknown": a later
+	// Upsert keeps it only if both its tenantId and sourceContext equal the
+	// stored ones, otherwise both are cleared to "".
 	TenantID string `bson:"tenantId,omitempty" json:"-"`
 	// SourceContext is the producer context of the unsubscribe token that
 	// created or last refreshed this opt-out, copied at consume time because
-	// the token itself expires through its 30-day TTL. Latest writer wins.
+	// the token itself expires through its 30-day TTL. Same agree-or-unknown rule as TenantID.
 	SourceContext string `bson:"sourceContext,omitempty" json:"-"`
 }

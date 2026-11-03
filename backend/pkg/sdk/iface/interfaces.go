@@ -1718,7 +1718,7 @@ type MarketingOptoutInfo struct {
 	// this exact value back as expectAt to LiftMarketingOptout; Mongo stores
 	// milliseconds, so do not recompute or round it.
 	At            time.Time
-	TenantID      string // attribution of the latest writer, "" when unknown
+	TenantID      string // attribution, "" when unknown or when writers disagreed
 	SourceContext string // producer context of the unsubscribe that created it, "" when unknown
 }
 
@@ -1743,7 +1743,9 @@ type MarketingOptoutManager interface {
 	LiftMarketingOptout(ctx context.Context, address string, expectAt time.Time, ev OptoutEvidence) (bool, error)
 	// RecordMarketingOptout records an opt-out the caller collected. On an
 	// address that already has one it keeps the first instant but refreshes the
-	// latest instant (so an in-flight lift loses) and the attribution.
+	// latest instant (so an in-flight lift loses), and keeps the attribution
+	// only if it agrees with the stored one (otherwise both fields are cleared:
+	// the row becomes unattributable, never relabelled).
 	RecordMarketingOptout(ctx context.Context, address string, ev OptoutEvidence) error
 }
 

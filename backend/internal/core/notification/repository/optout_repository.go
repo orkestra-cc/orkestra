@@ -43,33 +43,45 @@ func NormalizeOptoutAddress(a string) string { return strings.ToLower(strings.Tr
 // Upsert records the opt-out idempotently: replaying it after a crash never
 // creates a second document and never un-opts-out an address. The first
 // opt-out instant (at), category and source token are kept; lastAt advances
-// ($max) on every call, which is what a lift is guarded by; tenantId and
-// sourceContext are latest-writer-wins, "" included, so a later unattributed
-// opt-out makes the row unattributable rather than leaving a stale tenant.
+// ($max) on every call, which is what a lift is guarded by.
+//
+// Attribution (tenantId, sourceContext) is "agree or unknown": a new row takes
+// the incoming pair; on an existing row the pair is kept only if BOTH incoming
+// values equal the stored ones, otherwise both are cleared to "". A second
+// writer that disagrees therefore makes the row unattributable instead of
+// relabelling it, so one tenant cannot take over another's opt-out. This is a
+// single update-pipeline statement (works with upsert), so the comparison and
+// the write are atomic.
 func (r *marketingOptoutRepo) Upsert(ctx context.Context, doc models.MarketingOptoutDoc) error {
 	addr := NormalizeOptoutAddress(doc.Address)
 	if addr == "" {
 		return nil
 	}
+	lit := func(v any) bson.D { return bson.D{{Key: "$literal", Value: v}} }
+	// On an upsert-insert the pipeline runs on a document holding only the
+	// filter's address, so a missing "at" means "new row".
+	isNew := bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$type", Value: "$at"}}, "missing"}}}
+	agree := bson.D{{Key: "$and", Value: bson.A{
+		bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$tenantId", ""}}}, lit(doc.TenantID)}}},
+		bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$sourceContext", ""}}}, lit(doc.SourceContext)}}},
+	}}}
+	keepOrClear := func(incoming string) bson.D {
+		return bson.D{{Key: "$cond", Value: bson.A{
+			bson.D{{Key: "$or", Value: bson.A{isNew, agree}}}, lit(incoming), "",
+		}}}
+	}
+	pipeline := mongo.Pipeline{{{Key: "$set", Value: bson.D{
+		{Key: "address", Value: addr},
+		{Key: "category", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$category", lit(doc.Category)}}}},
+		{Key: "at", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$at", doc.At}}}},
+		{Key: "sourceTokenUuid", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$sourceTokenUuid", lit(doc.SourceTokenUUID)}}}},
+		{Key: "lastAt", Value: bson.D{{Key: "$max", Value: bson.A{"$lastAt", doc.At}}}},
+		{Key: "tenantId", Value: keepOrClear(doc.TenantID)},
+		{Key: "sourceContext", Value: keepOrClear(doc.SourceContext)},
+	}}}}
 	update := func() error {
 		//tenantscope:allow system: opt-outs are keyed by address and apply platform-wide — a recipient does not opt out one tenant at a time, and scoping this per tenant would make the opt-out trivially bypassable
-		_, err := r.col().UpdateOne(ctx,
-			bson.M{"address": addr},
-			bson.M{
-				"$setOnInsert": bson.M{
-					"address":         addr,
-					"category":        doc.Category,
-					"at":              doc.At,
-					"sourceTokenUuid": doc.SourceTokenUUID,
-				},
-				"$set": bson.M{
-					"tenantId":      doc.TenantID,
-					"sourceContext": doc.SourceContext,
-				},
-				"$max": bson.M{"lastAt": doc.At},
-			},
-			options.Update().SetUpsert(true),
-		)
+		_, err := r.col().UpdateOne(ctx, bson.M{"address": addr}, pipeline, options.Update().SetUpsert(true))
 		return err
 	}
 	err := update()

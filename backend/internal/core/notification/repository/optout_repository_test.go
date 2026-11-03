@@ -142,37 +142,58 @@ func TestMongo_OptoutGetAndDeleteIfAt(t *testing.T) {
 	}
 }
 
-func TestMongo_OptoutUpsertAdvancesLastAtAndOverwritesAttribution(t *testing.T) {
-	repo, done := newTestOptoutRepo(t)
-	defer done()
+func TestMongo_OptoutUpsertAttributionAgreeOrUnknown(t *testing.T) {
 	ctx := context.Background()
-	first, second := time.UnixMilli(1_700_000_000_000), time.UnixMilli(1_700_000_060_000)
-
-	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "ada@example.test", At: first, TenantID: "T", SourceContext: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "ada@example.test", At: second, TenantID: "U", SourceContext: "c2"}); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := repo.Get(ctx, "ada@example.test")
-	if !got.At.Equal(first) || !got.LastAt.Equal(second) || got.TenantID != "U" || got.SourceContext != "c2" {
-		t.Fatalf("after re-record: %+v", got)
-	}
-	// An earlier instant never moves lastAt back; "" overwrites attribution.
-	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "ada@example.test", At: first}); err != nil {
-		t.Fatal(err)
-	}
-	got, _ = repo.Get(ctx, "ada@example.test")
-	if !got.LastAt.Equal(second) || got.TenantID != "" || got.SourceContext != "" {
-		t.Fatalf("after unattributed upsert: %+v", got)
-	}
-
-	// The stale lastAt no longer lifts; the current one does.
-	if ok, _ := repo.DeleteIfAt(ctx, "ada@example.test", first); ok {
-		t.Fatal("the first instant must not match once lastAt advanced")
-	}
-	if ok, err := repo.DeleteIfAt(ctx, "ada@example.test", second); err != nil || !ok {
-		t.Fatalf("current lastAt: ok=%v err=%v", ok, err)
+	t0 := time.UnixMilli(1_700_000_000_000)
+	for _, tc := range []struct {
+		name               string
+		second             models.MarketingOptoutDoc
+		wantTenant, wantCx string
+	}{
+		{"same attribution is kept", models.MarketingOptoutDoc{TenantID: "U", SourceContext: "cU"}, "U", "cU"},
+		{"another tenant clears both", models.MarketingOptoutDoc{TenantID: "T"}, "", ""},
+		{"same tenant, other context clears both", models.MarketingOptoutDoc{TenantID: "U", SourceContext: "other"}, "", ""},
+		{"consume with a different context clears both", models.MarketingOptoutDoc{SourceContext: "cX"}, "", ""},
+		{"unattributed over attributed clears both", models.MarketingOptoutDoc{}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, done := newTestOptoutRepo(t)
+			defer done()
+			first := models.MarketingOptoutDoc{Address: "ada@example.test", At: t0, Category: "marketing", SourceTokenUUID: "tok1", TenantID: "U", SourceContext: "cU"}
+			if err := repo.Upsert(ctx, first); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := repo.Get(ctx, "ada@example.test")
+			if got.TenantID != "U" || got.SourceContext != "cU" || !got.LastAt.Equal(t0) {
+				t.Fatalf("insert must keep the incoming values: %+v", got)
+			}
+			tc.second.Address, tc.second.At, tc.second.SourceTokenUUID = "ADA@example.test", t0.Add(time.Minute), "tok2"
+			if err := repo.Upsert(ctx, tc.second); err != nil {
+				t.Fatal(err)
+			}
+			got, _ = repo.Get(ctx, "ada@example.test")
+			if got.TenantID != tc.wantTenant || got.SourceContext != tc.wantCx {
+				t.Fatalf("attribution = %q/%q, want %q/%q", got.TenantID, got.SourceContext, tc.wantTenant, tc.wantCx)
+			}
+			// First-writer fields stay; lastAt advances.
+			if !got.At.Equal(t0) || got.Category != "marketing" || got.SourceTokenUUID != "tok1" || !got.LastAt.Equal(t0.Add(time.Minute)) {
+				t.Fatalf("first-writer fields or lastAt wrong: %+v", got)
+			}
+			// An earlier instant never moves lastAt back.
+			tc.second.At = t0
+			_ = repo.Upsert(ctx, tc.second)
+			got, _ = repo.Get(ctx, "ada@example.test")
+			if !got.LastAt.Equal(t0.Add(time.Minute)) {
+				t.Fatalf("lastAt moved back: %v", got.LastAt)
+			}
+			// The stale instant no longer lifts; the current one does.
+			if ok, _ := repo.DeleteIfAt(ctx, "ada@example.test", t0); ok {
+				t.Fatal("the first instant must not match once lastAt advanced")
+			}
+			if ok, err := repo.DeleteIfAt(ctx, "ada@example.test", t0.Add(time.Minute)); err != nil || !ok {
+				t.Fatalf("current lastAt: ok=%v err=%v", ok, err)
+			}
+		})
 	}
 }
 

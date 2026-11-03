@@ -30,7 +30,9 @@ func (m *memOptouts) Upsert(_ context.Context, d models.MarketingOptoutDoc) erro
 		// Same semantics as the repository: first at kept, lastAt advances,
 		// attribution is latest-writer-wins.
 		old.LastAt = d.At
-		old.TenantID, old.SourceContext = d.TenantID, d.SourceContext
+		if old.TenantID != d.TenantID || old.SourceContext != d.SourceContext {
+			old.TenantID, old.SourceContext = "", ""
+		}
 		m.docs[a] = old
 		return nil
 	}
@@ -251,8 +253,24 @@ func TestOptoutManager_LiftLosesToARecordAfterLookup(t *testing.T) {
 		t.Fatalf("a lift on a stale At must lose: lifted=%v err=%v", lifted, err)
 	}
 	now, _ := k.mgr.LookupMarketingOptout(ctx, "ada@example.test")
-	if now.TenantID != "U" || !now.At.After(seen.At) {
-		t.Fatalf("attribution must follow the latest writer: %+v", now)
+	if now.TenantID != "" || !now.At.After(seen.At) {
+		t.Fatalf("disagreeing writers must leave the row unattributable: %+v", now)
+	}
+}
+
+func TestOptoutManager_RecordOverConsumedRowClearsAttribution(t *testing.T) {
+	k := newManagerKit(t)
+	ctx := context.Background()
+	// A row U's unsubscribe created (what Consume writes).
+	if err := k.optouts.Upsert(ctx, models.MarketingOptoutDoc{Address: "ada@example.test", At: time.Unix(10, 0), TenantID: "U", SourceContext: "ctx-U"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.mgr.RecordMarketingOptout(ctx, "ada@example.test", iface.OptoutEvidence{TenantID: "T"}); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := k.mgr.LookupMarketingOptout(ctx, "ada@example.test")
+	if info.TenantID != "" || info.SourceContext != "" {
+		t.Fatalf("T must not take over U's opt-out: %+v", info)
 	}
 }
 
