@@ -1714,8 +1714,11 @@ type MarketingUnsubscribeSinkSetter interface {
 // MarketingOptoutInfo is what LookupMarketingOptout reveals about a durable
 // marketing opt-out. It carries no address and no token.
 type MarketingOptoutInfo struct {
+	// At is the latest opt-out instant (the first one is not exposed). Pass
+	// this exact value back as expectAt to LiftMarketingOptout; Mongo stores
+	// milliseconds, so do not recompute or round it.
 	At            time.Time
-	TenantID      string // attribution only, "" when unknown
+	TenantID      string // attribution of the latest writer, "" when unknown
 	SourceContext string // producer context of the unsubscribe that created it, "" when unknown
 }
 
@@ -1734,11 +1737,13 @@ type OptoutEvidence struct {
 type MarketingOptoutManager interface {
 	// LookupMarketingOptout returns (nil, nil) when the address has none.
 	LookupMarketingOptout(ctx context.Context, address string) (*MarketingOptoutInfo, error)
-	// LiftMarketingOptout deletes the opt-out only if it is still the one the
-	// caller saw (its instant equals expectAt) and reports whether it did.
+	// LiftMarketingOptout deletes the opt-out only if it has not been recorded
+	// again since the caller looked (its latest instant still equals expectAt,
+	// the At that Lookup returned) and reports whether it did.
 	LiftMarketingOptout(ctx context.Context, address string, expectAt time.Time, ev OptoutEvidence) (bool, error)
-	// RecordMarketingOptout records an opt-out the caller collected (no-op on
-	// an address that already has one).
+	// RecordMarketingOptout records an opt-out the caller collected. On an
+	// address that already has one it keeps the first instant but refreshes the
+	// latest instant (so an in-flight lift loses) and the attribution.
 	RecordMarketingOptout(ctx context.Context, address string, ev OptoutEvidence) error
 }
 

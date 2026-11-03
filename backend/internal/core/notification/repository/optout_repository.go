@@ -18,8 +18,10 @@ type MarketingOptoutRepository interface {
 	IsOptedOut(ctx context.Context, address, category string) (bool, error)
 	// Get returns the opt-out for an address, or (nil, nil) when none.
 	Get(ctx context.Context, address string) (*models.MarketingOptoutDoc, error)
-	// DeleteIfAt removes the opt-out only while it still carries instant at,
-	// so a lift never deletes an opt-out recorded again in the meantime.
+	// DeleteIfAt removes the opt-out only while its latest instant (lastAt,
+	// or at on a legacy row without one) equals at, so a lift never deletes an
+	// opt-out recorded again in the meantime. at must be the value Get
+	// returned (Mongo keeps milliseconds).
 	DeleteIfAt(ctx context.Context, address string, at time.Time) (bool, error)
 }
 
@@ -38,10 +40,12 @@ func (r *marketingOptoutRepo) col() *mongo.Collection {
 // from a mail client's casing would not match the send path's lookup.
 func NormalizeOptoutAddress(a string) string { return strings.ToLower(strings.TrimSpace(a)) }
 
-// Upsert records the opt-out idempotently: replaying it after a crash is a
-// no-op on an address that already opted out, and never a second document.
-// The earliest opt-out instant wins — an address does not un-opt-out by
-// clicking again.
+// Upsert records the opt-out idempotently: replaying it after a crash never
+// creates a second document and never un-opts-out an address. The first
+// opt-out instant (at), category and source token are kept; lastAt advances
+// ($max) on every call, which is what a lift is guarded by; tenantId and
+// sourceContext are latest-writer-wins, "" included, so a later unattributed
+// opt-out makes the row unattributable rather than leaving a stale tenant.
 func (r *marketingOptoutRepo) Upsert(ctx context.Context, doc models.MarketingOptoutDoc) error {
 	addr := NormalizeOptoutAddress(doc.Address)
 	if addr == "" {
@@ -56,9 +60,12 @@ func (r *marketingOptoutRepo) Upsert(ctx context.Context, doc models.MarketingOp
 				"category":        doc.Category,
 				"at":              doc.At,
 				"sourceTokenUuid": doc.SourceTokenUUID,
-				"tenantId":        doc.TenantID,
-				"sourceContext":   doc.SourceContext,
 			},
+			"$set": bson.M{
+				"tenantId":      doc.TenantID,
+				"sourceContext": doc.SourceContext,
+			},
+			"$max": bson.M{"lastAt": doc.At},
 		},
 		options.Update().SetUpsert(true),
 	)
@@ -116,17 +123,24 @@ func (r *marketingOptoutRepo) Get(ctx context.Context, address string) (*models.
 	return &doc, nil
 }
 
-// DeleteIfAt deletes the row only when both the address and the opt-out
-// instant match, and reports whether it did. The instant is the guard: a
-// caller that read the opt-out, decided to lift it, and lost a race against a
-// fresh opt-out must not delete the newer fact.
+// DeleteIfAt deletes the row only when the address matches and its latest
+// opt-out instant equals at: lastAt, or at itself on a legacy row that has no
+// lastAt. A caller that read the opt-out, decided to lift it, and lost a race
+// against a fresh opt-out (which advances lastAt) must not delete the newer
+// fact.
 func (r *marketingOptoutRepo) DeleteIfAt(ctx context.Context, address string, at time.Time) (bool, error) {
 	addr := NormalizeOptoutAddress(address)
 	if addr == "" {
 		return false, nil
 	}
 	//tenantscope:allow system: same reason as Upsert — an opt-out is a platform-wide fact keyed by address, not a tenant one
-	res, err := r.col().DeleteOne(ctx, bson.M{"address": addr, "at": at})
+	res, err := r.col().DeleteOne(ctx, bson.M{
+		"address": addr,
+		"$or": []bson.M{
+			{"lastAt": at},
+			{"lastAt": bson.M{"$exists": false}, "at": at},
+		},
+	})
 	if err != nil {
 		return false, err
 	}

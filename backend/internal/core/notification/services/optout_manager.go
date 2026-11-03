@@ -48,12 +48,16 @@ func NewOptoutManager(optouts repository.MarketingOptoutRepository, tokens repos
 func (m *optoutManager) LookupMarketingOptout(ctx context.Context, address string) (*iface.MarketingOptoutInfo, error) {
 	doc, err := m.optouts.Get(ctx, repository.NormalizeOptoutAddress(address))
 	if err != nil {
-		return nil, fmt.Errorf("notification: reading the marketing opt-out: %w", err)
+		return nil, m.fail("reading the marketing opt-out", err, address)
 	}
 	if doc == nil {
 		return nil, nil
 	}
-	info := &iface.MarketingOptoutInfo{At: doc.At, TenantID: doc.TenantID, SourceContext: doc.SourceContext}
+	at := doc.LastAt
+	if at.IsZero() {
+		at = doc.At // legacy row, written before lastAt existed
+	}
+	info := &iface.MarketingOptoutInfo{At: at, TenantID: doc.TenantID, SourceContext: doc.SourceContext}
 	if info.SourceContext == "" && doc.SourceTokenUUID != "" && m.tokens != nil {
 		// Older opt-outs predate the copied context; the token may still exist.
 		tok, terr := m.tokens.GetByUUID(ctx, doc.SourceTokenUUID)
@@ -76,7 +80,7 @@ func (m *optoutManager) LiftMarketingOptout(ctx context.Context, address string,
 	}
 	lifted, err := m.optouts.DeleteIfAt(ctx, addr, expectAt)
 	if err != nil {
-		return false, fmt.Errorf("notification: lifting the marketing opt-out: %w", err)
+		return false, m.fail("lifting the marketing opt-out", err, address)
 	}
 	if lifted {
 		m.audit(ctx, auditActionOptoutLifted, addr, ev)
@@ -95,10 +99,18 @@ func (m *optoutManager) RecordMarketingOptout(ctx context.Context, address strin
 		At:       m.now(),
 		TenantID: ev.TenantID,
 	}); err != nil {
-		return fmt.Errorf("notification: recording the marketing opt-out: %w", err)
+		return m.fail("recording the marketing opt-out", err, address)
 	}
 	m.audit(ctx, auditActionOptoutRecorded, addr, ev)
 	return nil
+}
+
+// ErrOptoutOperationFailed wraps a repository failure of the opt-out manager.
+// The message is scrubbed: a write error can quote the address it failed on.
+var ErrOptoutOperationFailed = errors.New("notification: marketing opt-out operation failed")
+
+func (m *optoutManager) fail(what string, err error, address string) error {
+	return fmt.Errorf("%w: %s: %s", ErrOptoutOperationFailed, what, scrubAddress(err.Error(), address))
 }
 
 // audit emits to whatever sink is registered right now; the address is in the

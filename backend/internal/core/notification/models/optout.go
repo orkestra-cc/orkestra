@@ -17,14 +17,19 @@ type MarketingOptoutDoc struct {
 	// Category narrows the opt-out; empty means all marketing.
 	Category string    `bson:"category,omitempty" json:"category,omitempty"`
 	At       time.Time `bson:"at" json:"at"`
+	// LastAt is the most recent opt-out instant (Upsert advances it with
+	// $max; At keeps the first). Rows written before it existed have none, and
+	// readers fall back to At. It is the guard a lift matches on.
+	LastAt time.Time `bson:"lastAt,omitempty" json:"-"`
 	// SourceTokenUUID records which unsubscribe token produced this, for
 	// support questions. It is never the token itself, only its uuid.
 	SourceTokenUUID string `bson:"sourceTokenUuid,omitempty" json:"-"`
 	// TenantID is attribution only ("" when unknown): the opt-out stays
-	// platform-wide whatever it says. Stamped by RecordMarketingOptout.
+	// platform-wide whatever it says. Latest writer wins on every Upsert,
+	// "" included: an unattributed later opt-out makes the row unattributable.
 	TenantID string `bson:"tenantId,omitempty" json:"-"`
 	// SourceContext is the producer context of the unsubscribe token that
-	// created this opt-out, copied at consume time because the token itself
-	// expires through its 30-day TTL.
+	// created or last refreshed this opt-out, copied at consume time because
+	// the token itself expires through its 30-day TTL. Latest writer wins.
 	SourceContext string `bson:"sourceContext,omitempty" json:"-"`
 }

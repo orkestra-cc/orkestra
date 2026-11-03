@@ -141,3 +141,51 @@ func TestMongo_OptoutGetAndDeleteIfAt(t *testing.T) {
 		t.Fatal("the row must be gone")
 	}
 }
+
+func TestMongo_OptoutUpsertAdvancesLastAtAndOverwritesAttribution(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+	first, second := time.UnixMilli(1_700_000_000_000), time.UnixMilli(1_700_000_060_000)
+
+	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "ada@example.test", At: first, TenantID: "T", SourceContext: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "ada@example.test", At: second, TenantID: "U", SourceContext: "c2"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.Get(ctx, "ada@example.test")
+	if !got.At.Equal(first) || !got.LastAt.Equal(second) || got.TenantID != "U" || got.SourceContext != "c2" {
+		t.Fatalf("after re-record: %+v", got)
+	}
+	// An earlier instant never moves lastAt back; "" overwrites attribution.
+	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "ada@example.test", At: first}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = repo.Get(ctx, "ada@example.test")
+	if !got.LastAt.Equal(second) || got.TenantID != "" || got.SourceContext != "" {
+		t.Fatalf("after unattributed upsert: %+v", got)
+	}
+
+	// The stale lastAt no longer lifts; the current one does.
+	if ok, _ := repo.DeleteIfAt(ctx, "ada@example.test", first); ok {
+		t.Fatal("the first instant must not match once lastAt advanced")
+	}
+	if ok, err := repo.DeleteIfAt(ctx, "ada@example.test", second); err != nil || !ok {
+		t.Fatalf("current lastAt: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestMongo_OptoutDeleteIfAtLegacyRowWithoutLastAt(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+	at := time.UnixMilli(1_700_000_000_000)
+	//tenantscope:allow system: test fixture in the platform-global opt-out collection
+	if _, err := repo.col().InsertOne(ctx, bson.M{"address": "old@example.test", "at": at}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.DeleteIfAt(ctx, "old@example.test", at); err != nil || !ok {
+		t.Fatalf("legacy row deletable by at: ok=%v err=%v", ok, err)
+	}
+}

@@ -2,8 +2,10 @@ package services
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,10 +25,17 @@ func newMemOptouts() *memOptouts { return &memOptouts{docs: map[string]models.Ma
 
 func (m *memOptouts) Upsert(_ context.Context, d models.MarketingOptoutDoc) error {
 	a := repository.NormalizeOptoutAddress(d.Address)
-	if _, ok := m.docs[a]; !ok {
-		d.Address = a
-		m.docs[a] = d
+	d.Address = a
+	if old, ok := m.docs[a]; ok {
+		// Same semantics as the repository: first at kept, lastAt advances,
+		// attribution is latest-writer-wins.
+		old.LastAt = d.At
+		old.TenantID, old.SourceContext = d.TenantID, d.SourceContext
+		m.docs[a] = old
+		return nil
 	}
+	d.LastAt = d.At
+	m.docs[a] = d
 	return nil
 }
 func (m *memOptouts) IsOptedOut(_ context.Context, a, _ string) (bool, error) {
@@ -43,7 +52,11 @@ func (m *memOptouts) Get(_ context.Context, a string) (*models.MarketingOptoutDo
 func (m *memOptouts) DeleteIfAt(_ context.Context, a string, at time.Time) (bool, error) {
 	a = repository.NormalizeOptoutAddress(a)
 	d, ok := m.docs[a]
-	if !ok || !d.At.Equal(at) {
+	eff := d.LastAt
+	if eff.IsZero() {
+		eff = d.At
+	}
+	if !ok || !eff.Equal(at) {
 		return false, nil
 	}
 	delete(m.docs, a)
@@ -216,5 +229,47 @@ func TestOptoutManager_RecordEmptyAddressFails(t *testing.T) {
 	k := newManagerKit(t)
 	if err := k.mgr.RecordMarketingOptout(context.Background(), "  ", iface.OptoutEvidence{}); err == nil {
 		t.Fatal("an empty address must be refused, not silently dropped")
+	}
+}
+
+func TestOptoutManager_LiftLosesToARecordAfterLookup(t *testing.T) {
+	k := newManagerKit(t)
+	clock := time.Unix(1000, 0)
+	k.mgr.(*optoutManager).now = func() time.Time { return clock }
+	ctx := context.Background()
+	if err := k.mgr.RecordMarketingOptout(ctx, "ada@example.test", iface.OptoutEvidence{TenantID: "T"}); err != nil {
+		t.Fatal(err)
+	}
+	seen, _ := k.mgr.LookupMarketingOptout(ctx, "ada@example.test")
+
+	clock = clock.Add(time.Minute)
+	if err := k.mgr.RecordMarketingOptout(ctx, "ada@example.test", iface.OptoutEvidence{TenantID: "U"}); err != nil {
+		t.Fatal(err)
+	}
+	lifted, err := k.mgr.LiftMarketingOptout(ctx, "ada@example.test", seen.At, iface.OptoutEvidence{TenantID: "T"})
+	if err != nil || lifted {
+		t.Fatalf("a lift on a stale At must lose: lifted=%v err=%v", lifted, err)
+	}
+	now, _ := k.mgr.LookupMarketingOptout(ctx, "ada@example.test")
+	if now.TenantID != "U" || !now.At.After(seen.At) {
+		t.Fatalf("attribution must follow the latest writer: %+v", now)
+	}
+}
+
+type failingOptouts struct{ *memOptouts }
+
+func (failingOptouts) Get(context.Context, string) (*models.MarketingOptoutDoc, error) {
+	return nil, errors.New("failed on ada@example.test")
+}
+
+func TestOptoutManager_ErrorsAreScrubbedAndSentinelled(t *testing.T) {
+	k := newManagerKit(t)
+	mgr := NewOptoutManager(failingOptouts{k.optouts}, k.tokens, nil, nil)
+	_, err := mgr.LookupMarketingOptout(context.Background(), "ada@example.test")
+	if !errors.Is(err, ErrOptoutOperationFailed) {
+		t.Fatalf("want the sentinel, got %v", err)
+	}
+	if strings.Contains(err.Error(), "ada@example.test") {
+		t.Fatalf("the address leaked into the error: %v", err)
 	}
 }
