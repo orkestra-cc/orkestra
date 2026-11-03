@@ -239,3 +239,32 @@ func TestMongo_OptoutUpsertConcurrentWritersConverge(t *testing.T) {
 		t.Fatalf("lastAt = %v, want the maximum %v", got.LastAt, want)
 	}
 }
+
+// A "$"-prefixed local part is a valid address (net/mail accepts it). The
+// update pipeline must write it as a literal, never read it as a field path,
+// or the row loses its address and the unsubscribe is silently lost.
+func TestMongo_OptoutUpsertDollarAddressIsLiteral(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+
+	const addr = "$x@example.com"
+	for i, at := range []time.Time{time.Unix(100, 0), time.Unix(200, 0)} {
+		if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: addr, Category: "marketing", At: at}); err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+		got, err := repo.IsOptedOut(ctx, addr, "marketing")
+		if err != nil || !got {
+			t.Fatalf("after upsert %d: IsOptedOut = %v, %v; want true", i, got, err)
+		}
+		doc, err := repo.Get(ctx, addr)
+		if err != nil || doc == nil || doc.Address != addr {
+			t.Fatalf("after upsert %d: Get = %+v, %v; want address %q kept", i, doc, err, addr)
+		}
+	}
+	//tenantscope:allow system: test assertion against the platform-global opt-out collection, same scope as the repository it exercises
+	n, err := repo.col().CountDocuments(ctx, bson.M{})
+	if err != nil || n != 1 {
+		t.Fatalf("expected exactly one document, n=%d err=%v", n, err)
+	}
+}

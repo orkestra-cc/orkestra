@@ -71,7 +71,8 @@ func (r *marketingOptoutRepo) Upsert(ctx context.Context, doc models.MarketingOp
 		}}}
 	}
 	pipeline := mongo.Pipeline{{{Key: "$set", Value: bson.D{
-		{Key: "address", Value: addr},
+		// lit: a "$"-prefixed local part is a valid address, not a field path.
+		{Key: "address", Value: lit(addr)},
 		{Key: "category", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$category", lit(doc.Category)}}}},
 		{Key: "at", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$at", doc.At}}}},
 		{Key: "sourceTokenUuid", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$sourceTokenUuid", lit(doc.SourceTokenUUID)}}}},

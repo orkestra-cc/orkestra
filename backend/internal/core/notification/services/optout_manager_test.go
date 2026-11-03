@@ -28,7 +28,7 @@ func (m *memOptouts) Upsert(_ context.Context, d models.MarketingOptoutDoc) erro
 	d.Address = a
 	if old, ok := m.docs[a]; ok {
 		// Same semantics as the repository: first at kept, lastAt advances,
-		// attribution is latest-writer-wins.
+		// attribution is agree-or-unknown (a disagreeing writer clears it).
 		old.LastAt = d.At
 		if old.TenantID != d.TenantID || old.SourceContext != d.SourceContext {
 			old.TenantID, old.SourceContext = "", ""
