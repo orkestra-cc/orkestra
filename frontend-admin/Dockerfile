@@ -70,7 +70,12 @@ RUN apk add --no-cache curl gettext
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Default nginx config: SPA fallback + /health. Mountable override via
-# /etc/nginx/conf.d/default.conf is still supported.
+# /etc/nginx/conf.d/default.conf is still supported — and the prod
+# compose mounts docker/frontend-admin/nginx.conf, which carries the reasons
+# behind each header. The cache policy here is the same: /config.js no-store,
+# hashed /assets/ immutable, index.html (every SPA route) no-cache so a new
+# build is picked up on the next load. Locations that declare a header
+# re-state the security ones (nginx does not merge add_header across levels).
 RUN echo 'server { \
     listen 80; \
     server_name localhost; \
@@ -84,7 +89,16 @@ RUN echo 'server { \
         add_header X-Content-Type-Options "nosniff" always; \
         try_files $uri =404; \
     } \
+    location ^~ /assets/ { \
+        add_header Cache-Control "public, max-age=31536000, immutable"; \
+        add_header X-Content-Type-Options "nosniff" always; \
+        try_files $uri =404; \
+    } \
     location / { \
+        add_header Cache-Control "no-cache" always; \
+        add_header X-Frame-Options "SAMEORIGIN" always; \
+        add_header X-Content-Type-Options "nosniff" always; \
+        add_header X-XSS-Protection "0" always; \
         try_files $uri $uri/ /index.html; \
     } \
     location /health { \

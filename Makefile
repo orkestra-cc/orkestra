@@ -173,7 +173,7 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test agents-check agents-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening backend-retrieval-hardening
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening backend-retrieval-hardening backend-frontend-nginx
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
@@ -183,7 +183,7 @@ frontend-client-clean:
 BASE_REF ?= origin/dev
 SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
 CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
-BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/% orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh,$(CI_CHANGED)),1,)
+BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/% docker/frontend-admin/% frontend-admin/Dockerfile frontend-client/Dockerfile orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
@@ -307,7 +307,7 @@ agents-test:
 
 # ---- Backend ----
 
-ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-retrieval-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-retrieval-hardening backend-frontend-nginx backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -328,6 +328,13 @@ backend-credential-fallbacks:
 # and IP flags on. See docker/tests/gotenberg-hardening.test.sh.
 backend-gotenberg-hardening:
 	@bash docker/tests/gotenberg-hardening.test.sh
+
+# Live gate: the console nginx config answers with the cache contract —
+# index.html (every SPA route) no-cache, hashed /assets/ immutable,
+# /config.js no-store — and keeps its security headers. Runs nginx:alpine on
+# a fake build; see docker/tests/frontend-nginx-cache.test.sh.
+backend-frontend-nginx:
+	@bash docker/tests/frontend-nginx-cache.test.sh
 
 # Static gate: the retrieval overlay (Qdrant + TEI, ADR-0023) keeps its
 # hardening — no published port, retrieval-net only (egress only for the weight

@@ -12,6 +12,10 @@ on:
       - 'docker/docker-compose.retrieval.yml'
       - 'docker/mongo-init/**'
       - 'docker/tests/**'
+      # make backend-frontend-nginx serves these configs
+      - 'docker/frontend-admin/**'
+      - 'frontend-admin/Dockerfile'
+      - 'frontend-client/Dockerfile'
       - '.github/workflows/backend.yml'
       - 'Makefile'
       - '.mise.toml'
@@ -42,6 +46,10 @@ on:
       - 'docker/docker-compose.retrieval.yml'
       - 'docker/mongo-init/**'
       - 'docker/tests/**'
+      # make backend-frontend-nginx serves these configs
+      - 'docker/frontend-admin/**'
+      - 'frontend-admin/Dockerfile'
+      - 'frontend-client/Dockerfile'
       - '.github/workflows/backend.yml'
       - 'Makefile'
       - '.mise.toml'
