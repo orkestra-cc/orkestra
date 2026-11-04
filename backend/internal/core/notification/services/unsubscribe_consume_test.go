@@ -672,3 +672,26 @@ func TestScrubAddress(t *testing.T) {
 		})
 	}
 }
+
+func (f *consumeOptouts) Get(context.Context, string) (*models.MarketingOptoutDoc, error) {
+	return nil, nil
+}
+func (f *consumeOptouts) DeleteIfAt(context.Context, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (f *consumeTokenStore) GetByUUID(context.Context, string) (*models.UnsubscribeTokenDoc, error) {
+	return nil, repository.ErrNotFound
+}
+
+func TestConsume_CopiesTokenContextToOptout(t *testing.T) {
+	// The token expires through its TTL; the opt-out outlives it, so the
+	// producer context has to be copied onto the opt-out at consume time.
+	k := newConsumeKit(t, consumeDeps{})
+	if err := k.svc.Consume(context.Background(), "raw-token"); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	if k.optouts.last.SourceContext != "ref-9" {
+		t.Fatalf("SourceContext = %q, want the token context", k.optouts.last.SourceContext)
+	}
+}

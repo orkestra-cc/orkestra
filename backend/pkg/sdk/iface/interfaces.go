@@ -1711,6 +1711,44 @@ type MarketingUnsubscribeSinkSetter interface {
 	SetMarketingUnsubscribeSink(MarketingUnsubscribeSink)
 }
 
+// MarketingOptoutInfo is what LookupMarketingOptout reveals about a durable
+// marketing opt-out. It carries no address and no token.
+type MarketingOptoutInfo struct {
+	// At is the latest opt-out instant (the first one is not exposed). Pass
+	// this exact value back as expectAt to LiftMarketingOptout; Mongo stores
+	// milliseconds, so do not recompute or round it.
+	At            time.Time
+	TenantID      string // attribution, "" when unknown or when writers disagreed
+	SourceContext string // producer context of the unsubscribe that created it, "" when unknown
+}
+
+// OptoutEvidence is the audit trail a caller supplies when it lifts or
+// records an opt-out.
+type OptoutEvidence struct {
+	TenantID  string // attribution stamped on a recorded opt-out, and on the audit event
+	Source    string // e.g. "crm.consent_request"
+	Reference string // e.g. a response uuid
+}
+
+// MarketingOptoutManager is the audited seam over the durable marketing
+// opt-out, for a consumer that collects consent itself. Resolved lazily via
+// module.ServiceMarketingOptoutManager. It never touches the suppression
+// list and never fires the MarketingUnsubscribeSink.
+type MarketingOptoutManager interface {
+	// LookupMarketingOptout returns (nil, nil) when the address has none.
+	LookupMarketingOptout(ctx context.Context, address string) (*MarketingOptoutInfo, error)
+	// LiftMarketingOptout deletes the opt-out only if it has not been recorded
+	// again since the caller looked (its latest instant still equals expectAt,
+	// the At that Lookup returned) and reports whether it did.
+	LiftMarketingOptout(ctx context.Context, address string, expectAt time.Time, ev OptoutEvidence) (bool, error)
+	// RecordMarketingOptout records an opt-out the caller collected. On an
+	// address that already has one it keeps the first instant but refreshes the
+	// latest instant (so an in-flight lift loses), and keeps the attribution
+	// only if it agrees with the stored one (otherwise both fields are cleared:
+	// the row becomes unattributable, never relabelled).
+	RecordMarketingOptout(ctx context.Context, address string, ev OptoutEvidence) error
+}
+
 // TemplateView is a read projection of a notification template (campaign preview).
 type TemplateView struct {
 	TemplateID string

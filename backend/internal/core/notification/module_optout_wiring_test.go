@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -53,6 +54,11 @@ func TestInit_WiresTheOptoutSeam(t *testing.T) {
 	}
 	if m.svc.Optouts() == nil {
 		t.Fatal("Init must leave the opt-out seam wired (non-nil); a nil seam fails every marketing send closed")
+	}
+
+	// The audited opt-out seam other modules resolve lazily.
+	if _, ok := module.GetTyped[iface.MarketingOptoutManager](deps.Services, module.ServiceMarketingOptoutManager); !ok {
+		t.Fatal("Init must register the MarketingOptoutManager under ServiceMarketingOptoutManager")
 	}
 
 	// Same guard for the consume path, and just as cheap: an empty token

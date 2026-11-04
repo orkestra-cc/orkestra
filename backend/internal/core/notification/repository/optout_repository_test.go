@@ -107,3 +107,164 @@ func TestMongo_IsOptedOut(t *testing.T) {
 		})
 	}
 }
+
+func TestMongo_OptoutGetAndDeleteIfAt(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+
+	if d, err := repo.Get(ctx, "ada@example.test"); d != nil || err != nil {
+		t.Fatalf("Get on an empty collection = %v, %v; want nil, nil", d, err)
+	}
+	at := time.UnixMilli(1_700_000_000_000)
+	if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "Ada@example.test", At: at, TenantID: "t1", SourceContext: "ctx-1"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, err := repo.Get(ctx, "  ADA@example.test ")
+	if err != nil || got == nil {
+		t.Fatalf("Get: %v %v", got, err)
+	}
+	if !got.At.Equal(at) || got.TenantID != "t1" || got.SourceContext != "ctx-1" {
+		t.Fatalf("unexpected doc: %+v", got)
+	}
+
+	if ok, err := repo.DeleteIfAt(ctx, "ada@example.test", at.Add(time.Millisecond)); err != nil || ok {
+		t.Fatalf("wrong instant: ok=%v err=%v", ok, err)
+	}
+	if d, _ := repo.Get(ctx, "ada@example.test"); d == nil {
+		t.Fatal("the row must be kept when the instant differs")
+	}
+	if ok, err := repo.DeleteIfAt(ctx, "ADA@example.test", got.At); err != nil || !ok {
+		t.Fatalf("right instant: ok=%v err=%v", ok, err)
+	}
+	if d, _ := repo.Get(ctx, "ada@example.test"); d != nil {
+		t.Fatal("the row must be gone")
+	}
+}
+
+func TestMongo_OptoutUpsertAttributionAgreeOrUnknown(t *testing.T) {
+	ctx := context.Background()
+	t0 := time.UnixMilli(1_700_000_000_000)
+	for _, tc := range []struct {
+		name               string
+		second             models.MarketingOptoutDoc
+		wantTenant, wantCx string
+	}{
+		{"same attribution is kept", models.MarketingOptoutDoc{TenantID: "U", SourceContext: "cU"}, "U", "cU"},
+		{"another tenant clears both", models.MarketingOptoutDoc{TenantID: "T"}, "", ""},
+		{"same tenant, other context clears both", models.MarketingOptoutDoc{TenantID: "U", SourceContext: "other"}, "", ""},
+		{"consume with a different context clears both", models.MarketingOptoutDoc{SourceContext: "cX"}, "", ""},
+		{"unattributed over attributed clears both", models.MarketingOptoutDoc{}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, done := newTestOptoutRepo(t)
+			defer done()
+			first := models.MarketingOptoutDoc{Address: "ada@example.test", At: t0, Category: "marketing", SourceTokenUUID: "tok1", TenantID: "U", SourceContext: "cU"}
+			if err := repo.Upsert(ctx, first); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := repo.Get(ctx, "ada@example.test")
+			if got.TenantID != "U" || got.SourceContext != "cU" || !got.LastAt.Equal(t0) {
+				t.Fatalf("insert must keep the incoming values: %+v", got)
+			}
+			tc.second.Address, tc.second.At, tc.second.SourceTokenUUID = "ADA@example.test", t0.Add(time.Minute), "tok2"
+			if err := repo.Upsert(ctx, tc.second); err != nil {
+				t.Fatal(err)
+			}
+			got, _ = repo.Get(ctx, "ada@example.test")
+			if got.TenantID != tc.wantTenant || got.SourceContext != tc.wantCx {
+				t.Fatalf("attribution = %q/%q, want %q/%q", got.TenantID, got.SourceContext, tc.wantTenant, tc.wantCx)
+			}
+			// First-writer fields stay; lastAt advances.
+			if !got.At.Equal(t0) || got.Category != "marketing" || got.SourceTokenUUID != "tok1" || !got.LastAt.Equal(t0.Add(time.Minute)) {
+				t.Fatalf("first-writer fields or lastAt wrong: %+v", got)
+			}
+			// An earlier instant never moves lastAt back.
+			tc.second.At = t0
+			_ = repo.Upsert(ctx, tc.second)
+			got, _ = repo.Get(ctx, "ada@example.test")
+			if !got.LastAt.Equal(t0.Add(time.Minute)) {
+				t.Fatalf("lastAt moved back: %v", got.LastAt)
+			}
+			// The stale instant no longer lifts; the current one does.
+			if ok, _ := repo.DeleteIfAt(ctx, "ada@example.test", t0); ok {
+				t.Fatal("the first instant must not match once lastAt advanced")
+			}
+			if ok, err := repo.DeleteIfAt(ctx, "ada@example.test", t0.Add(time.Minute)); err != nil || !ok {
+				t.Fatalf("current lastAt: ok=%v err=%v", ok, err)
+			}
+		})
+	}
+}
+
+func TestMongo_OptoutDeleteIfAtLegacyRowWithoutLastAt(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+	at := time.UnixMilli(1_700_000_000_000)
+	//tenantscope:allow system: test fixture in the platform-global opt-out collection
+	if _, err := repo.col().InsertOne(ctx, bson.M{"address": "old@example.test", "at": at}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.DeleteIfAt(ctx, "old@example.test", at); err != nil || !ok {
+		t.Fatalf("legacy row deletable by at: ok=%v err=%v", ok, err)
+	}
+}
+
+// A real E11000 cannot be forced deterministically, so this races writers on
+// one new address: none may fail, and because the loser retries, the final
+// lastAt is the maximum of all of them whichever writer won the insert.
+func TestMongo_OptoutUpsertConcurrentWritersConverge(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+	base := time.UnixMilli(1_700_000_000_000)
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			errs <- repo.Upsert(ctx, models.MarketingOptoutDoc{Address: "race@example.test", At: base.Add(time.Duration(i) * time.Second)})
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("a racing writer failed: %v", err)
+		}
+	}
+	got, err := repo.Get(ctx, "race@example.test")
+	if err != nil || got == nil {
+		t.Fatalf("Get: %v %v", got, err)
+	}
+	if want := base.Add((n - 1) * time.Second); !got.LastAt.Equal(want) {
+		t.Fatalf("lastAt = %v, want the maximum %v", got.LastAt, want)
+	}
+}
+
+// A "$"-prefixed local part is a valid address (net/mail accepts it). The
+// update pipeline must write it as a literal, never read it as a field path,
+// or the row loses its address and the unsubscribe is silently lost.
+func TestMongo_OptoutUpsertDollarAddressIsLiteral(t *testing.T) {
+	repo, done := newTestOptoutRepo(t)
+	defer done()
+	ctx := context.Background()
+
+	const addr = "$x@example.com"
+	for i, at := range []time.Time{time.Unix(100, 0), time.Unix(200, 0)} {
+		if err := repo.Upsert(ctx, models.MarketingOptoutDoc{Address: addr, Category: "marketing", At: at}); err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+		got, err := repo.IsOptedOut(ctx, addr, "marketing")
+		if err != nil || !got {
+			t.Fatalf("after upsert %d: IsOptedOut = %v, %v; want true", i, got, err)
+		}
+		doc, err := repo.Get(ctx, addr)
+		if err != nil || doc == nil || doc.Address != addr {
+			t.Fatalf("after upsert %d: Get = %+v, %v; want address %q kept", i, doc, err, addr)
+		}
+	}
+	//tenantscope:allow system: test assertion against the platform-global opt-out collection, same scope as the repository it exercises
+	n, err := repo.col().CountDocuments(ctx, bson.M{})
+	if err != nil || n != 1 {
+		t.Fatalf("expected exactly one document, n=%d err=%v", n, err)
+	}
+}

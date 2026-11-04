@@ -53,9 +53,12 @@ const (
 	ServiceRAGQuery  ServiceKey = "rag.query"
 	ServiceRetrieval ServiceKey = "retrieval.service" // *retrieval/services.Service: RetrievalCorpusRegistry, RetrievalOutbox, RetrievalSearch, RetrievalPrincipalResolver (ADR-0023)
 
-	ServiceNotificationSender  ServiceKey = "notification.sender"
-	ServicePasswordService     ServiceKey = "auth.password"
-	ServicePasswordAuthService ServiceKey = "auth.password_auth"
+	ServiceNotificationSender ServiceKey = "notification.sender"
+	// ServiceMarketingOptoutManager is the audited lookup/lift/record of
+	// durable marketing opt-outs (iface.MarketingOptoutManager).
+	ServiceMarketingOptoutManager ServiceKey = "notification.marketing_optout_manager"
+	ServicePasswordService        ServiceKey = "auth.password"
+	ServicePasswordAuthService    ServiceKey = "auth.password_auth"
 
 	// ServiceSessionRevocation is the Redis-backed revoked-session set. Every
 	// authenticated request checks it before running the handler, so an
