@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { server } from 'test/server';
@@ -455,6 +455,66 @@ describe('ModuleConfigSection', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('API Key')).toHaveValue('')
     );
+  });
+
+  describe('saved notice', () => {
+    const mod = moduleWith([field({ key: 'host', label: 'Host' })]);
+    const okSave = () =>
+      server.use(
+        http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+          HttpResponse.json({
+            environment: 'production',
+            configValues: { host: 'b' },
+            secretStatus: {},
+            updatedAt: ''
+          })
+        )
+      );
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it('hides itself three seconds after a successful save', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      okSave();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderWithProviders(<TestHost mod={mod} />);
+
+      await user.type(screen.getByLabelText('Host'), 'b');
+      await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+      expect(
+        await screen.findByText('Configuration saved successfully.')
+      ).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(3000));
+      expect(
+        screen.queryByText('Configuration saved successfully.')
+      ).not.toBeInTheDocument();
+    });
+
+    // A timer left armed past unmount fires after the test environment is
+    // torn down — vitest then reports an unhandled `window is not defined`
+    // from a test that passed (struck under load on 2026-10-30).
+    it('cancels its timer when the page unmounts before it fires', async () => {
+      okSave();
+      const user = userEvent.setup();
+      const view = renderWithProviders(<TestHost mod={mod} />);
+
+      await user.type(screen.getByLabelText('Host'), 'b');
+      const setSpy = vi.spyOn(globalThis, 'setTimeout');
+      const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+      await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+      await screen.findByText('Configuration saved successfully.');
+
+      const index = setSpy.mock.calls.findIndex(([, ms]) => ms === 3000);
+      expect(index).toBeGreaterThanOrEqual(0);
+      const id = setSpy.mock.results[index].value;
+
+      view.unmount();
+      expect(clearSpy).toHaveBeenCalledWith(id);
+    });
   });
 
   it('flags stored values that violate their declared rules with no interaction at all', async () => {
