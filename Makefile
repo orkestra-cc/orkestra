@@ -102,9 +102,11 @@ redis-cli:
 # of `make ci-backend`: the validator is what gates a staging/production deploy.
 backend-script-tests:
 	@bash -n scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh \
+	    scripts/ci-stamp.sh scripts/test-ci-stamp.sh \
 	    orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh docker/tests/dev-frontend-deps.test.sh
 	@./scripts/test-env-file.sh
 	@./scripts/test-env-validate.sh
+	@./scripts/test-ci-stamp.sh
 	@bash scripts/test-orkestra-helpers.sh
 	@bash docker/tests/dev-frontend-deps.test.sh
 
@@ -171,7 +173,7 @@ frontend-client-clean:
 # ============================================================================
 
 .PHONY: install install-hooks fmt ci-help
-.PHONY: ci ci-all ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+.PHONY: ci ci-all ci-surfaces ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test agents-check agents-test
 .PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening backend-retrieval-hardening backend-frontend-nginx
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
@@ -183,11 +185,12 @@ frontend-client-clean:
 BASE_REF ?= origin/dev
 SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
 CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
-BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/% docker/frontend-admin/% frontend-admin/Dockerfile frontend-client/Dockerfile orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh,$(CI_CHANGED)),1,)
+BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/% docker/frontend-admin/% frontend-admin/Dockerfile frontend-client/Dockerfile scripts/ci-stamp.sh scripts/test-ci-stamp.sh orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
 MCP_CHANGED     := $(if $(filter .mcp.json .codex/config.toml .github/workflows/mcp-config.yml scripts/check-mcp-sync.py scripts/test-mcp-sync.py,$(CI_CHANGED)),1,)
+CI_SURFACES     := $(strip $(if $(BACKEND_CHANGED),backend) $(if $(ADMIN_CHANGED),frontend-admin) $(if $(CLIENT_CHANGED),frontend-client) $(if $(MOBILE_CHANGED),mobile) $(if $(MCP_CHANGED),mcp))
 
 # ---- Setup ----
 
@@ -276,9 +279,18 @@ ci:
 	@# No path filter: agents-check is sub-second, and a filter would miss the
 	@# untracked CLAUDE.md that /init writes in a new directory.
 	@$(MAKE) --no-print-directory agents-check
+	@# Reached only when everything above passed: lets the pre-push hook skip
+	@# a second gate on the same tree (scripts/ci-stamp.sh).
+	@./scripts/ci-stamp.sh write $(CI_SURFACES)
+
+# The surfaces `make ci` would check now, one word each (read by
+# scripts/ci-stamp.sh prepush to match a stamp).
+ci-surfaces:
+	@echo $(CI_SURFACES)
 
 ci-all: ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 	@echo "All surface checks passed."
+	@./scripts/ci-stamp.sh write backend frontend-admin frontend-client mobile mcp
 
 # ---- Shared MCP configuration ----
 

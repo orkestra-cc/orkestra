@@ -84,6 +84,8 @@ make ci      # auto-detects which surfaces you changed; runs only those checks
 
 The same `make` targets are what GitHub Actions runs. If `make ci` is green locally, CI will be green.
 
+The pre-push hook runs the same gate, but not twice: a green `make ci` (or `make ci-all`) on a clean tree leaves a stamp keyed by the git tree in `<git-common-dir>/ci-stamps/`, and `git push` skips the gate when the pushed commit's tree is stamped for every surface `make ci-surfaces` lists (`scripts/ci-stamp.sh`). A reworded commit with the same content still matches; any content change, or a newly touched surface, runs the gate again. `CI_GATE_FORCE=1 git push` forces it. The hook routes the gate through the host's `ci-gate` queue when that command is installed (octolabs-worktree `scripts/host/ci-gate`), otherwise it runs plain `make ci`. Gating before the push also keeps the push itself short: a gate run inside the hook holds the SSH connection open, and GitHub can close it before the hook ends.
+
 That parity is load-bearing on private forks, whose Actions runners are billing-blocked — `make ci` is the *only* gate they get. It is also why the lockfile checks live in the targets rather than in the workflows: CI installs with `npm ci` / `flutter pub get` **before** it calls `make`, so a lockfile that could no longer satisfy its manifest failed there and nowhere else — and on a fork with no runners, nowhere at all until the next production image build. The lockfile targets close that gap without touching an installed `node_modules`, so they are cheap enough to run on every push.
 
 | Command | What it runs |
