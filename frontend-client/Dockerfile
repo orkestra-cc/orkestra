@@ -36,7 +36,11 @@ RUN apk add --no-cache curl gettext
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# SPA fallback + /health endpoint.
+# SPA fallback + /health endpoint. Cache policy: /config.js no-store, hashed
+# /assets/ immutable, index.html (every SPA route) no-cache so a new build is
+# picked up on the next load instead of after a heuristic cache lifetime.
+# Locations that declare a header re-state the security ones (nginx does not
+# merge add_header across levels).
 RUN printf 'server {\n\
     listen 80;\n\
     server_name _;\n\
@@ -55,7 +59,16 @@ RUN printf 'server {\n\
         return 200 "healthy";\n\
         add_header Content-Type text/plain;\n\
     }\n\
+    location ^~ /assets/ {\n\
+        add_header Cache-Control "public, max-age=31536000, immutable";\n\
+        add_header X-Content-Type-Options "nosniff" always;\n\
+        try_files $uri =404;\n\
+    }\n\
     location / {\n\
+        add_header Cache-Control "no-cache" always;\n\
+        add_header X-Frame-Options "SAMEORIGIN" always;\n\
+        add_header X-Content-Type-Options "nosniff" always;\n\
+        add_header X-XSS-Protection "0" always;\n\
         try_files $uri $uri/ /index.html;\n\
     }\n\
 }\n' > /etc/nginx/conf.d/default.conf
