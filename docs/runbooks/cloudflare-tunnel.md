@@ -276,9 +276,13 @@ tunnel's requests over all of them — so check the hand-started one runs
 services. Then, in this order:
 
 1. start the compose connector next to it:
-   `cd docker && docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml [overlays…] --env-file .env --profile tunnel up -d --no-deps cloudflared`
-   (the stack's own files; on staging `docker-compose.staging.yml` in place of
-   `docker-compose.prod.yml`);
+   `cd docker && docker compose -p <APP_NAME>-<ENV> -f docker-compose.infra.yml -f docker-compose.prod.yml [overlays…] --env-file .env --profile tunnel up -d --no-deps cloudflared`
+   (the stack's own project name and files; on staging
+   `docker-compose.staging.yml` in place of `docker-compose.prod.yml`). The
+   `-p` is required: without it Compose names the project after the
+   directory (`docker`), and cloudflared lands on a network where the
+   services do not resolve while Cloudflare already sends it requests. Check
+   the name with `docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' <APP_NAME>-backend-<ENV>`;
 2. wait until it is ready:
    `docker run --rm --network container:<APP_NAME>-cloudflared-<ENV> cloudflare/cloudflared:2026.10.5 tunnel --metrics 127.0.0.1:20241 ready`
    exits 0 (retry for up to a minute);
@@ -312,7 +316,8 @@ service, and was taken over in this order.
 
 - With `CLOUDFLARE_TUNNEL=true`, `./orkestra.sh deploy` decodes the token and
   checks its tunnel id against `_tunnel_id` (another environment's tunnel is
-  refused), adds `--profile tunnel` to every compose command, runs `up -d
+  refused), adds `--profile tunnel` to its compose commands (the infra
+  `up` names its services, so it leaves cloudflared alone), runs `up -d
   --no-deps cloudflared` after the services and waits until it is ready: a
   redeploy never drops the only way in. Without the ENV's routes file or
   token it stops before building anything.
