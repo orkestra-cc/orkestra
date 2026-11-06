@@ -216,6 +216,8 @@ _restore_terminal() {
 
 _on_exit() {
     local code=$?
+    # Temp files a half-done write left (tunnel_write_atomic, tunnel_set_flag).
+    [ -z "${ORKESTRA_TMPFILES[*]+x}" ] || rm -f "${ORKESTRA_TMPFILES[@]}" 2> /dev/null || true
     _restore_terminal
     exit "$code"
 }
@@ -1323,6 +1325,24 @@ fullstack_execute_deploy() {
         COMMIT_MSG="Development build"
     fi
 
+    # Cloudflare Tunnel (CLOUDFLARE_TUNNEL=true, set by `tunnel switch
+    # tunnel`): the DNS points at this stack's cloudflared, so every compose
+    # command of the deploy carries the `tunnel` profile and the deploy keeps
+    # cloudflared up — a redeploy must never drop the only way in. Checked
+    # here, on the checked-out ref, before anything is built or started.
+    local tunnel_on=false
+    if tunnel_enabled; then
+        # Routes file, token, and the token's tunnel id against _tunnel_id:
+        # a deploy must never start another environment's tunnel.
+        tunnel_deploy_prepare
+        tunnel_on=true
+        compose_files+=(--profile tunnel)
+        p_ok "Cloudflare Tunnel enabled (docker/cloudflared/$ENV.json, tunnel $TUNNEL_ID)"
+    fi
+    # The switch's images stay on the host while the ENV has routes, so a
+    # switch mid-incident needs no registry. A failed pull only warns.
+    if [ "$ENV" != "development" ]; then tunnel_prepull; fi
+
     # --- Build images ---
     if [ "$REBUILD_IMAGES" = "yes" ] && [ "$DEPLOY_SCOPE" != "infra" ]; then
         p_section "Building Docker images"
@@ -1422,6 +1442,14 @@ fullstack_execute_deploy() {
             fi
         fi
         with_spinner "Waiting for services to initialize" sleep 30
+    fi
+
+    # Idempotent: compose leaves a running cloudflared alone unless its
+    # service definition changed. A routes change needs `tunnel reload`.
+    if [ "$tunnel_on" = true ]; then
+        with_spinner "Keeping the Cloudflare Tunnel up" \
+            compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" up -d --no-deps "$TUNNEL_SERVICE"
+        tunnel_wait_ready "The services are deployed, but the names on the tunnel answer 530 until cloudflared connects."
     fi
 
     # --- Health checks (non-dev) ---
@@ -1588,8 +1616,11 @@ fullstack_stop() {
     esac
 
     if [ "$stop_infra" = true ]; then
+        # With the tunnel profile, so `down` also removes cloudflared instead
+        # of leaving it attached to the network it is removing.
+        tunnel_profile_args
         with_spinner "Stopping the whole stack (app + infrastructure)" \
-            compose_stack --env-file "$ENV_FILE" down
+            compose_stack --env-file "$ENV_FILE" ${TUNNEL_PROFILE_ARGS[@]+"${TUNNEL_PROFILE_ARGS[@]}"} down
     fi
 }
 
@@ -1599,7 +1630,8 @@ fullstack_status() {
     echo
 
     p_section "Containers"
-    compose_stack --env-file "$ENV_FILE" ps
+    tunnel_profile_args
+    compose_stack --env-file "$ENV_FILE" ${TUNNEL_PROFILE_ARGS[@]+"${TUNNEL_PROFILE_ARGS[@]}"} ps
     echo
 
     if [ "$ENV" != "development" ]; then
@@ -2289,6 +2321,1031 @@ retrieval_view_logs() {
 }
 
 # ---------------------------------------------------------------------------
+# Cloudflare Tunnel switch (staging/production)
+# ---------------------------------------------------------------------------
+#
+# Moves this stack's public hostnames between the two ways in, without
+# changing a single URL:
+#
+#   direct  Cloudflare proxy -> DNS A/CNAME to the origin (or the zone's
+#           wildcard) -> reverse proxy -> the ports published on
+#           HOST_BIND_ADDRESS
+#   tunnel  Cloudflare proxy -> CNAME <tunnel-id>.cfargotunnel.com -> the
+#           stack's own `cloudflared` service (compose profile `tunnel`) ->
+#           the services by name on the stack network
+#
+# docker/cloudflared/<ENV>.json is the single source of the routes: it is
+# cloudflared's config file (JSON is YAML; cloudflared ignores the top-level
+# `_note`, `_tunnel_id` and `_smoke` keys) and the list of hostnames whose DNS
+# the switch moves. The tunnel is created in the Cloudflare dashboard WITHOUT
+# public hostnames, so the local ingress stays authoritative. The ports stay
+# published in both modes: going back is only a DNS change.
+#
+# Safety rules (docs/runbooks/cloudflare-tunnel.md):
+#   - every DNS change of a hostname is ONE batch call (deletes + posts),
+#     which Cloudflare applies all or nothing: a failure leaves the name as it
+#     was, never without a record;
+#   - the snapshot of a name's direct records is written before its first
+#     change and never overwritten; `switch direct` reconciles every name to
+#     it, whatever state a failed run left;
+#   - the DNS moves only towards a path proved to work: the tunnel once
+#     cloudflared is ready and every route answers from its network
+#     namespace, the direct path once the origin answers for each name;
+#   - a name whose smoke test fails after the move is put back automatically;
+#   - a wildcard record is never written, and a name with no record and no
+#     wildcard is an error.
+#
+# The container is addressed by its exact name (${APP_NAME}-cloudflared-${ENV})
+# and must carry this stack's compose project label: a host may run other
+# cloudflared containers (another stack's, or a hand-started connector) that
+# this code must never see as its own.
+
+TUNNEL_SERVICE="cloudflared"
+# Same pin as docker-compose.prod.yml (the test checks they agree): the
+# readiness probe runs this image, already on the host once cloudflared ran.
+TUNNEL_IMAGE="cloudflare/cloudflared:2026.10.5"
+# Metrics/ingress probes need curl; a deploy pre-pulls it.
+TUNNEL_PROBE_IMAGE="curlimages/curl:8.11.1"
+TUNNEL_METRICS="127.0.0.1:20241"
+# Overridable only to point the switch at a mock API in tests; read from the
+# process environment, never from docker/.env.
+TUNNEL_CF_API="${CLOUDFLARE_API_URL:-https://api.cloudflare.com/client/v4}"
+# Readiness wait (attempts x 2 s), smoke retries per name (attempts x 5 s),
+# consecutive all-green smoke rounds, and the drain of cloudflared after
+# `switch direct`: total requests flat for FLAT samples (x 5 s), at most MAX.
+TUNNEL_READY_ATTEMPTS="${TUNNEL_READY_ATTEMPTS:-30}"
+TUNNEL_SMOKE_ATTEMPTS="${TUNNEL_SMOKE_ATTEMPTS:-6}"
+TUNNEL_SMOKE_ROUNDS="${TUNNEL_SMOKE_ROUNDS:-2}"
+TUNNEL_DRAIN_FLAT_SAMPLES="${TUNNEL_DRAIN_FLAT_SAMPLES:-6}"
+TUNNEL_DRAIN_MAX_SAMPLES="${TUNNEL_DRAIN_MAX_SAMPLES:-36}"
+
+# Temporary files to remove on exit (see _on_exit).
+declare -a ORKESTRA_TMPFILES=()
+
+# tunnel_enabled — CLOUDFLARE_TUNNEL=true in docker/.env of a staging or
+# production stack: deploy, stop and status then include the `tunnel` profile.
+tunnel_enabled() {
+    case "${ENV:-}" in staging | production) ;; *) return 1 ;; esac
+    [ "$(env_get_active "$ENV_FILE" CLOUDFLARE_TUNNEL)" = true ]
+}
+
+# tunnel_profile_args — sets the global TUNNEL_PROFILE_ARGS to
+# (--profile tunnel) when the tunnel is enabled, () otherwise.
+declare -a TUNNEL_PROFILE_ARGS=()
+tunnel_profile_args() {
+    TUNNEL_PROFILE_ARGS=()
+    if tunnel_enabled; then TUNNEL_PROFILE_ARGS=(--profile tunnel); fi
+}
+
+# tunnel_routes_file — path of this ENV's routes file.
+tunnel_routes_file() { printf '%s/cloudflared/%s.json' "$DOCKER_DIR" "$ENV"; }
+
+# tunnel_check_routes — dies unless this ENV's routes file exists, is valid
+# JSON with at least one hostname, ends with a catch-all rule, lists no
+# wildcard and is readable by cloudflared's non-root user. Sets TUNNEL_ROUTES
+# and TUNNEL_HOSTNAMES.
+tunnel_check_routes() {
+    TUNNEL_ROUTES=$(tunnel_routes_file)
+    [ -f "$TUNNEL_ROUTES" ] || die "No routes file for $ENV: docker/cloudflared/$ENV.json. The base ships no routes: copy docker/cloudflared/$ENV.json.example, list this stack's hostnames, commit it in the fork (docs/runbooks/cloudflare-tunnel.md)."
+    jq -e 'type == "object" and (.ingress | type == "array")' "$TUNNEL_ROUTES" > /dev/null 2>&1 \
+        || die "$TUNNEL_ROUTES is not a routes file (JSON object with an ingress array)"
+    jq -e '.ingress | length > 0 and (.[-1] | has("hostname") | not)' "$TUNNEL_ROUTES" > /dev/null \
+        || die "$TUNNEL_ROUTES: the last ingress rule must be the catch-all without hostname ({\"service\": \"http_status:404\"})"
+    TUNNEL_HOSTNAMES=$(jq -r '.ingress[] | select(.hostname) | .hostname' "$TUNNEL_ROUTES")
+    [ -n "$TUNNEL_HOSTNAMES" ] || die "$TUNNEL_ROUTES has no hostname"
+    # The switch writes one record per listed name and never a wildcard.
+    if printf '%s\n' "$TUNNEL_HOSTNAMES" | grep -q '\*'; then
+        die "$TUNNEL_ROUTES lists a wildcard hostname: the switch moves exact names only (a wildcard record is never touched)"
+    fi
+    # cloudflared runs as a non-root uid (remapped too under userns-remap):
+    # the directory mount is useless if the file is not world-readable.
+    [ -n "$(find "$TUNNEL_ROUTES" -perm -o=r 2> /dev/null)" ] \
+        || die "$TUNNEL_ROUTES is not world-readable: cloudflared runs as a non-root user (chmod 644)"
+}
+
+# tunnel_load_inputs — paths and docker/.env inputs of the switch (also used
+# by a tunnel-enabled deploy). Needs ENV, APP_NAME, DOCKER_DIR, ENV_FILE.
+tunnel_load_inputs() {
+    TUNNEL_STATE_DIR="$DOCKER_DIR/cloudflared/state"
+    TUNNEL_SNAPSHOT="$TUNNEL_STATE_DIR/$ENV-direct-dns.json"
+    TUNNEL_CONTAINER="${APP_NAME}-cloudflared-${ENV}"
+    TUNNEL_TOKEN=$(env_get_active "$ENV_FILE" CLOUDFLARE_TUNNEL_TOKEN)
+    TUNNEL_API_TOKEN=$(env_get_active "$ENV_FILE" CLOUDFLARE_API_TOKEN)
+    TUNNEL_ZONE_ID=$(env_get_active "$ENV_FILE" CLOUDFLARE_ZONE_ID)
+    TUNNEL_DIRECT_ORIGIN=$(env_get_active "$ENV_FILE" CLOUDFLARE_DIRECT_ORIGIN)
+    TUNNEL_DIRECT_CHECK_IP=$(env_get_active "$ENV_FILE" CLOUDFLARE_DIRECT_CHECK_IP)
+    TUNNEL_ID=""
+}
+
+# tunnel_init_env — resolve the stack and every input of the switch. Refuses
+# development, and a shell ENV that disagrees with docker/.env.
+tunnel_init_env() {
+    [ -f "$ENV_FILE" ] || die "docker/.env not found: the tunnel switch runs from a deployed staging/production checkout"
+    if ! detect_environment > /dev/null 2>&1; then
+        die "Cannot detect ENV. Set ENV=staging|production in docker/.env."
+    fi
+    ENV="$DETECTED_ENV"
+    case "$ENV" in
+        staging | production) ;;
+        *) die "Cloudflare Tunnel is for staging and production only (ENV=$ENV)" ;;
+    esac
+    local file_env
+    file_env=$(env_get_active "$ENV_FILE" ENV)
+    [ "$file_env" = "$ENV" ] \
+        || die "Shell ENV=$ENV but docker/.env says ENV=${file_env:-<unset>}: run the switch from the $ENV checkout"
+    set_env_config
+    resolve_stack_identity
+    command -v jq > /dev/null 2>&1 || die "jq is required"
+    command -v curl > /dev/null 2>&1 || die "curl is required"
+    tunnel_check_routes
+    tunnel_load_inputs
+}
+
+# tunnel_lock — one tunnel command per stack at a time (flock on a file in
+# the state directory, held until the process exits).
+tunnel_lock() {
+    mkdir -p "$TUNNEL_STATE_DIR"
+    chmod 700 "$TUNNEL_STATE_DIR" 2> /dev/null || true
+    if ! command -v flock > /dev/null 2>&1; then
+        p_warn "flock not found: concurrent tunnel commands on this stack are not prevented"
+        return 0
+    fi
+    exec 9> "$TUNNEL_STATE_DIR/.lock"
+    flock -n 9 || die "Another './orkestra.sh tunnel' is running on $STACK (lock: ${TUNNEL_STATE_DIR#"$PROJECT_ROOT"/}/.lock)"
+}
+
+# tunnel_write_atomic FILE — stdin to FILE through a temp file in the same
+# directory and a rename: a reader (or a crash) never sees half a file.
+tunnel_write_atomic() {
+    local file=$1 dir tmp
+    dir=$(dirname "$file")
+    mkdir -p "$dir"
+    tmp=$(mktemp "$dir/.$(basename "$file").XXXXXX") || die "Cannot create a temporary file in $dir"
+    ORKESTRA_TMPFILES+=("$tmp")
+    if ! cat > "$tmp"; then
+        rm -f "$tmp"
+        die "Cannot write $file"
+    fi
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$file"
+}
+
+# tunnel_set_flag true|false — CLOUDFLARE_TUNNEL in docker/.env (env_set
+# writes a temp file next to it and renames it).
+tunnel_set_flag() {
+    ORKESTRA_TMPFILES+=("${ENV_FILE}.tmp.$$")
+    env_set "$ENV_FILE" CLOUDFLARE_TUNNEL "$1"
+}
+
+# tunnel_decode_token — the tunnel token is base64 JSON {"a": account tag,
+# "t": tunnel id, "s": secret}. Sets TUNNEL_ID and checks it is the tunnel
+# pinned for this ENV.
+tunnel_decode_token() {
+    [ -n "$TUNNEL_TOKEN" ] || die "CLOUDFLARE_TUNNEL_TOKEN is empty in docker/.env"
+    if [[ "$TUNNEL_TOKEN" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+        die "CLOUDFLARE_TUNNEL_TOKEN looks like the tunnel ID: paste the token (the eyJ... string of Networks > Tunnels > <name> > install command)"
+    fi
+    local decoded
+    decoded=$(tunnel_token_json "$TUNNEL_TOKEN")
+    [ -n "$decoded" ] || die "CLOUDFLARE_TUNNEL_TOKEN is not a valid tunnel token"
+    TUNNEL_ID=$(printf '%s' "$decoded" | jq -r '.t // empty')
+    [ -n "$TUNNEL_ID" ] || die "CLOUDFLARE_TUNNEL_TOKEN carries no tunnel id"
+    tunnel_check_id
+}
+
+# tunnel_token_json TOKEN — the decoded JSON object of a tunnel token, "" if
+# it is not one.
+tunnel_token_json() {
+    local padded=$1 decoded
+    while [ $((${#padded} % 4)) -ne 0 ]; do padded="$padded="; done
+    decoded=$(printf '%s' "$padded" | tr '_-' '/+' | base64 -d 2> /dev/null) || decoded=""
+    if printf '%s' "$decoded" | jq -e 'type == "object"' > /dev/null 2>&1; then
+        printf '%s' "$decoded"
+    fi
+}
+
+# tunnel_other_replicas — names of the running containers, ours excepted,
+# that run THIS tunnel: a TUNNEL_TOKEN variable or a --token argument whose
+# tunnel id is TUNNEL_ID, or the id itself in their arguments (a hand-started
+# connector, another checkout's stack). One per line. Read only: they are
+# never stopped or touched, and no token is ever printed.
+tunnel_other_replicas() {
+    local ids id line name rest tok
+    ids=$(docker ps -q 2> /dev/null) || return 0
+    for id in $ids; do
+        line=$(docker inspect --type container \
+            -f '{{.Name}}{{"\t"}}{{.Config.Image}} {{range .Config.Env}}{{.}} {{end}}{{join .Args " "}}' \
+            "$id" 2> /dev/null) || continue
+        name=${line%%$'\t'*}
+        name=${name#/}
+        rest=${line#*$'\t'}
+        [ -n "$name" ] && [ "$name" != "$TUNNEL_CONTAINER" ] || continue
+        case "$rest" in *cloudflared* | *TUNNEL_TOKEN=* | *--token*) ;; *) continue ;; esac
+        if [[ "$rest" == *"$TUNNEL_ID"* ]]; then
+            printf '%s\n' "$name"
+            continue
+        fi
+        for tok in $(printf '%s' "$rest" | grep -oE '(TUNNEL_TOKEN=|--token[ =])[A-Za-z0-9_+/=-]+' | sed -E 's/^(TUNNEL_TOKEN=|--token[ =])//'); do
+            if [ "$(tunnel_token_json "$tok" | jq -r '.t // empty' 2> /dev/null)" = "$TUNNEL_ID" ]; then
+                printf '%s\n' "$name"
+                break
+            fi
+        done
+    done
+}
+
+# tunnel_warn_other_replicas — say which other connectors of this tunnel run
+# here. Cloudflare spreads the tunnel's requests over all of them, so nothing
+# per-connector (its request counter) proves where a request went: the switch
+# relies on the HTTP answers only. Sets T_OTHERS.
+tunnel_warn_other_replicas() {
+    T_OTHERS=$(tunnel_other_replicas)
+    [ -n "$T_OTHERS" ] || return 0
+    p_warn "Other connector(s) of tunnel $TUNNEL_ID run on this host: $(printf '%s' "$T_OTHERS" | paste -sd ' ' -) — Cloudflare spreads the tunnel's requests over them too, so they must route like docker/cloudflared/$ENV.json. Only the HTTP answers are checked. Remove them (docker rm -f <name>) once $TUNNEL_CONTAINER is ready: runbook «Taking over from a hand-started connector»."
+}
+
+# tunnel_check_id — one tunnel per environment: two hosts running one token
+# are replicas of one tunnel, and Cloudflare spreads every hostname's requests
+# over both. The token must carry this ENV's _tunnel_id, and no other ENV's.
+tunnel_check_id() {
+    local pinned file other
+    pinned=$(jq -r '._tunnel_id // empty' "$TUNNEL_ROUTES")
+    for file in "$DOCKER_DIR"/cloudflared/*.json; do
+        [ -f "$file" ] || continue
+        [ "$file" = "$TUNNEL_ROUTES" ] && continue
+        other=$(jq -r '._tunnel_id // empty' "$file" 2> /dev/null || true)
+        if [ -n "$other" ] && [ "$other" = "$TUNNEL_ID" ]; then
+            die "CLOUDFLARE_TUNNEL_TOKEN is the tunnel of $(basename "$file" .json) ($TUNNEL_ID): $ENV needs its own tunnel"
+        fi
+    done
+    case "$pinned" in
+        "" | TODO*) die "No _tunnel_id in $TUNNEL_ROUTES: write $TUNNEL_ID there (and commit it) if it is the $ENV tunnel" ;;
+    esac
+    [ "$pinned" = "$TUNNEL_ID" ] \
+        || die "CLOUDFLARE_TUNNEL_TOKEN is tunnel $TUNNEL_ID, but $TUNNEL_ROUTES pins $pinned for $ENV"
+}
+
+# tunnel_cf METHOD PATH [JSON BODY] — prints the API's .result, dies on an
+# error. The API token reaches curl on stdin (-K -), never in argv.
+tunnel_cf() {
+    local method=$1 path=$2 body=${3:-} response
+    [ -n "$TUNNEL_API_TOKEN" ] || die "CLOUDFLARE_API_TOKEN is empty in docker/.env"
+    local -a args=(-sS -m 30 -K - -X "$method" "$TUNNEL_CF_API$path")
+    if [ -n "$body" ]; then
+        args+=(-H "Content-Type: application/json" --data "$body")
+    fi
+    response=$(printf 'header = "Authorization: Bearer %s"\n' "$TUNNEL_API_TOKEN" | curl "${args[@]}") \
+        || die "Cloudflare API unreachable ($method $path)"
+    if [ "$(printf '%s' "$response" | jq -r '.success' 2> /dev/null)" != "true" ]; then
+        die "Cloudflare API $method $path: $(printf '%s' "$response" | jq -c '.errors' 2> /dev/null || printf '%s' "$response" | head -c 300)"
+    fi
+    printf '%s' "$response" | jq -c '.result'
+}
+
+# tunnel_resolve_zone — CLOUDFLARE_ZONE_ID, or the zone named by the last two
+# labels of the first hostname (set the id for a zone like example.co.uk).
+tunnel_resolve_zone() {
+    [ -n "$TUNNEL_ZONE_ID" ] && return 0
+    local first zone result host
+    first=$(printf '%s\n' "$TUNNEL_HOSTNAMES" | head -1)
+    zone=$(printf '%s' "$first" | awk -F. '{print $(NF-1)"."$NF}')
+    for host in $TUNNEL_HOSTNAMES; do
+        case "$host" in
+            "$zone" | *."$zone") ;;
+            *) die "$host is not in zone $zone: one routes file serves one zone (or set CLOUDFLARE_ZONE_ID)" ;;
+        esac
+    done
+    result=$(tunnel_cf GET "/zones?name=$zone") || exit 1
+    TUNNEL_ZONE_ID=$(printf '%s' "$result" | jq -r '.[0].id // empty')
+    [ -n "$TUNNEL_ZONE_ID" ] || die "Zone $zone not found: set CLOUDFLARE_ZONE_ID in docker/.env"
+}
+
+tunnel_target() { printf '%s.cfargotunnel.com' "$TUNNEL_ID"; }
+
+# tunnel_records_named NAME QUERY_NAME — A/AAAA/CNAME records whose name is
+# exactly NAME (the filter is ours too: an API answer that also listed the
+# wildcard must not make it look like the name's own record).
+tunnel_records_named() {
+    local result
+    result=$(tunnel_cf GET "/zones/$TUNNEL_ZONE_ID/dns_records?name=$2&per_page=100") || exit 1
+    printf '%s' "$result" | jq -c --arg n "$1" \
+        '[.[] | select(.name == $n and (.type == "A" or .type == "AAAA" or .type == "CNAME"))]'
+}
+
+tunnel_dns_records() { tunnel_records_named "$1" "$1"; }
+
+# tunnel_wildcard_name HOST — the wildcard record that would answer for HOST
+# when it has no record of its own (*.<parent>), "" for a two-label name.
+tunnel_wildcard_name() {
+    local parent=${1#*.}
+    case "$parent" in *.*) printf '*.%s' "$parent" ;; *) printf '' ;; esac
+}
+
+# tunnel_wildcard_records HOST — the A/AAAA/CNAME records of HOST's wildcard
+# ([] when there is none). Read only: the switch never writes a wildcard.
+tunnel_wildcard_records() {
+    local wildcard
+    wildcard=$(tunnel_wildcard_name "$1")
+    [ -n "$wildcard" ] || { printf '[]'; return 0; }
+    tunnel_records_named "$wildcard" "%2A.${wildcard#\*.}"
+}
+
+# tunnel_points_to_tunnel RECORDS_JSON — exactly one CNAME to this tunnel.
+tunnel_points_to_tunnel() {
+    printf '%s' "$1" | jq -e --arg t "$(tunnel_target)" \
+        'length == 1 and .[0].type == "CNAME" and .[0].content == $t' > /dev/null
+}
+
+# tunnel_norm RECORDS_JSON — what a record set answers, for comparisons.
+tunnel_norm() {
+    printf '%s' "$1" | jq -c 'map({type, content: (.content | ascii_downcase), proxied: (.proxied // false)}) | sort_by(.type, .content)'
+}
+
+tunnel_describe_records() {
+    printf '%s' "$1" | jq -r 'map("\(.type) \(.content)\(if .proxied then " (proxied)" else "" end)") | join(", ")'
+}
+
+# tunnel_classify HOST — sets T_CUR (the name's own A/AAAA/CNAME records),
+# T_WILD (its wildcard's, read only when it has none) and T_KIND:
+#   tunnel        one CNAME to this tunnel
+#   other-tunnel  a CNAME to another *.cfargotunnel.com (T_OTHER): neither
+#                 direct nor something to snapshot
+#   direct        records of its own
+#   wildcard      none of its own, a wildcard answers
+#   none          no record and no wildcard: the name does not resolve
+tunnel_classify() {
+    local host=$1
+    T_CUR=$(tunnel_dns_records "$host") || exit 1
+    T_WILD='[]'
+    T_OTHER=""
+    if tunnel_points_to_tunnel "$T_CUR"; then
+        T_KIND=tunnel
+        return 0
+    fi
+    T_OTHER=$(printf '%s' "$T_CUR" | jq -r --arg t "$(tunnel_target)" \
+        '[.[] | select(.type == "CNAME" and (.content | endswith(".cfargotunnel.com")) and .content != $t) | .content] | first // empty')
+    if [ -n "$T_OTHER" ]; then
+        T_KIND=other-tunnel
+    elif [ "$(printf '%s' "$T_CUR" | jq 'length')" -gt 0 ]; then
+        T_KIND=direct
+    else
+        T_WILD=$(tunnel_wildcard_records "$host") || exit 1
+        if [ "$(printf '%s' "$T_WILD" | jq 'length')" -gt 0 ]; then T_KIND=wildcard; else T_KIND=none; fi
+    fi
+}
+
+# Snapshot: per hostname {"records": [{type, name, content, proxied, ttl,
+# comment, tags}...], "via_wildcard": bool} — the name's own records before
+# its first switch, or [] with via_wildcard=true when the wildcard answered.
+tunnel_snapshot_load() {
+    T_SNAP='{}'
+    if [ -f "$TUNNEL_SNAPSHOT" ]; then
+        T_SNAP=$(jq -c 'if type == "object" then . else error("not an object") end' "$TUNNEL_SNAPSHOT" 2> /dev/null) \
+            || die "${TUNNEL_SNAPSHOT#"$PROJECT_ROOT"/} is not a valid snapshot: fix or move it (it is the way back)"
+    fi
+}
+
+tunnel_snapshot_has() {
+    printf '%s' "$T_SNAP" | jq -e --arg h "$1" '.[$h] | type == "object" and (.records | type == "array")' > /dev/null
+}
+
+# tunnel_snapshot_add HOST RECORDS_JSON VIA_WILDCARD — adds HOST's entry and
+# writes the file; an existing entry is never overwritten.
+tunnel_snapshot_add() {
+    tunnel_snapshot_has "$1" && return 0
+    T_SNAP=$(printf '%s' "$T_SNAP" | jq -c --arg h "$1" --argjson r "$2" --argjson w "$3" \
+        '.[$h] = {records: ($r | map({type, name, content, proxied, ttl, comment, tags})), via_wildcard: $w}')
+    # Not a pipeline: tunnel_write_atomic must run in this shell (its temp
+    # file is registered for cleanup, and its die must stop the switch).
+    tunnel_write_atomic "$TUNNEL_SNAPSHOT" < <(printf '%s\n' "$T_SNAP" | jq .)
+}
+
+tunnel_snapshot_records() { printf '%s' "$T_SNAP" | jq -c --arg h "$1" '.[$h].records'; }
+tunnel_snapshot_via_wildcard() { [ "$(printf '%s' "$T_SNAP" | jq -r --arg h "$1" '.[$h].via_wildcard // false')" = true ]; }
+
+# tunnel_postable RECORDS_JSON — records as the API takes them on create.
+tunnel_postable() {
+    printf '%s' "$1" | jq -c 'map({type, name, content, proxied, ttl, comment, tags} | with_entries(select(.value != null and .value != [])))'
+}
+
+tunnel_cname_records() {
+    jq -nc --arg n "$1" --arg c "$(tunnel_target)" \
+        '[{type: "CNAME", name: $n, content: $c, proxied: true, ttl: 1, comment: "orkestra.sh tunnel"}]'
+}
+
+# tunnel_swap HOST CURRENT_JSON NEW_JSON — replaces HOST's records in ONE
+# batch call (deletes, then posts), which Cloudflare applies all or nothing.
+# Returns 1 on failure: the name is then exactly as it was.
+tunnel_swap() {
+    local body
+    body=$(jq -nc --argjson cur "$2" --argjson new "$(tunnel_postable "$3")" \
+        '{deletes: ($cur | map({id})), posts: $new}')
+    (tunnel_cf POST "/zones/$TUNNEL_ZONE_ID/dns_records/batch" "$body" > /dev/null)
+}
+
+# tunnel_container_state — "running" / "stopped" when the container named
+# TUNNEL_CONTAINER exists AND belongs to this stack's compose project,
+# "foreign" when that name belongs to something else, "" when absent.
+tunnel_container_state() {
+    local out running project
+    out=$(docker inspect --type container -f '{{.State.Running}}|{{index .Config.Labels "com.docker.compose.project"}}' \
+        "$TUNNEL_CONTAINER" 2> /dev/null) || out=""
+    [ -n "$out" ] || { printf ''; return 0; }
+    running=${out%%|*}
+    project=${out#*|}
+    if [ "$project" != "$COMPOSE_PROJECT_NAME" ]; then
+        printf 'foreign'
+    elif [ "$running" = true ]; then
+        printf 'running'
+    else
+        printf 'stopped'
+    fi
+}
+
+# tunnel_ensure_image IMAGE — present locally, or pulled; a pull failure is
+# reported as such (mid-incident the registry may be the problem).
+tunnel_ensure_image() {
+    docker image inspect "$1" > /dev/null 2>&1 && return 0
+    p_step "Pulling $1"
+    docker pull -q "$1" > /dev/null 2>&1 \
+        || die "Cannot pull $1 (registry unreachable?). Pull it when the registry answers; a deploy pre-pulls it while docker/cloudflared/$ENV.json exists."
+}
+
+# tunnel_is_ready — cloudflared's /ready answers 200 (at least one edge
+# connection). Read with the pinned cloudflared image itself (`tunnel ready`),
+# which is on the host as soon as cloudflared ran: no pull needed.
+tunnel_is_ready() {
+    [ "$(tunnel_container_state)" = running ] || return 1
+    docker run --rm --network "container:$TUNNEL_CONTAINER" --read-only --cap-drop ALL \
+        --security-opt no-new-privileges:true "$TUNNEL_IMAGE" \
+        tunnel --metrics "$TUNNEL_METRICS" ready > /dev/null 2>&1
+}
+
+# tunnel_wait_ready [WHAT-WAS-CHANGED] — dies after the wait; the message
+# says what the caller had (not) changed.
+tunnel_wait_ready() {
+    local changed=${1:-"No DNS record was changed."} i
+    p_step "Waiting for cloudflared to connect to Cloudflare"
+    for ((i = 0; i < TUNNEL_READY_ATTEMPTS; i++)); do
+        if tunnel_is_ready; then
+            p_ok "Tunnel ready"
+            return 0
+        fi
+        sleep 2
+    done
+    die "cloudflared not ready after $((TUNNEL_READY_ATTEMPTS * 2)) s: check 'docker logs $TUNNEL_CONTAINER' and the token. $changed"
+}
+
+# tunnel_probe ARGS... — curl from cloudflared's network namespace.
+tunnel_probe() {
+    docker run --rm --network "container:$TUNNEL_CONTAINER" --cap-drop ALL \
+        --security-opt no-new-privileges:true "$TUNNEL_PROBE_IMAGE" "$@" 2> /dev/null
+}
+
+# tunnel_total_requests — cloudflared_tunnel_total_requests, "" if unreadable.
+tunnel_total_requests() {
+    local body
+    body=$(tunnel_probe -s -m 5 "http://$TUNNEL_METRICS/metrics") || { printf ''; return 0; }
+    printf '%s\n' "$body" | awk '/^cloudflared_tunnel_total_requests[ {]/ {s += $NF; seen = 1} END {if (seen) printf "%d", s}'
+}
+
+# tunnel_check_remote_config — a tunnel with public hostnames in the
+# dashboard pushes a remote configuration that overrides the routes file.
+tunnel_check_remote_config() {
+    if docker logs "$TUNNEL_CONTAINER" 2>&1 | grep -q 'Updated to new configuration'; then
+        die "cloudflared received a REMOTE configuration (dashboard public hostnames): it overrides docker/cloudflared/$ENV.json. Remove the tunnel's public hostnames in the dashboard, then './orkestra.sh tunnel reload'."
+    fi
+}
+
+# tunnel_validate_ingress — cloudflared's own check of the routes file, in a
+# throwaway container with no network.
+tunnel_validate_ingress() {
+    local out
+    out=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+        -v "$DOCKER_DIR/cloudflared:/etc/cloudflared:ro" "$TUNNEL_IMAGE" \
+        tunnel --config "/etc/cloudflared/$ENV.json" ingress validate 2>&1) \
+        || die "docker/cloudflared/$ENV.json fails 'cloudflared tunnel ingress validate': $out"
+}
+
+# tunnel_probe_services — every hostname's service at its _smoke path, from
+# cloudflared's network namespace, with the public Host header: what the
+# tunnel will do, proved before any name moves. 2xx/3xx only.
+tunnel_probe_services() {
+    local host service path code failed=""
+    tunnel_ensure_image "$TUNNEL_PROBE_IMAGE"
+    p_step "Probing every route from cloudflared's network"
+    for host in $TUNNEL_HOSTNAMES; do
+        service=$(jq -r --arg h "$host" '[.ingress[] | select(.hostname == $h) | .service] | first' "$TUNNEL_ROUTES")
+        case "$service" in http://* | https://*) ;; *) continue ;; esac
+        path=$(jq -r --arg h "$host" '._smoke[$h] // "/"' "$TUNNEL_ROUTES")
+        code=$(tunnel_probe -sk -m 10 -o /dev/null -w '%{http_code}' -H "Host: $host" "${service%/}$path") || code=000
+        if tunnel_good_status "$code"; then
+            p_ok "$host -> $service$path: HTTP $code"
+        else
+            p_warn "$host -> $service$path: HTTP ${code:-000}"
+            failed="$failed $host"
+        fi
+    done
+    [ -z "$failed" ] || die "Routes that do not answer from cloudflared:$failed. Fix the service or docker/cloudflared/$ENV.json first. No DNS record was changed."
+}
+
+# tunnel_compose ARGS... — docker compose over this stack's files (overlays
+# included, like every command that touches the stack) with the tunnel profile.
+tunnel_compose() {
+    stack_compose_files
+    docker compose "${STACK_COMPOSE_FILES[@]}" --env-file "$ENV_FILE" --profile tunnel "$@"
+}
+
+# tunnel_check_external_networks — compose refuses to start ANY service while
+# an external network the files declare is missing: say which, before trying.
+tunnel_check_external_networks() {
+    local rendered net missing=""
+    rendered=$(tunnel_compose config --format json 2> /dev/null) \
+        || die "docker compose cannot render this stack (run './orkestra.sh status' to see why)"
+    for net in $(printf '%s' "$rendered" | jq -r '.networks // {} | to_entries[] | select(.value.external == true) | .value.name // .key'); do
+        docker network inspect "$net" > /dev/null 2>&1 || missing="$missing $net"
+    done
+    [ -z "$missing" ] || die "External network(s) missing for this stack:$missing — create them first (docker network create <name>)"
+}
+
+# tunnel_http_status URL — HTTP status through Cloudflare, 000 on no answer.
+tunnel_http_status() {
+    local code
+    code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$1" 2> /dev/null) || true
+    printf '%s' "${code:-000}"
+}
+
+# tunnel_direct_probe HOST TARGET PATH — the origin itself (TARGET: an IP or
+# hostname) answering for HOST on 443, without going through Cloudflare.
+tunnel_direct_probe() {
+    local target=$2 code
+    case "$target" in *:*) target="[$target]" ;; esac
+    code=$(curl -sk -m 15 -o /dev/null -w '%{http_code}' --connect-to "$1:443:$target:443" "https://$1$3" 2> /dev/null) || true
+    printf '%s' "${code:-000}"
+}
+
+# A status that proves the route: 2xx or 3xx. Not 000 (no answer), not 404
+# (the tunnel's catch-all), not 5xx (502 origin, 522 timeout, 530 tunnel).
+tunnel_good_status() {
+    case "$1" in '' | *[!0-9]*) return 1 ;; esac
+    [ "$1" -ge 200 ] && [ "$1" -lt 400 ]
+}
+
+# tunnel_smoke_url HOST — https://HOST<_smoke> with a cache-busting query.
+tunnel_smoke_url() {
+    local path sep
+    path=$(jq -r --arg h "$1" '._smoke[$h] // "/"' "$TUNNEL_ROUTES")
+    case "$path" in *\?*) sep='&' ;; *) sep='?' ;; esac
+    printf 'https://%s%s%s_orkestra_smoke=%s%s' "$1" "$path" "$sep" "$(date +%s)" "$RANDOM"
+}
+
+# tunnel_smoke_test — TUNNEL_SMOKE_ROUNDS consecutive rounds in which every
+# hostname answers 2xx/3xx through Cloudflare. Sets T_FAILED (names failing
+# the last round); returns 1 on a failure.
+tunnel_smoke_test() {
+    local host code round i url
+    T_FAILED=""
+    p_step "Smoke test through Cloudflare ($TUNNEL_SMOKE_ROUNDS consecutive green rounds)"
+    for ((round = 1; round <= TUNNEL_SMOKE_ROUNDS; round++)); do
+        for host in $TUNNEL_HOSTNAMES; do
+            code=000
+            for ((i = 0; i < TUNNEL_SMOKE_ATTEMPTS; i++)); do
+                url=$(tunnel_smoke_url "$host")
+                code=$(tunnel_http_status "$url")
+                tunnel_good_status "$code" && break
+                sleep 5
+            done
+            if tunnel_good_status "$code"; then
+                [ "$round" -lt "$TUNNEL_SMOKE_ROUNDS" ] || p_ok "$host -> HTTP $code"
+            else
+                p_warn "$host -> HTTP $code (round $round)"
+                # One name per line: orkestra.sh splits words on newlines only.
+                T_FAILED="${T_FAILED:+$T_FAILED$'\n'}$host"
+            fi
+        done
+        [ -z "$T_FAILED" ] || return 1
+    done
+    return 0
+}
+
+# tunnel_proxy_hint — the backend resolves the client IP from the hops it
+# trusts. Through the tunnel its peer is cloudflared on the stack network and
+# X-Forwarded-For holds only what the Cloudflare edge wrote; through
+# Cloudflare + a reverse proxy the chain is one hop longer. A hop count fits
+# one mode only; TRUSTED_PROXY_CIDRS covering the reverse proxy and this
+# stack's network fits both. Warns when the setting will collapse callers
+# onto cloudflared's address (one rate-limit bucket for the whole internet).
+tunnel_proxy_hint() {
+    local count cidrs subnets subnet net covered c
+    count=$(env_get_active "$ENV_FILE" TRUSTED_PROXY_COUNT)
+    cidrs=$(env_get_active "$ENV_FILE" TRUSTED_PROXY_CIDRS)
+    if [ -z "$cidrs" ]; then
+        case "${count:-0}" in
+            1) p_warn "TRUSTED_PROXY_COUNT=1 fits the tunnel only: back on the direct path (Cloudflare -> reverse proxy) it reads the wrong hop. Prefer TRUSTED_PROXY_CIDRS (reverse proxy + this stack's network) — docs/runbooks/cloudflare-tunnel.md «Client IP»" ;;
+            *) p_warn "TRUSTED_PROXY_COUNT=${count:-0} with no TRUSTED_PROXY_CIDRS: through the tunnel the backend sees ONE hop, so every caller would get cloudflared's address. Set TRUSTED_PROXY_CIDRS (reverse proxy + this stack's network) — docs/runbooks/cloudflare-tunnel.md «Client IP»" ;;
+        esac
+        return 0
+    fi
+    subnets=$(docker network inspect "${COMPOSE_PROJECT_NAME}_default" \
+        -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2> /dev/null) || subnets=""
+    for subnet in ${subnets// /$'\n'}; do
+        net=${subnet%/*}
+        case "$net" in *:*) continue ;; esac
+        covered=false
+        local -a list=()
+        IFS=, read -r -a list <<< "$cidrs"
+        for c in ${list[@]+"${list[@]}"}; do
+            c=${c// /}
+            if tunnel_cidr_contains "$c" "$net"; then covered=true; break; fi
+        done
+        [ "$covered" = true ] \
+            || p_warn "TRUSTED_PROXY_CIDRS does not cover this stack's network $subnet: through the tunnel the backend's peer is cloudflared there, and every caller would get its address. Add $subnet — docs/runbooks/cloudflare-tunnel.md «Client IP»"
+    done
+}
+
+# tunnel_ip4_int A.B.C.D — the address as an integer, 1 when not IPv4.
+tunnel_ip4_int() {
+    local IFS=. a b c d x
+    read -r a b c d <<< "$1"
+    for x in "$a" "$b" "$c" "$d"; do
+        case "$x" in '' | *[!0-9]*) return 1 ;; esac
+        [ "$x" -le 255 ] || return 1
+    done
+    printf '%d' $(((a << 24) + (b << 16) + (c << 8) + d))
+}
+
+# tunnel_cidr_contains CIDR IP — IPv4 only (an IPv6 CIDR never matches).
+tunnel_cidr_contains() {
+    local net=${1%/*} bits=${1#*/} n i mask
+    [ "$bits" != "$1" ] || bits=32
+    case "$bits" in '' | *[!0-9]*) return 1 ;; esac
+    [ "$bits" -le 32 ] || return 1
+    n=$(tunnel_ip4_int "$net") || return 1
+    i=$(tunnel_ip4_int "$2") || return 1
+    if [ "$bits" -eq 0 ]; then mask=0; else mask=$(((0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF)); fi
+    [ $((n & mask)) -eq $((i & mask)) ]
+}
+
+tunnel_status() {
+    local state host
+    tunnel_decode_token
+    p_section "Cloudflare Tunnel · $STACK"
+    printf '  %-28s %s\n' "Routes" "docker/cloudflared/$ENV.json"
+    printf '  %-28s %s\n' "CLOUDFLARE_TUNNEL" "$(env_get_active "$ENV_FILE" CLOUDFLARE_TUNNEL)"
+    printf '  %-28s %s\n' "Tunnel" "$TUNNEL_ID"
+    state=$(tunnel_container_state)
+    case "$state" in
+        running)
+            if tunnel_is_ready; then
+                printf '  %-28s %s\n' "cloudflared" "$TUNNEL_CONTAINER — ready (connected to Cloudflare)"
+            else
+                printf '  %-28s %s\n' "cloudflared" "$TUNNEL_CONTAINER — running, NOT ready"
+            fi
+            ;;
+        stopped) printf '  %-28s %s\n' "cloudflared" "$TUNNEL_CONTAINER — stopped" ;;
+        foreign) printf '  %-28s %s\n' "cloudflared" "$TUNNEL_CONTAINER exists but is not in project $COMPOSE_PROJECT_NAME — left alone" ;;
+        *) printf '  %-28s %s\n' "cloudflared" "not running" ;;
+    esac
+    printf '  %-28s %s\n' "Direct DNS snapshot" "$([ -f "$TUNNEL_SNAPSHOT" ] && printf '%s' "${TUNNEL_SNAPSHOT#"$PROJECT_ROOT"/}" || printf none)"
+    tunnel_warn_other_replicas
+    tunnel_proxy_hint
+    tunnel_resolve_zone
+    echo
+    for host in $TUNNEL_HOSTNAMES; do
+        tunnel_classify "$host"
+        case "$T_KIND" in
+            tunnel) printf '  %stunnel%s   %s\n' "$c_success" "$c_reset" "$host" ;;
+            direct) printf '  %sdirect%s   %s  %s\n' "$c_warn" "$c_reset" "$host" "$(tunnel_describe_records "$T_CUR")" ;;
+            wildcard) printf '  %sdirect%s   %s  via %s: %s\n' "$c_warn" "$c_reset" "$host" "$(tunnel_wildcard_name "$host")" "$(tunnel_describe_records "$T_WILD")" ;;
+            other-tunnel) printf '  %sOTHER%s    %s  CNAME %s (another tunnel)\n' "$c_error" "$c_reset" "$host" "$T_OTHER" ;;
+            none) printf '  %sNONE%s     %s  (no record, no wildcard: does not resolve)\n' "$c_error" "$c_reset" "$host" ;;
+        esac
+    done
+}
+
+tunnel_confirm() {
+    local what=$1 yes=$2
+    [ "$ENV" = production ] || return 0
+    [ "$yes" = yes ] && return 0
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        die "Switching production requires an interactive confirmation or --yes."
+    fi
+    ask_yes_no "Switch PRODUCTION ($STACK) to $what?" "n" || { p_warn "Cancelled."; exit 0; }
+}
+
+# tunnel_restore_failed MOVED — after a failed smoke test through the tunnel,
+# put back to its snapshot (one batch each) each failing name THIS run moved
+# (MOVED: one per line). A name that was on the tunnel before the run is never
+# touched: during an outage its "way back" (the wildcard, the old records)
+# may be exactly what is down. A name without a snapshot entry stays too.
+tunnel_restore_failed() {
+    local moved=$1 host
+    for host in $T_FAILED; do
+        if ! printf '%s\n' "$moved" | grep -qxF -- "$host"; then
+            p_warn "$host was already on the tunnel before this run: left as is"
+            continue
+        fi
+        tunnel_classify "$host"
+        [ "$T_KIND" = tunnel ] || continue
+        if ! tunnel_snapshot_has "$host"; then
+            p_warn "$host has no snapshot entry: left on the tunnel"
+            continue
+        fi
+        if tunnel_swap "$host" "$T_CUR" "$(tunnel_snapshot_records "$host")"; then
+            p_ok "$host put back on its direct path"
+        else
+            p_warn "$host: putting it back failed — it is still on the tunnel (the batch is all or nothing); run 'tunnel switch direct'"
+        fi
+    done
+}
+
+tunnel_switch_tunnel() {
+    local yes=${1:-no} host all_direct
+    tunnel_decode_token
+    tunnel_resolve_zone
+    tunnel_confirm "the tunnel" "$yes"
+    tunnel_lock
+    [ "$(tunnel_container_state)" != foreign ] \
+        || die "A container named $TUNNEL_CONTAINER exists outside project $COMPOSE_PROJECT_NAME: refusing to replace it"
+    tunnel_proxy_hint
+
+    # Every name is classified before anything starts; an unexpected state
+    # stops the switch with nothing changed.
+    tunnel_snapshot_load
+    local -A kind=() cur=()
+    for host in $TUNNEL_HOSTNAMES; do
+        tunnel_classify "$host"
+        kind[$host]=$T_KIND
+        cur[$host]=$T_CUR
+        case "$T_KIND" in
+            other-tunnel) die "$host points at another tunnel ($T_OTHER), not $(tunnel_target): neither direct nor ours. Fix its record (or the token) first. Nothing was changed." ;;
+            none) die "$host has no DNS record and no wildcard answers for it: it does not resolve today. Create its direct record first. Nothing was changed." ;;
+            direct)
+                if tunnel_snapshot_has "$host" \
+                    && [ "$(tunnel_norm "$T_CUR")" != "$(tunnel_norm "$(tunnel_snapshot_records "$host")")" ]; then
+                    die "$host: its records ($(tunnel_describe_records "$T_CUR")) differ from its snapshot entry, which is never overwritten. Check which is right and fix the DNS or ${TUNNEL_SNAPSHOT#"$PROJECT_ROOT"/}. Nothing was changed."
+                fi
+                ;;
+        esac
+    done
+
+    tunnel_validate_ingress
+    tunnel_check_external_networks
+    p_step "Starting cloudflared (routes from docker/cloudflared/$ENV.json)"
+    tunnel_compose up -d --no-deps "$TUNNEL_SERVICE"
+    tunnel_wait_ready
+    tunnel_check_remote_config
+    tunnel_warn_other_replicas
+    tunnel_probe_services
+    # From here on the DNS may point at cloudflared: deploys must keep it up.
+    tunnel_set_flag true
+
+    local moved=""
+    for host in $TUNNEL_HOSTNAMES; do
+        if [ "${kind[$host]}" = tunnel ]; then
+            p_ok "$host already on the tunnel"
+            continue
+        fi
+        # Saved before its first change, never overwritten: the way back.
+        if [ "${kind[$host]}" = wildcard ]; then
+            tunnel_snapshot_add "$host" '[]' true
+        else
+            tunnel_snapshot_add "$host" "${cur[$host]}" false
+        fi
+        if ! tunnel_swap "$host" "${cur[$host]}" "$(tunnel_cname_records "$host")"; then
+            die "Moving $host failed; it is unchanged (one batch, all or nothing). Run 'tunnel switch tunnel' again to continue, or 'tunnel switch direct' to put back the names already moved."
+        fi
+        moved="${moved:+$moved$'\n'}$host"
+        if [ "${kind[$host]}" = wildcard ]; then
+            p_ok "$host -> $(tunnel_target) (had no record of its own: $(tunnel_wildcard_name "$host") answered)"
+        else
+            p_ok "$host -> $(tunnel_target)"
+        fi
+    done
+
+    if tunnel_smoke_test; then
+        p_ok "Mode: tunnel. Back with: ./orkestra.sh tunnel switch direct"
+        return 0
+    fi
+    if [ -n "$moved" ]; then
+        p_warn "Through the tunnel these fail: $(printf '%s' "$T_FAILED" | paste -sd ' ' -) — putting back on their direct path those this run moved"
+    else
+        p_warn "Through the tunnel these fail: $(printf '%s' "$T_FAILED" | paste -sd ' ' -) — this run moved no name, so no DNS is changed"
+    fi
+    tunnel_restore_failed "$moved"
+    all_direct=true
+    for host in $TUNNEL_HOSTNAMES; do
+        tunnel_classify "$host"
+        [ "$T_KIND" != tunnel ] || all_direct=false
+    done
+    [ "$all_direct" = false ] || tunnel_set_flag false
+    die "Smoke test failed through the tunnel. Check 'docker logs $TUNNEL_CONTAINER' and docker/cloudflared/$ENV.json; './orkestra.sh tunnel status' shows where each name is."
+}
+
+# tunnel_wait_drained — after the DNS went direct, Cloudflare's edges stop
+# sending requests to cloudflared within a few seconds to minutes. Waits until
+# cloudflared_tunnel_total_requests stays flat for TUNNEL_DRAIN_FLAT_SAMPLES
+# readings 5 s apart. Returns 1 if it never does (or cannot be read).
+tunnel_wait_drained() {
+    local last="" now flat=0 i
+    [ "$(tunnel_container_state)" = running ] || return 0
+    if ! docker image inspect "$TUNNEL_PROBE_IMAGE" > /dev/null 2>&1 \
+        && ! docker pull -q "$TUNNEL_PROBE_IMAGE" > /dev/null 2>&1; then
+        p_warn "Cannot pull $TUNNEL_PROBE_IMAGE: cloudflared's request counter cannot be read"
+        return 1
+    fi
+    p_step "Waiting until cloudflared stops receiving requests"
+    for ((i = 0; i < TUNNEL_DRAIN_MAX_SAMPLES; i++)); do
+        now=$(tunnel_total_requests)
+        [ -n "$now" ] || { p_warn "cloudflared's metrics are unreadable"; return 1; }
+        if [ "$now" = "$last" ]; then flat=$((flat + 1)); else flat=0; fi
+        last=$now
+        if [ "$flat" -ge "$TUNNEL_DRAIN_FLAT_SAMPLES" ]; then
+            p_ok "cloudflared idle ($now requests in total)"
+            return 0
+        fi
+        sleep 5
+    done
+    return 1
+}
+
+tunnel_switch_direct() {
+    local yes=${1:-no} host desired target path code
+    tunnel_decode_token
+    tunnel_resolve_zone
+    tunnel_confirm "direct" "$yes"
+    tunnel_lock
+    tunnel_snapshot_load
+
+    # Where every name goes back to, decided before any change. A name whose
+    # records differ from its snapshot entry is reconciled whatever left it
+    # so (a failed run included):
+    #   entry with records        -> exactly those records
+    #   entry via the wildcard    -> no record of its own (the wildcard must
+    #                                still exist)
+    #   no entry, on the tunnel   -> the wildcard if one answers, else
+    #                                CLOUDFLARE_DIRECT_ORIGIN, else refuse
+    #   no entry, direct          -> left alone
+    local -A want=() cur=() wild=()
+    local -a moving=()
+    local otype=CNAME
+    if [[ "$TUNNEL_DIRECT_ORIGIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        otype=A
+    elif [[ "$TUNNEL_DIRECT_ORIGIN" == *:* ]]; then
+        otype=AAAA
+    fi
+    for host in $TUNNEL_HOSTNAMES; do
+        tunnel_classify "$host"
+        [ "$T_KIND" != other-tunnel ] \
+            || die "$host points at another tunnel ($T_OTHER): neither direct nor ours. Fix it first. Nothing was changed."
+        cur[$host]=$T_CUR
+        if tunnel_snapshot_has "$host"; then
+            desired=$(tunnel_snapshot_records "$host")
+            if tunnel_snapshot_via_wildcard "$host"; then
+                if [ "$T_KIND" != wildcard ]; then
+                    T_WILD=$(tunnel_wildcard_records "$host") || exit 1
+                fi
+                [ "$(printf '%s' "$T_WILD" | jq 'length')" -gt 0 ] \
+                    || die "$host came through $(tunnel_wildcard_name "$host"), which no longer exists: without it the name would not resolve. Recreate the wildcard or give $host a record. Nothing was changed."
+            fi
+            if [ "$T_KIND" = direct ] && [ "$(tunnel_norm "$T_CUR")" != "$(tunnel_norm "$desired")" ]; then
+                die "$host has direct records ($(tunnel_describe_records "$T_CUR")) that differ from its snapshot entry: changed by hand? Fix the DNS or ${TUNNEL_SNAPSHOT#"$PROJECT_ROOT"/}. Nothing was changed."
+            fi
+        else
+            case "$T_KIND" in
+                direct | wildcard) p_ok "$host already direct"; continue ;;
+                none) die "$host has no DNS record, no wildcard and no snapshot entry: it does not resolve. Nothing was changed." ;;
+            esac
+            T_WILD=$(tunnel_wildcard_records "$host") || exit 1
+            if [ "$(printf '%s' "$T_WILD" | jq 'length')" -gt 0 ]; then
+                p_warn "$host: no snapshot entry, $(tunnel_wildcard_name "$host") answers for it: only its tunnel CNAME will be deleted"
+                desired='[]'
+            elif [ -n "$TUNNEL_DIRECT_ORIGIN" ]; then
+                p_warn "$host: no snapshot entry, no wildcard: it becomes a proxied $otype record to $TUNNEL_DIRECT_ORIGIN"
+                desired=$(jq -nc --arg h "$host" --arg o "$TUNNEL_DIRECT_ORIGIN" --arg t "$otype" \
+                    '[{type: $t, name: $h, content: $o, proxied: true, ttl: 1}]')
+            else
+                die "$host: no snapshot entry, no wildcard and no CLOUDFLARE_DIRECT_ORIGIN in docker/.env: don't know where the direct records point. Nothing was changed."
+            fi
+        fi
+        wild[$host]=$T_WILD
+        if [ "$(tunnel_norm "$T_CUR")" = "$(tunnel_norm "$desired")" ]; then
+            p_ok "$host already direct"
+            continue
+        fi
+        want[$host]=$desired
+        moving+=("$host")
+    done
+
+    # The direct path must answer before any name goes to it: the origin
+    # (CLOUDFLARE_DIRECT_CHECK_IP, else the record or wildcard target) for
+    # each name on 443, Cloudflare bypassed.
+    for host in ${moving[@]+"${moving[@]}"}; do
+        target=$TUNNEL_DIRECT_CHECK_IP
+        [ -n "$target" ] || target=$(printf '%s' "${want[$host]}" | jq -r 'first.content // empty')
+        [ -n "$target" ] || target=$(printf '%s' "${wild[$host]}" | jq -r 'first.content // empty')
+        path=$(jq -r --arg h "$host" '._smoke[$h] // "/"' "$TUNNEL_ROUTES")
+        code=$(tunnel_direct_probe "$host" "$target" "$path")
+        tunnel_good_status "$code" \
+            || die "The direct path does not answer for $host ($target:443$path -> HTTP $code). Nothing was changed. If the public IP does not hairpin from this host, set CLOUDFLARE_DIRECT_CHECK_IP to the reverse proxy's LAN address."
+        p_ok "Direct path answers for $host ($target -> HTTP $code)"
+    done
+
+    for host in ${moving[@]+"${moving[@]}"}; do
+        if ! tunnel_swap "$host" "${cur[$host]}" "${want[$host]}"; then
+            die "Putting $host back failed; it is unchanged (one batch, all or nothing). Run 'tunnel switch direct' again: it reconciles every name to its snapshot."
+        fi
+        if [ "$(printf '%s' "${want[$host]}" | jq 'length')" -gt 0 ]; then
+            p_ok "$host -> $(tunnel_describe_records "${want[$host]}")"
+        else
+            p_ok "$host -> $(tunnel_wildcard_name "$host") (tunnel CNAME deleted, wildcard untouched)"
+        fi
+    done
+
+    tunnel_warn_other_replicas
+    [ -z "$T_OTHERS" ] || p_warn "The drain is measured on $TUNNEL_CONTAINER only: the other connectors keep serving the tunnel until you remove them."
+    local drained=true
+    tunnel_wait_drained || drained=false
+
+    if ! tunnel_smoke_test; then
+        p_warn "On the direct path these fail: $(printf '%s' "$T_FAILED" | paste -sd ' ' -) — putting them back on the tunnel"
+        if tunnel_is_ready; then
+            for host in $T_FAILED; do
+                # Only the names this run moved: one that was direct before
+                # it is not ours to send to the tunnel.
+                if ! printf '%s\n' ${moving[@]+"${moving[@]}"} | grep -qxF -- "$host"; then
+                    p_warn "$host was already direct before this run: left as is"
+                    continue
+                fi
+                tunnel_classify "$host"
+                [ "$T_KIND" != tunnel ] || continue
+                if tunnel_swap "$host" "$T_CUR" "$(tunnel_cname_records "$host")"; then
+                    p_ok "$host back on the tunnel"
+                else
+                    p_warn "$host: putting it back on the tunnel failed — it is unchanged"
+                fi
+            done
+        else
+            p_warn "cloudflared is not ready: the names stay direct"
+        fi
+        die "Smoke test failed on the direct path: cloudflared left running, snapshot kept. './orkestra.sh tunnel status' shows where each name is."
+    fi
+
+    if [ "$drained" != true ]; then
+        p_warn "cloudflared still receives requests (Cloudflare's edges follow the DNS within minutes): it is left running, CLOUDFLARE_TUNNEL stays true. Run './orkestra.sh tunnel switch direct' again later to remove it."
+        return 0
+    fi
+    case "$(tunnel_container_state)" in
+        running | stopped)
+            p_step "Removing cloudflared"
+            tunnel_compose rm -sf "$TUNNEL_SERVICE"
+            ;;
+    esac
+    tunnel_set_flag false
+    rm -f "$TUNNEL_SNAPSHOT"
+    p_ok "Mode: direct"
+}
+
+tunnel_reload() {
+    tunnel_decode_token
+    tunnel_lock
+    [ "$(tunnel_container_state)" = running ] || die "cloudflared ($TUNNEL_CONTAINER) is not running"
+    tunnel_validate_ingress
+    tunnel_probe_services
+    p_step "Restarting cloudflared with docker/cloudflared/$ENV.json"
+    tunnel_compose restart "$TUNNEL_SERVICE"
+    tunnel_wait_ready "The DNS was not touched; names on the tunnel answer 530 until cloudflared connects."
+    tunnel_check_remote_config
+}
+
+# tunnel_deploy_prepare — a deploy of a stack with CLOUDFLARE_TUNNEL=true:
+# the routes file, the token and its tunnel id are checked before anything is
+# built (a deploy must not start a cloudflared of another environment).
+tunnel_deploy_prepare() {
+    command -v jq > /dev/null 2>&1 || die "jq is required while CLOUDFLARE_TUNNEL=true"
+    tunnel_check_routes
+    tunnel_load_inputs
+    [ -n "$TUNNEL_TOKEN" ] \
+        || die "CLOUDFLARE_TUNNEL=true but CLOUDFLARE_TUNNEL_TOKEN is empty in docker/.env. Nothing was started."
+    tunnel_decode_token
+}
+
+# tunnel_prepull — while this ENV has a routes file, a deploy keeps the
+# switch's images on the host, so a switch mid-incident needs no registry.
+tunnel_prepull() {
+    [ -f "$(tunnel_routes_file)" ] || return 0
+    local image
+    for image in "$TUNNEL_IMAGE" "$TUNNEL_PROBE_IMAGE"; do
+        docker image inspect "$image" > /dev/null 2>&1 && continue
+        if docker pull -q "$image" > /dev/null 2>&1; then
+            p_ok "Pulled $image (Cloudflare Tunnel switch)"
+        else
+            p_warn "Pull of $image failed (registry unreachable?): the tunnel switch will need it"
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Unified logs picker (SKU profiles + full-stack aware)
 # ---------------------------------------------------------------------------
 
@@ -2642,6 +3699,13 @@ ${c_bold}RETRIEVAL${c_reset} ${c_muted}(Qdrant + TEI inference for the retrieval
   ${c_accent}retrieval bench${c_reset} [flags]           Benchmark keyword/dense/hybrid/rerank in the backend container (dev, hot-reload staging)
   ${c_accent}retrieval logs${c_reset} <svc> [flags]      View logs for a retrieval service (seeds included)
 
+${c_bold}CLOUDFLARE TUNNEL${c_reset} ${c_muted}(staging/production — same public URLs, routes in docker/cloudflared/<ENV>.json)${c_reset}
+  ${c_accent}tunnel status${c_reset}                     Mode per hostname (DNS), cloudflared connections, snapshot
+  ${c_accent}tunnel switch tunnel${c_reset} [--yes]      cloudflared up -> ready -> DNS to the tunnel -> smoke test
+  ${c_accent}tunnel switch direct${c_reset} [--yes]      DNS back from the snapshot -> smoke test -> cloudflared removed
+  ${c_accent}tunnel reload${c_reset}                     Restart cloudflared after editing the routes file
+                                   Guide: docs/runbooks/cloudflare-tunnel.md
+
 ${c_bold}LOG FLAGS${c_reset}
   ${c_accent}-f${c_reset}, ${c_accent}--follow${c_reset}           Follow log output (tail -f)
   ${c_accent}-n${c_reset}, ${c_accent}--lines${c_reset} N          Lines to show when not following (default 100)
@@ -2800,6 +3864,32 @@ cli_dispatch() {
                     ;;
                 "") die "Missing subcommand. Try --help." ;;
                 *) die "Unknown retrieval subcommand: $subcmd. Valid: up | down | status | info | bench | logs" ;;
+            esac
+            ;;
+
+        tunnel)
+            local subcmd=${1:-}
+            [ -n "$subcmd" ] && shift
+            case "$subcmd" in
+                status) tunnel_init_env; tunnel_status ;;
+                reload) tunnel_init_env; tunnel_reload ;;
+                switch)
+                    local mode=${1:-} tunnel_yes="no"
+                    [ -n "$mode" ] && shift
+                    while [ $# -gt 0 ]; do
+                        case "$1" in
+                            --yes | -y) tunnel_yes="yes"; shift ;;
+                            *) die "Unknown flag: $1" ;;
+                        esac
+                    done
+                    case "$mode" in
+                        tunnel) tunnel_init_env; tunnel_switch_tunnel "$tunnel_yes" ;;
+                        direct) tunnel_init_env; tunnel_switch_direct "$tunnel_yes" ;;
+                        *) die "Usage: ./orkestra.sh tunnel switch tunnel|direct [--yes]" ;;
+                    esac
+                    ;;
+                "") die "Missing subcommand. Valid: status | reload | switch tunnel|direct" ;;
+                *) die "Unknown tunnel subcommand: $subcmd. Valid: status | reload | switch tunnel|direct" ;;
             esac
             ;;
 

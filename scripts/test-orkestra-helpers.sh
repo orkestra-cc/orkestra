@@ -846,6 +846,104 @@ check "orkestra.sh infra deploy starts gotenberg with mongodb/redis/rustfs" "yes
     "$(grep -Eq 'compose .* up -d mongodb redis rustfs gotenberg$' "$gotenberg_deploy_log" && printf yes || printf no)"
 rm -f "$gotenberg_deploy_log" "$gotenberg_deploy_out"
 
+# --- Cloudflare Tunnel: with CLOUDFLARE_TUNNEL=true a staging/production
+# deploy carries the `tunnel` profile and keeps cloudflared up (and waits for
+# it to be ready), so a redeploy never drops the only way in; without the
+# ENV's routes file, the token, or with a token of another tunnel, it starts
+# nothing. git, curl, env-validate and the health check are stubs. ---
+td_tmp="$(mktemp -d)"
+mkdir -p "$td_tmp/scripts" "$td_tmp/docker"
+printf 'exit 0\n' > "$td_tmp/scripts/env-validate.sh"
+printf 'exit 0\n' > "$td_tmp/docker/health-check.sh"
+touch "$td_tmp/docker/docker-compose.infra.yml" "$td_tmp/docker/docker-compose.staging.yml" "$td_tmp/docker/docker-compose.prod.yml"
+export TD_LOG="$td_tmp/log"
+TD_TID=11111111-2222-4333-8444-555555555555
+export TD_GOOD_TOKEN
+TD_GOOD_TOKEN=$(printf '{"a":"a","t":"%s","s":"eA=="}' "$TD_TID" | base64 -w0)
+# td_deploy ENV — one full deploy in a subshell; prints its exit status. The
+# docker calls land in $TD_LOG, the output in $td_tmp/out.
+td_deploy() {
+    : > "$TD_LOG"
+    printf 'APP_NAME=acme\nENV=%s\n' "$1" > "$td_tmp/docker/.env"
+    [ -z "${TD_TUNNEL:-}" ] || printf 'CLOUDFLARE_TUNNEL=true\nCLOUDFLARE_TUNNEL_TOKEN=%s\n' "${TD_TUNNEL_TOKEN-$TD_GOOD_TOKEN}" >> "$td_tmp/docker/.env"
+    (
+        SCRIPT_DIR="$td_tmp"; PROJECT_ROOT="$td_tmp"; DOCKER_DIR="$td_tmp/docker"
+        ENV=$1; APP_NAME=acme; STACK="acme-$1"; COMPOSE_PROJECT_NAME="acme-$1"
+        DEPLOY_SCOPE=all; REBUILD_IMAGES=no; BRANCH=any; SKIP_CONFIRMATION=yes
+        INFRA_COMPOSE="$td_tmp/docker/docker-compose.infra.yml"
+        COMPOSE_FILE="$td_tmp/docker/docker-compose.staging.yml"
+        [ "$1" != production ] || COMPOSE_FILE="$td_tmp/docker/docker-compose.prod.yml"
+        COMPOSE_OVERLAY_FILES=()
+        ENV_FILE="$td_tmp/docker/.env"
+        check_docker_running() { :; }
+        ensure_jwt_keys_readable() { :; }
+        git() { case "$1" in rev-parse) printf 'abc1234\n' ;; log) printf 'test\n' ;; esac; return 0; }
+        curl() { printf '200'; }
+        sleep() { :; }
+        docker() {
+            local IFS=' '
+            printf '%s\n' "docker $*" >> "$TD_LOG"
+            case "$*" in
+                # Our cloudflared exists and is ready; TD_NO_IMAGE: images
+                # absent and the registry unreachable.
+                "inspect --type container "*) printf 'true|acme-%s\n' "$ENV" ;;
+                "image inspect "* | "pull "*) [ -z "${TD_NO_IMAGE:-}" ] || return 1 ;;
+            esac
+            return 0
+        }
+        fullstack_execute_deploy
+    ) < /dev/null > "$td_tmp/out" 2>&1
+    printf '%s' "$?"
+}
+td_saw() { grep -Eq -- "$1" "$TD_LOG" && printf yes || printf no; }
+td_said() { grep -qF -- "$1" "$td_tmp/out" && printf yes || printf no; }
+td_routes() { # td_routes ENV
+    mkdir -p "$td_tmp/docker/cloudflared"
+    printf '{"_tunnel_id":"%s","ingress":[{"hostname":"a.example.com","service":"http://backend:3000"},{"service":"http_status:404"}]}\n' \
+        "$TD_TID" > "$td_tmp/docker/cloudflared/$1.json"
+    chmod 644 "$td_tmp/docker/cloudflared/$1.json"
+}
+check "tunnel deploy without a routes file is refused" "1" "$(TD_TUNNEL=1 td_deploy staging)"
+check "tunnel deploy without routes: nothing built or started" "no" "$(td_saw ' (build|up) ')"
+check "tunnel deploy without routes: says why" "yes" "$(td_said 'No routes file for staging')"
+td_routes staging
+check "tunnel deploy without a token is refused" "1" "$(TD_TUNNEL=1 TD_TUNNEL_TOKEN= td_deploy staging)"
+check "tunnel deploy without a token: nothing built or started" "no" "$(td_saw ' (build|up) ')"
+check "tunnel deploy with another tunnel's token is refused" "1|no|yes" \
+    "$(TD_TUNNEL=1 TD_TUNNEL_TOKEN="$(printf '{"a":"a","t":"99999999-8888-4777-8666-555555555555","s":"eA=="}' | base64 -w0)" td_deploy staging)|$(td_saw ' (build|up) ')|$(td_said "pins $TD_TID")"
+check "tunnel deploy succeeds" "0" "$(TD_TUNNEL=1 td_deploy staging)"
+check "tunnel deploy waits for cloudflared's readiness after starting it" "yes" \
+    "$(awk '/up -d --no-deps cloudflared$/ {u = NR} / tunnel --metrics 127\.0\.0\.1:20241 ready$/ {if (u && NR > u) r = 1} END {print r ? "yes" : "no"}' "$TD_LOG")"
+check "tunnel deploy starts the staging stack with the tunnel profile" "yes" "$(td_saw '--profile tunnel .*up -d$')"
+check "tunnel deploy keeps cloudflared up" "yes" "$(td_saw '--profile tunnel .*up -d --no-deps cloudflared$')"
+check "a deploy without CLOUDFLARE_TUNNEL never starts cloudflared" "0|no|no" \
+    "$(td_deploy staging)|$(td_saw 'up -d --no-deps cloudflared')|$(td_saw '--profile tunnel')"
+check "…but keeps the switch's images on the host while routes exist" "yes|yes" \
+    "$(td_saw '^docker image inspect cloudflare/cloudflared:2026\.10\.5$')|$(td_saw '^docker image inspect curlimages/curl:')"
+check "a failed pre-pull warns as a pull failure and does not fail the deploy" "0|yes" \
+    "$(TD_NO_IMAGE=1 td_deploy staging)|$(td_said 'Pull of cloudflare/cloudflared:2026.10.5 failed')"
+# Production refuses root, so this case needs a non-root test run.
+if [ "$EUID" -ne 0 ]; then
+    # One tunnel per environment: staging's file would claim the same id.
+    rm -f "$td_tmp/docker/cloudflared/staging.json"
+    td_routes production
+    check "production tunnel deploy succeeds" "0" "$(TD_TUNNEL=1 td_deploy production)"
+    check "production tunnel deploy rolls the backend out with the tunnel profile" "yes" \
+        "$(td_saw '--profile tunnel .*up -d --no-deps backend$')"
+    check "production tunnel deploy keeps cloudflared up" "yes" "$(td_saw '--profile tunnel .*up -d --no-deps cloudflared$')"
+fi
+# stop/status: the profile only while CLOUDFLARE_TUNNEL=true is an ACTIVE line
+# of a staging/production docker/.env (a commented sample never counts).
+td_profile() { # td_profile ENV FILE-CONTENT
+    printf '%b' "$2" > "$td_tmp/docker/.env"
+    ( local IFS=" "; ENV=$1; ENV_FILE="$td_tmp/docker/.env"; tunnel_profile_args; printf '%s' "${TUNNEL_PROFILE_ARGS[*]:-none}" )
+}
+check "tunnel profile on staging with CLOUDFLARE_TUNNEL=true" "--profile tunnel" "$(td_profile staging 'CLOUDFLARE_TUNNEL=true\n')"
+check "no tunnel profile on development" "none" "$(td_profile development 'CLOUDFLARE_TUNNEL=true\n')"
+check "no tunnel profile from a commented CLOUDFLARE_TUNNEL=true" "none" "$(td_profile production '# CLOUDFLARE_TUNNEL=true\n')"
+rm -rf "$td_tmp"
+unset -f td_deploy td_saw td_said td_routes td_profile
+
 # --- scripts/health-check.sh checks gotenberg exactly like the other infra
 # containers: Docker container state + its compose healthcheck, no HTTP
 # probe (it has no published port to probe from the host). Run the real

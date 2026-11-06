@@ -432,6 +432,39 @@ services:
       retries: 3
       start_period: 30s
 
+  # Cloudflare Tunnel connector — compose profile `tunnel`, so it exists only
+  # once `./orkestra.sh tunnel switch tunnel` (or a deploy with
+  # CLOUDFLARE_TUNNEL=true) starts it. Same service as in
+  # docker-compose.prod.yml (keep the two equal: the test compares them).
+  # Routes come from the repo, never the dashboard: cloudflared reads
+  # docker/cloudflared/<ENV>.json (the directory is mounted, not the file, so a
+  # checkout that replaces the file is seen by the next restart). The tunnel
+  # reaches the services by name on this stack's network. No published port,
+  # and metrics on loopback only: the switch reads /ready and /metrics from
+  # inside cloudflared's network namespace. Keep the image pin equal to
+  # TUNNEL_IMAGE in orkestra.sh. Guide: docs/runbooks/cloudflare-tunnel.md.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.5
+    container_name: ${APP_NAME}-cloudflared-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
+    restart: unless-stopped
+    profiles:
+      - tunnel
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    # Outbound connections and an unprivileged metrics port: nothing to re-add.
+    cap_drop:
+      - ALL
+    command: tunnel --no-autoupdate --config /etc/cloudflared/${ENV}.json --metrics 127.0.0.1:20241 run
+    environment:
+      # Empty unless the tunnel is configured; orkestra.sh refuses to start
+      # the profile without it.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+
 volumes:
   backend-logs:
     driver: local

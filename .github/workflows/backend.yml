@@ -12,6 +12,8 @@ on:
       - 'docker/docker-compose.retrieval.yml'
       - 'docker/mongo-init/**'
       - 'docker/tests/**'
+      # make backend-cloudflare-tunnel checks the shipped routes examples
+      - 'docker/cloudflared/**'
       # make backend-frontend-nginx serves these configs
       - 'docker/frontend-admin/**'
       - 'frontend-admin/Dockerfile'
@@ -46,6 +48,8 @@ on:
       - 'docker/docker-compose.retrieval.yml'
       - 'docker/mongo-init/**'
       - 'docker/tests/**'
+      # make backend-cloudflare-tunnel checks the shipped routes examples
+      - 'docker/cloudflared/**'
       # make backend-frontend-nginx serves these configs
       - 'docker/frontend-admin/**'
       - 'frontend-admin/Dockerfile'

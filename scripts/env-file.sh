@@ -7,6 +7,7 @@
 # first argument so it is testable against a throwaway temp file.
 #
 #   env_get <file> <key>          -> echoes current value ("" if absent)
+#   env_get_active <file> <key>   -> same, active lines only, whitespace-trimmed
 #   env_set <file> <key> <value>  -> upsert (uncomment / replace / append)
 #   secret_is_placeholder <value> -> 0 when VALUE is empty or a shipped literal
 #   secret_is_weak <value> [min]  -> 0 when placeholder OR shorter than MIN (16)
@@ -30,6 +31,27 @@ env_get() {
     elif [ "${line#\'}" != "$line" ] && [ "${line%\'}" != "$line" ]; then
         line=${line#\'}; line=${line%\'}
     fi
+    printf '%s' "$line"
+}
+
+# env_get_active FILE KEY — the first active (uncommented) KEY= line only: no
+# fallback to a commented stub, so a sample in .env.example never becomes a
+# live setting. Surrounding whitespace (including a CRLF file's \r) is trimmed
+# before and after stripping one matched quote pair; inner spaces are kept, so
+# a whitespace-only value reads as empty.
+env_get_active() {
+    local file=$1 key=$2 line=""
+    [ -f "$file" ] || return 0
+    line=$(grep -E "^${key}=" "$file" 2>/dev/null | head -1 || true)
+    [ -n "$line" ] || return 0
+    line=${line#*"${key}="}
+    line=${line#"${line%%[![:space:]]*}"}
+    line=${line%"${line##*[![:space:]]}"}
+    case "$line" in
+        \"*\" | \'*\') line=${line:1:${#line}-2} ;;
+    esac
+    line=${line#"${line%%[![:space:]]*}"}
+    line=${line%"${line##*[![:space:]]}"}
     printf '%s' "$line"
 }
 

@@ -15,7 +15,8 @@
 #   - hashed /assets/*: one year, immutable; a missing one is a plain 404.
 #   - unhashed static files (TinyMCE, favicons): revalidated, never immutable.
 #   - /config.js: no-store.
-# plus the security headers each location must re-state.
+# plus the security headers each location must re-state — the whole set on
+# documents, since nothing in front of nginx adds any behind a tunnel.
 #
 # The fallback configs baked into frontend-admin/Dockerfile and
 # frontend-client/Dockerfile are checked statically at the end.
@@ -84,11 +85,19 @@ expect() {
   done
 }
 
+# Behind the Cloudflare Tunnel no reverse proxy adds headers: every document
+# carries the whole set from nginx itself (docs/runbooks/cloudflare-tunnel.md).
+origin_headers=(
+  'has:referrer-policy: strict-origin-when-cross-origin'
+  'has:permissions-policy: camera=(), microphone=(), geolocation=()'
+  'has:strict-transport-security: max-age=31536000'
+)
 doc_headers=(
   'has:cache-control: no-cache'
   'has:x-frame-options: SAMEORIGIN'
   'has:x-content-type-options: nosniff'
   'has:x-xss-protection: 0'
+  "${origin_headers[@]}"
 )
 immutable=(
   'status:200'
