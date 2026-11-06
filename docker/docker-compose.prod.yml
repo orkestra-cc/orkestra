@@ -291,7 +291,7 @@ services:
   # inside cloudflared's network namespace. Keep the image pin equal to
   # TUNNEL_IMAGE in orkestra.sh. Guide: docs/runbooks/cloudflare-tunnel.md.
   cloudflared:
-    image: cloudflare/cloudflared:2026.10.5
+    image: cloudflare/cloudflared:2026.10.7
     container_name: ${APP_NAME}-cloudflared-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}

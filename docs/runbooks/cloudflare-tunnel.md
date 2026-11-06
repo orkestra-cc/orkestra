@@ -44,7 +44,7 @@ a production stack since. It is generic: a fork adds only its routes file.
   - `_tunnel_id` pins the id of **this** environment's tunnel (not a secret:
     it is the CNAME target).
   - check a change with
-    `docker run --rm -v "$PWD/docker/cloudflared:/etc/cloudflared:ro" cloudflare/cloudflared:2026.10.5 tunnel --config /etc/cloudflared/production.json ingress validate`.
+    `docker run --rm -v "$PWD/docker/cloudflared:/etc/cloudflared:ro" cloudflare/cloudflared:2026.10.7 tunnel --config /etc/cloudflared/production.json ingress validate`.
 - **`cloudflared` service** in `docker/docker-compose.prod.yml` and, with the
   same definition, in `docker/docker-compose.staging.yml` (staging runs its own
   full file): compose profile `tunnel`, so it exists only when
@@ -284,7 +284,7 @@ services. Then, in this order:
    services do not resolve while Cloudflare already sends it requests. Check
    the name with `docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' <APP_NAME>-backend-<ENV>`;
 2. wait until it is ready:
-   `docker run --rm --network container:<APP_NAME>-cloudflared-<ENV> cloudflare/cloudflared:2026.10.5 tunnel --metrics 127.0.0.1:20241 ready`
+   `docker run --rm --network container:<APP_NAME>-cloudflared-<ENV> cloudflare/cloudflared:2026.10.7 tunnel --metrics 127.0.0.1:20241 ready`
    exits 0 (retry for up to a minute);
 3. remove the hand-started replica: `docker rm -f <its name>` (the switch
    never touches a container that is not `<APP_NAME>-cloudflared-<ENV>` of
