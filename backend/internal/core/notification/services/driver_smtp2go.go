@@ -127,14 +127,25 @@ func (d *smtp2goDriver) Unusable(p SenderProfile) []string {
 	return nil
 }
 
-// Capabilities: ListUnsubscribeHeaders is false for the reason the mailup
-// driver gives — the API accepting custom_headers is not proof that
-// List-Unsubscribe / List-Unsubscribe-Post reach the inbox covered by the
-// DKIM signature; flipping it is the outcome of the release gate's
-// real-mailbox test, not a setting. Attachments is true: the payload shape
-// is the one the API reference and SMTP2GO's own client both declare.
+// Capabilities: ListUnsubscribeHeaders is true. The API accepting
+// custom_headers was not proof on its own; the DKIM release gate (docs-site
+// notification guide) was run against real Gmail mailboxes on 2026-11-06,
+// on marketing messages sent through this driver on 2026-10-29 and
+// 2026-11-03: each carried exactly one List-Unsubscribe (this API's own
+// endpoint) and one List-Unsubscribe-Post, the sender domain's own
+// DKIM-Signature (d= the From domain, SMTP2GO-hosted selector) listed both
+// in h=, Gmail reported dkim=pass and dmarc=pass, and the one-click POST
+// recorded the opt-out. SMTP2GO signs the two names even on mail that does
+// not carry them, so the headers cannot be added after signing.
+//
+// What stays the deployment's: the From domain must be a sender domain
+// verified in SMTP2GO (otherwise only SMTP2GO's own d= signature is
+// present and DMARC does not align), and the account must not add an
+// unsubscribe header of its own (duplicates). Run the gate once per sender
+// domain. Attachments is true: the payload shape is the one the API
+// reference and SMTP2GO's own client both declare.
 func (d *smtp2goDriver) Capabilities() DriverCapabilities {
-	return DriverCapabilities{ListUnsubscribeHeaders: false, Attachments: true}
+	return DriverCapabilities{ListUnsubscribeHeaders: true, Attachments: true}
 }
 
 // smtp2goHeadersFrom converts EmailMessage.Headers into custom_headers, keys
