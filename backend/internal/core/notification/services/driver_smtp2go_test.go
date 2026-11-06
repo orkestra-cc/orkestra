@@ -74,13 +74,14 @@ func TestSMTP2GODriver_Requires(t *testing.T) {
 	}
 }
 
-// TestSMTP2GODriver_Capabilities: custom_headers being accepted is not proof
-// that List-Unsubscribe reaches the inbox DKIM-signed — the same position
-// the mailup driver takes until a real-mailbox release-gate test proves it.
+// TestSMTP2GODriver_Capabilities: smtp2go declares the one-click headers.
+// The declaration rests on the DKIM release gate run against real mailboxes
+// (see Capabilities in driver_smtp2go.go): it is a code fact, never a
+// setting, and moving it back is a code change too.
 func TestSMTP2GODriver_Capabilities(t *testing.T) {
 	c := NewSMTP2GODriver(nil).Capabilities()
-	if c.ListUnsubscribeHeaders {
-		t.Fatal("smtp2go must report ListUnsubscribeHeaders=false until a real send proves otherwise")
+	if !c.ListUnsubscribeHeaders {
+		t.Fatal("smtp2go must report ListUnsubscribeHeaders=true: the release gate proved the headers reach the inbox DKIM-signed")
 	}
 	if !c.Attachments {
 		t.Fatal("smtp2go carries attachments")

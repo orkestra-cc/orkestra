@@ -115,7 +115,8 @@ RFC 8058 also requires both headers to be covered by the sending domain's DKIM s
 
 What the result means depends on which driver you tested:
 
-- For a driver whose capability is currently declared unsupported in code (in the base install, `mailup` and `smtp2go`), a passing test is what justifies a maintainer changing that driver's source to declare the capability supported — a code change, never a setting you can toggle from the admin UI. The constant exists because a vendor API accepting the headers is not the same as its relay delivering and signing them.
+- For a driver whose capability is currently declared unsupported in code (in the base install, `mailup`), a passing test is what justifies a maintainer changing that driver's source to declare the capability supported — a code change, never a setting you can toggle from the admin UI. The constant exists because a vendor API accepting the headers is not the same as its relay delivering and signing them.
+- `smtp2go` declares the capability: the test above was run against real mailboxes before it was flipped. The declaration covers what this module hands SMTP2GO, not how your account signs, so run the test once for **each sender domain** you send from: the domain must be verified in SMTP2GO (a `DKIM-Signature` with `d=` your From domain, not only SMTP2GO's own), and the account's own unsubscribe link or footer must be off, or the message carries a second `List-Unsubscribe` that is not this module's.
 - For a driver whose capability is already declared supported (`smtp`) against your own relay, a signature that does *not* cover both headers means the relay is misconfigured, not this module — the capability describes what this module hands the relay, not what the relay does with it. Fix the relay.
 - `noop` never sends anything, so there is nothing to test for it.
 
