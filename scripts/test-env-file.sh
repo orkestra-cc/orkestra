@@ -58,6 +58,38 @@ check "lone leading quote kept"  '"unterminated'  "$(env_get "$tmp" LONEQ)"
 printf "QUOTED='/'\n" >> "$tmp"
 check "paired quotes stripped"   "/"              "$(env_get "$tmp" QUOTED)"
 
+# --- env_get_active: active lines only, trimmed, one quote pair stripped ---
+act="$(mktemp)"; trap 'rm -f "$tmp" "$act"' EXIT
+{
+    printf '# STUB_ONLY=/from/comment.yml\n'
+    printf 'FIRST=one\nFIRST=two\n'
+    printf 'BLANK=   \n'
+    printf 'CRLF=/a/b.yml\r\n'
+    printf 'PADDED=  /a b/c.yml  \n'
+    printf 'DQ="/x y.yml"\n'
+    printf "SQ='/x y.yml'\n"
+    printf 'DQCRLF="/x y.yml"\r\n'
+    printf 'QBLANK="   "\n'
+    printf 'LONE="/half.yml\n'
+    printf '# MIXED=/commented.yml\nMIXED=/active.yml\n'
+    printf 'EMPTY=\n'
+}  > "$act"
+check "active: commented stub is ignored"     ""               "$(env_get_active "$act" STUB_ONLY)"
+check "active: first match wins"              "one"            "$(env_get_active "$act" FIRST)"
+check "active: whitespace-only is empty"      ""               "$(env_get_active "$act" BLANK)"
+check "active: CRLF \\r is trimmed"            "/a/b.yml"       "$(env_get_active "$act" CRLF)"
+check "active: outer spaces trimmed, inner kept" "/a b/c.yml"  "$(env_get_active "$act" PADDED)"
+check "active: double quotes stripped"        "/x y.yml"       "$(env_get_active "$act" DQ)"
+check "active: single quotes stripped"        "/x y.yml"       "$(env_get_active "$act" SQ)"
+check "active: quoted value with CRLF"        "/x y.yml"       "$(env_get_active "$act" DQCRLF)"
+check "active: quoted whitespace is empty"    ""               "$(env_get_active "$act" QBLANK)"
+check "active: lone leading quote kept"       '"/half.yml'     "$(env_get_active "$act" LONE)"
+check "active: active line wins over stub"    "/active.yml"    "$(env_get_active "$act" MIXED)"
+check "active: empty value"                   ""               "$(env_get_active "$act" EMPTY)"
+check "active: absent key"                    ""               "$(env_get_active "$act" NOPE)"
+check "active: absent file"                   ""               "$(env_get_active "$act.missing" FIRST)"
+check "env_get still falls back to the stub"  "/from/comment.yml" "$(env_get "$act" STUB_ONLY)"
+
 # --- secret hygiene: the shipped literals are placeholders, real values are not ---
 is_placeholder() { secret_is_placeholder "$1" && printf yes || printf no; }
 is_weak()        { secret_is_weak "$@" && printf yes || printf no; }

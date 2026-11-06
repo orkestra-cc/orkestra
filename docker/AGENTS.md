@@ -139,6 +139,18 @@ ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./scripts/env-validate.sh
 ```
 
+### Cloudflare Tunnel (staging/production)
+
+`./orkestra.sh tunnel status | reload | switch tunnel|direct [--yes]` moves a stack's public hostnames between the direct path (Cloudflare → origin IP → reverse proxy → the ports on `HOST_BIND_ADDRESS`) and the stack's own `cloudflared` service, same URLs in both modes. Runbook, setup and troubleshooting: [docs/runbooks/cloudflare-tunnel.md](../docs/runbooks/cloudflare-tunnel.md).
+
+- **Routes**: `docker/cloudflared/<ENV>.json` is cloudflared's config and the list of hostnames the switch moves. The base ships only `*.json.example`; a fork commits its own `<ENV>.json` (service names, catch-all `http_status:404` last, `_tunnel_id` of that environment's tunnel). The tunnel is created in the dashboard **without public hostnames**.
+- **Service**: `cloudflared` in `docker-compose.prod.yml` and, with the same definition, `docker-compose.staging.yml` (the test compares them), compose profile `tunnel`, pinned image, `read_only`, `no-new-privileges`, `cap_drop: ALL`, no published port, container `${APP_NAME}-cloudflared-${ENV}`, mounts the `docker/cloudflared/` directory read-only. The switch addresses it only by that exact name and only with this stack's compose project label — never a glob, never another cloudflared on the host.
+- **State**: `CLOUDFLARE_TUNNEL=true` in `docker/.env` (set by the switch) makes `deploy` add `--profile tunnel` and keep cloudflared up, `status` list it, and `stop --with-infra` remove it. The direct records it replaced are in `docker/cloudflared/state/<ENV>-direct-dns.json` (gitignored); a name served only by a wildcard (`*.<zone>`) gets its own tunnel CNAME, and going back deletes it — the wildcard itself is never written.
+- **Inputs** (`docker/.env`): `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_API_TOKEN` (Zone › DNS › Edit only), `CLOUDFLARE_ZONE_ID` (recommended), optional `CLOUDFLARE_DIRECT_ORIGIN`, `CLOUDFLARE_DIRECT_CHECK_IP`. Readiness is `cloudflared tunnel ready` in cloudflared's namespace, never the tunnels API.
+- **Safety**: each name's DNS change is one all-or-nothing batch call; snapshot entries are never overwritten and `switch direct` reconciles every name to them; the DNS moves only towards a path proved to work (routes probed from cloudflared, origin checked with Cloudflare bypassed), a name failing its smoke test goes back by itself, and cloudflared is removed only once drained. Deploys with `CLOUDFLARE_TUNNEL=true` check the token's tunnel id and wait for readiness; every staging/production deploy pre-pulls the switch's images while routes exist.
+- **Trusted proxies**: through the tunnel the backend sees one hop fewer than through Cloudflare + a reverse proxy; a stack that switches needs `TRUSTED_PROXY_CIDRS` covering the reverse proxy and the compose network, not a hop count.
+- Tests: `docker/tests/cloudflare-tunnel.test.sh` (`make backend-cloudflare-tunnel`, fake Cloudflare API, fake docker, compose contract).
+
 ### What belongs in `.env` / compose vs `/admin/modules`
 
 After the architecture-modernization refactor, **module-level configuration lives in MongoDB** (`module_configs`), is edited at `/admin/modules`, and secrets are AES-256-GCM-encrypted with `OAUTH_TOKEN_ENCRYPTION_KEY`. The `EnvVar` field on each module's `ConfigSchema()` is consulted **only on first-boot seeding** (`pkg/sdk/module/config_service.go::buildInitialConfig`); after that the document is authoritative and editing the env var has no effect.
@@ -398,6 +410,7 @@ Frontend dependencies, the same for both dev servers:
 | **backend**                  | 3000      | Go API server                        | Hot reload (AIR), staging-like env, RS256 JWT                   |
 | **frontend-admin**           | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
 | **client-frontend**          | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `app.orkestra.cc`; consumes `staging-api.*` |
+| **cloudflared**              | none      | Cloudflare Tunnel connector (profile `tunnel`) | Same service as production; see [Cloudflare Tunnel](#cloudflare-tunnel-stagingproduction). Through the tunnel the console and the client SPA are these Vite dev servers (port 5173 on the stack network) |
 
 Service names are uniform across dev/staging/prod (`backend`/`frontend-admin`/`client-frontend`); only the `container_name:` is stack-namespaced (`${APP_NAME}-<svc>-${ENV}`), e.g. `orkestra-backend-development` on the shipped defaults.
 
@@ -421,6 +434,7 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 | ------------ | --------- | ------------- | ------------------------------ |
 | **backend**  | `${BACKEND_PORT:-3000}`  | Go API server | Optimized build, health checks, `read_only` rootfs |
 | **frontend-admin** | `${FRONTEND_PORT:-8080}` | React web app | Nginx static serving           |
+| **cloudflared** | none | Cloudflare Tunnel connector (profile `tunnel`) | Started only by `./orkestra.sh tunnel switch tunnel` or a deploy with `CLOUDFLARE_TUNNEL=true`; see [Cloudflare Tunnel](#cloudflare-tunnel-stagingproduction) |
 
 Both bind to `${HOST_BIND_ADDRESS:-127.0.0.1}` — closed by default; `docker/.env` opens them to the address the reverse proxy reaches. See [Container hardening](#container-hardening) for the capability/rootfs contract.
 
@@ -667,6 +681,7 @@ What `docker-compose.prod.yml` and `docker-compose.infra.yml` actually enforce (
 | qdrant | ALL | — | no | `-unprivileged` image (uid 1000, owns its `qdrant-data` volume); listens on 6333 inside `retrieval-net` only; API key required; web UI off (`QDRANT__SERVICE__ENABLE_STATIC_CONTENT=false`) |
 | tei-embed, tei-rerank (+ seeds) | ALL | — | no | Bind :80 inside `retrieval-net` (verified under `userns-remap`); serving containers mount `tei-weights` **read-only**, seeds read-write; `mem_limit` set (8g / 9g, qdrant 2g) — `docker/tests/retrieval-hardening.test.sh` gates all of it |
 | gotenberg | ALL | — | no | Listens on 3000 inside `pdf-net` only (no published port); hardening leans on network isolation + Chromium flags (deny-list, no JS, no private/public IP fetch) rather than a read-only rootfs — `docker/tests/gotenberg-hardening.test.sh` gates the flags and the network shape |
+| cloudflared (profile `tunnel`) | ALL | — | yes | Outbound-only connections to the Cloudflare edge, metrics on its own loopback (`127.0.0.1:20241`), no published port; image user is non-root, routes directory mounted read-only (verified under `userns-remap` with `ingress validate`) — `docker/tests/cloudflare-tunnel.test.sh` gates the compose contract |
 
 Every service also sets `security_opt: [no-new-privileges:true]`. The backend's mutable paths are named volumes (`backend-uploads`, `backend-logs`) rather than `./backend/*` binds, which used to appear as root-owned untracked files under `docker/`. `backend/Dockerfile` pre-creates both mount points `1777` so an empty named volume inherits a directory a non-root uid can write — Docker never chowns volumes for you.
 
