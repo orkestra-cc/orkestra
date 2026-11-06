@@ -919,9 +919,9 @@ check "tunnel deploy keeps cloudflared up" "yes" "$(td_saw '--profile tunnel .*u
 check "a deploy without CLOUDFLARE_TUNNEL never starts cloudflared" "0|no|no" \
     "$(td_deploy staging)|$(td_saw 'up -d --no-deps cloudflared')|$(td_saw '--profile tunnel')"
 check "…but keeps the switch's images on the host while routes exist" "yes|yes" \
-    "$(td_saw '^docker image inspect cloudflare/cloudflared:2026\.10\.5$')|$(td_saw '^docker image inspect curlimages/curl:')"
+    "$(td_saw '^docker image inspect cloudflare/cloudflared:2026\.10\.7$')|$(td_saw '^docker image inspect curlimages/curl:')"
 check "a failed pre-pull warns as a pull failure and does not fail the deploy" "0|yes" \
-    "$(TD_NO_IMAGE=1 td_deploy staging)|$(td_said 'Pull of cloudflare/cloudflared:2026.10.5 failed')"
+    "$(TD_NO_IMAGE=1 td_deploy staging)|$(td_said 'Pull of cloudflare/cloudflared:2026.10.7 failed')"
 # Production refuses root, so this case needs a non-root test run.
 if [ "$EUID" -ne 0 ]; then
     # One tunnel per environment: staging's file would claim the same id.

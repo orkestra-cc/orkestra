@@ -2363,7 +2363,7 @@ retrieval_view_logs() {
 TUNNEL_SERVICE="cloudflared"
 # Same pin as docker-compose.prod.yml (the test checks they agree): the
 # readiness probe runs this image, already on the host once cloudflared ran.
-TUNNEL_IMAGE="cloudflare/cloudflared:2026.10.5"
+TUNNEL_IMAGE="cloudflare/cloudflared:2026.10.7"
 # Metrics/ingress probes need curl; a deploy pre-pulls it.
 TUNNEL_PROBE_IMAGE="curlimages/curl:8.11.1"
 TUNNEL_METRICS="127.0.0.1:20241"
