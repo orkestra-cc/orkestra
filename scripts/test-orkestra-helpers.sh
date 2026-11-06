@@ -510,8 +510,10 @@ check "production admin frontend update exists once" "1" \
     "$(printf '%s\n' "$ret_deploy_fn" | grep -c 'up -d --no-deps "$FRONTEND_SERVICE"')"
 check "production admin frontend update uses the stack file list" "0" \
     "$(printf '%s\n' "$ret_deploy_fn" | grep 'up -d --no-deps "$FRONTEND_SERVICE"' | grep -vc 'compose_files\[@\]')"
-check "deploy builds its file list with stack_compose_files" "yes/yes" \
-    "$(printf '%s\n' "$ret_deploy_fn" | grep -q '^ *stack_compose_files;\{0,1\}$' && printf yes || printf no)/$(printf '%s\n' "$ret_deploy_fn" | grep -q 'compose_files=("${STACK_COMPOSE_FILES\[@\]}")' && printf yes || printf no)"
+# The deploy runs compose_stack (infra + app + overlays) and adds the active
+# overlays to compose_files on top of it.
+check "deploy keeps the active observability and retrieval overlays" "yes/yes" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep -q 'compose_files+=(-f "$OBSERVABILITY_COMPOSE")' && printf yes || printf no)/$(printf '%s\n' "$ret_deploy_fn" | grep -q 'compose_files+=(-f "$RETRIEVAL_COMPOSE")' && printf yes || printf no)"
 
 # gum spin runs an external process and the TTY spinner a subshell: a shell
 # function passed to with_spinner fails under gum and loses globals such as
@@ -522,6 +524,9 @@ check "overlay lifecycle passes no shell function to with_spinner" "0" \
     "$(declare -f retrieval_up retrieval_down retrieval_seed observability_up observability_down observability_reset | grep -c 'with_spinner .*\(retrieval\|observability\)_')"
 ret_spinner_fns=""
 while IFS= read -r ret_word; do
+    # with_spinner runs a shell function in its bash subshell, never under gum,
+    # so compose_stack keeps its globals there; it is the one function allowed.
+    [ "$ret_word" = compose_stack ] && continue
     if [ "$(type -t "$ret_word" 2>/dev/null)" = function ]; then
         ret_spinner_fns="$ret_spinner_fns $ret_word"
     fi
@@ -616,6 +621,69 @@ check "retrieval info checks Docker and the overlay file" "yes" \
 rm -f "$ret_env_file" "$ret_log" "$ret_out" "$ret_env_log"
 unset -f ret_run ret_stack_files has ret_line ret_bench ret_bench_prod ret_bench_inactive ret_bench_tty ret_bench_nodocker ret_bench_probe_err
 
+# --- compose_stack: infra + the ENV's app file + its overlays, extras last ---
+cs_tmp="$(mktemp -d)"
+touch "$cs_tmp/infra.yml" "$cs_tmp/prod.yml" "$cs_tmp/staging.yml" "$cs_tmp/dev.yml"
+cs_log="$cs_tmp/log"
+export CS_LOG="$cs_log"
+(
+    INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/prod.yml"
+    COMPOSE_OVERLAY_FILES=("$cs_tmp/staging.yml")
+    docker() { local IFS=' '; printf '%s\n' "$*" > "$CS_LOG"; }
+    compose_stack -f "$cs_tmp/obs.yml" --env-file "$cs_tmp/.env" ps
+)
+check "compose_stack layers infra, app, overlay, then extras" \
+    "compose -f $cs_tmp/infra.yml -f $cs_tmp/prod.yml -f $cs_tmp/staging.yml -f $cs_tmp/obs.yml --env-file $cs_tmp/.env ps" \
+    "$(cat "$cs_log")"
+(
+    INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/dev.yml"
+    COMPOSE_OVERLAY_FILES=()
+    docker() { local IFS=' '; printf '%s\n' "$*" > "$CS_LOG"; }
+    compose_stack ps
+)
+check "compose_stack without overlays is infra + app" \
+    "compose -f $cs_tmp/infra.yml -f $cs_tmp/dev.yml ps" "$(cat "$cs_log")"
+cs_status="$(
+    (
+        INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/prod.yml"
+        COMPOSE_OVERLAY_FILES=("$cs_tmp/missing-staging.yml")
+        docker() { :; }
+        compose_stack ps
+    ) > "$cs_tmp/out" 2>&1
+    printf '%s' "$?"
+)"
+check "compose_stack refuses a missing overlay" "1" "$cs_status"
+check "compose_stack names the missing overlay" "yes" \
+    "$(grep -q 'missing-staging.yml' "$cs_tmp/out" && printf yes || printf no)"
+check "no raw infra+app compose call is left in orkestra.sh" "0" \
+    "$(grep -cF 'docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE"' "$DIR/../orkestra.sh")"
+check "no compose_files array call bypasses compose_stack" "0" \
+    "$(grep -cF 'docker compose "${compose_files[@]}"' "$DIR/../orkestra.sh")"
+# Every ENV of this base has its own full app file: no overlay is declared.
+cs_overlays="$(
+    for cs_env in development staging production; do
+        ( ENV=$cs_env; set_env_config; printf '%s:%s ' "$cs_env" "${#COMPOSE_OVERLAY_FILES[@]}" )
+    done
+)"
+check "set_env_config declares no overlay in any ENV" \
+    "development:0 staging:0 production:0 " "$cs_overlays"
+# gum runs an external process: a shell function takes the bash spinner, so
+# with_spinner compose_stack works with gum installed and a TTY.
+cs_spin="$(
+    (
+        HAS_GUM=true; HAS_TTY=true; HAS_UNICODE=false
+        gum() { printf 'gum\n'; }
+        INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/dev.yml"
+        COMPOSE_OVERLAY_FILES=()
+        docker() { local IFS=' '; printf '%s\n' "$*"; }
+        with_spinner "Listing" compose_stack ps
+        with_spinner "Listing" true
+    ) 2>&1 | grep -v 'Listing'
+)"
+check "with_spinner runs compose_stack without gum, a command with gum" \
+    "compose -f $cs_tmp/infra.yml -f $cs_tmp/dev.yml ps
+gum" "$cs_spin"
+rm -rf "$cs_tmp"
 
 # --- env-validate.sh: same-site host pairings (spec §8 follow-up #16) ---
 # The validator derives its ENV_FILE from its own location, so a copy in a
