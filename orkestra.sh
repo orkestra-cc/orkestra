@@ -158,6 +158,11 @@ DOCKER_DIR="$PROJECT_ROOT/docker"
 # stack (COMPOSE_PROJECT_NAME=${APP_NAME}-${ENV}; see resolve_stack_identity).
 INFRA_COMPOSE="$DOCKER_DIR/docker-compose.infra.yml"
 
+# App-file overlays for the current ENV, layered after COMPOSE_FILE by
+# compose_stack. set_env_config fills it; empty in every ENV of this base
+# (staging runs its own full docker-compose.staging.yml).
+COMPOSE_OVERLAY_FILES=()
+
 ENV_FILE="$DOCKER_DIR/.env"
 
 # ADR-0005 Phase D — self-hosted observability stack (Loki, Tempo,
@@ -416,16 +421,19 @@ _spinner_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 #
 # Usage: with_spinner "Building images..." docker compose build
 #
-# Pass an external command only, never a shell function: `gum spin` runs it as
-# a separate process (a function is not found there), and the TTY path runs it
-# in a background subshell, so any global it sets is lost. Call a function
-# directly after a p_step line instead.
+# Pass an external command, or compose_stack, never another shell function:
+# `gum spin` runs a command as a separate process (a function is not found
+# there, so a function always takes the bash spinner), and the TTY path runs it
+# in a background subshell, so any global it sets is lost. compose_stack sets
+# none that a caller reads. Call any other function directly after a p_step
+# line instead.
 with_spinner() {
     local message=$1
     shift
 
-    # Upgrade path: gum's built-in spinner
-    if [ "$HAS_GUM" = true ] && [ "$HAS_TTY" = true ]; then
+    # Upgrade path: gum's built-in spinner. gum runs an external process, so
+    # a shell function (compose_stack) takes the bash spinner below.
+    if [ "$HAS_GUM" = true ] && [ "$HAS_TTY" = true ] && [ "$(type -t "$1")" != function ]; then
         gum spin --spinner dot --title "$message" -- "$@"
         return $?
     fi
@@ -679,6 +687,30 @@ get_services() {
     fi
 }
 
+# compose_stack ARGS... — `docker compose` over this stack's files: the infra
+# file, the ENV's app file, then the ENV's overlays (COMPOSE_OVERLAY_FILES).
+# Extra `-f` overlays a caller passes in ARGS (observability, retrieval) land
+# after these, as before. A declared overlay that is missing is a checkout
+# that predates it — stop instead of letting compose fail on a bad -f.
+compose_stack() {
+    compose_base_files
+    docker compose "${COMPOSE_BASE_FILES[@]}" "$@"
+}
+
+# compose_base_files — sets the global COMPOSE_BASE_FILES to the -f list
+# compose_stack uses: infra, the ENV's app file, then its overlays.
+# stack_compose_files starts from the same list, so a command that recreates
+# the backend through either keeps the overlays.
+declare -a COMPOSE_BASE_FILES=()
+compose_base_files() {
+    COMPOSE_BASE_FILES=(-f "$INFRA_COMPOSE" -f "$COMPOSE_FILE")
+    local overlay
+    for overlay in ${COMPOSE_OVERLAY_FILES[@]+"${COMPOSE_OVERLAY_FILES[@]}"}; do
+        [ -f "$overlay" ] || die "Compose overlay not found: $overlay — update this checkout (git pull) before deploying $ENV"
+        COMPOSE_BASE_FILES+=(-f "$overlay")
+    done
+}
+
 is_service_running() {
     local compose_file=$1 service=$2 count
     # Fast path: query within the compose file's own project.
@@ -749,6 +781,7 @@ set_env_config() {
             ENV_ICON="$ic_dot"
             BRANCH="any"
             COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev.yml"
+            COMPOSE_OVERLAY_FILES=()
             DB_NAME="orkestra_dev"
             FRONTEND_URL="http://localhost:8080"
             BACKEND_URL="http://localhost:3000"
@@ -758,6 +791,7 @@ set_env_config() {
             ENV_ICON="$ic_dot"
             BRANCH="dev"
             COMPOSE_FILE="$DOCKER_DIR/docker-compose.staging.yml"
+            COMPOSE_OVERLAY_FILES=()
             DB_NAME="orkestra_staging"
             FRONTEND_URL="https://staging.orkestra.cc"
             BACKEND_URL="https://staging-api.orkestra.cc"
@@ -767,6 +801,7 @@ set_env_config() {
             ENV_ICON="$ic_dot"
             BRANCH="main"
             COMPOSE_FILE="$DOCKER_DIR/docker-compose.prod.yml"
+            COMPOSE_OVERLAY_FILES=()
             DB_NAME="orkestra"
             FRONTEND_URL="https://gestionale.orkestra.com"
             BACKEND_URL="https://api.orkestra.com"
@@ -1183,6 +1218,9 @@ fullstack_deploy_interactive() {
 # updates, health checks, smoke tests, deployment metadata log).
 fullstack_execute_deploy() {
     local TIMESTAMP DEPLOYMENT_ID
+    # Extra overlays only (observability, retrieval); compose_stack already
+    # passes infra + the ENV's app file + its overlays.
+    local -a compose_files=()
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
     DEPLOYMENT_ID="${ENV}_${TIMESTAMP}"
 
@@ -1299,7 +1337,7 @@ fullstack_execute_deploy() {
 
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Building backend image (no cache)" \
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" build --no-cache \
                 --build-arg VERSION="$VERSION" \
                 --build-arg BUILD_TIME="$BUILD_TIME" \
                 --build-arg GIT_COMMIT="$GIT_COMMIT" \
@@ -1307,7 +1345,7 @@ fullstack_execute_deploy() {
         fi
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Building admin frontend image (no cache)" \
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" build --no-cache \
                 --build-arg VERSION="$VERSION" \
                 --build-arg BUILD_TIME="$BUILD_TIME" \
                 --build-arg GIT_COMMIT="$GIT_COMMIT" \
@@ -1323,14 +1361,18 @@ fullstack_execute_deploy() {
     preflight_reclaim_containers "$INFRA_COMPOSE"
     preflight_reclaim_containers "$COMPOSE_FILE"
 
-    # Preserve each overlay's backend override (observability's Loki/Grafana
-    # environment, retrieval's endpoints and retrieval-net) whenever this
-    # stack already has that overlay's containers. The overlays are only
-    # valid as part of this merged stack, never on their own.
-    stack_compose_files
-    local -a compose_files=("${STACK_COMPOSE_FILES[@]}")
+    # Preserve the backend's Loki/Grafana environment override whenever this
+    # stack already has observability containers. The overlay is only valid as
+    # part of this merged stack, never on its own.
+    if observability_project_active; then
+        compose_files+=(-f "$OBSERVABILITY_COMPOSE")
+    fi
+    # Same for the retrieval overlay's endpoints and retrieval-net.
+    if retrieval_project_active; then
+        compose_files+=(-f "$RETRIEVAL_COMPOSE")
+    fi
     with_spinner "Ensuring infrastructure services are running" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mongodb redis rustfs gotenberg
+        compose_stack --env-file "$ENV_FILE" up -d mongodb redis rustfs gotenberg
     sleep 5
     p_ok "Infrastructure ready"
 
@@ -1339,12 +1381,12 @@ fullstack_execute_deploy() {
     elif [ "$ENV" = "production" ]; then
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Rolling-update backend" \
-                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d --no-deps "$BACKEND_SERVICE"
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" up -d --no-deps "$BACKEND_SERVICE"
             with_spinner "Waiting for backend to be healthy" sleep 15
         fi
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Deploying admin frontend" \
-                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d --no-deps "$FRONTEND_SERVICE"
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" up -d --no-deps "$FRONTEND_SERVICE"
         fi
         with_spinner "Waiting for services to stabilize" sleep 30
     else
@@ -1361,22 +1403,22 @@ fullstack_execute_deploy() {
             # One project, one `up -d` — do NOT `down` first (that would
             # tear down infra too, since infra is now part of this project).
             with_spinner "Starting services" \
-                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" up -d
         else
             if [ "$DEPLOY_SCOPE" = "backend" ]; then
-                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" stop "$BACKEND_SERVICE" 2> /dev/null || true
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" stop "$BACKEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting backend" \
-                    docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d "$BACKEND_SERVICE"
+                    compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" up -d "$BACKEND_SERVICE"
             fi
             if [ "$DEPLOY_SCOPE" = "frontend-admin" ]; then
-                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" 2> /dev/null || true
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting admin frontend" \
-                    docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE"
+                    compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE"
             fi
             if [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
-                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" "$BACKEND_SERVICE" 2> /dev/null || true
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" "$BACKEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting admin frontend and backend" \
-                    docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE" "$BACKEND_SERVICE"
+                    compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE" "$BACKEND_SERVICE"
             fi
         fi
         with_spinner "Waiting for services to initialize" sleep 30
@@ -1535,7 +1577,7 @@ fullstack_stop() {
     done < <(get_services "$COMPOSE_FILE")
 
     with_spinner "Stopping application services" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop \
+        compose_stack --env-file "$ENV_FILE" stop \
         "${APP_SERVICES[@]}"
 
     local stop_infra=false
@@ -1547,7 +1589,7 @@ fullstack_stop() {
 
     if [ "$stop_infra" = true ]; then
         with_spinner "Stopping the whole stack (app + infrastructure)" \
-            docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
+            compose_stack --env-file "$ENV_FILE" down
     fi
 }
 
@@ -1557,7 +1599,7 @@ fullstack_status() {
     echo
 
     p_section "Containers"
-    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+    compose_stack --env-file "$ENV_FILE" ps
     echo
 
     if [ "$ENV" != "development" ]; then
@@ -1600,7 +1642,7 @@ overlay_init_env() {
 }
 
 stack_backend_running() {
-    [ -n "$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
+    [ -n "$(compose_stack --env-file "$ENV_FILE" \
         ps -q "$BACKEND_SERVICE" 2> /dev/null)" ]
 }
 
@@ -1631,7 +1673,8 @@ stack_compose_files() {
     done
     # In auto mode retrieval_project_active does this itself.
     [ "$ret" != yes ] || retrieval_export_seed_timeout
-    STACK_COMPOSE_FILES=(-f "$INFRA_COMPOSE" -f "$COMPOSE_FILE")
+    compose_base_files
+    STACK_COMPOSE_FILES=("${COMPOSE_BASE_FILES[@]}")
     if [ "$obs" = yes ] || { [ "$obs" = auto ] && observability_project_active; }; then
         STACK_COMPOSE_FILES+=(-f "$OBSERVABILITY_COMPOSE")
     fi
@@ -1678,11 +1721,11 @@ declare -ar OBS_VOLUMES=(tempo-data prometheus-data loki-data promtail-positions
 # aborts before a lifecycle command can run.
 observability_list_services() {
     local services volumes expected
-    if ! services=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" \
+    if ! services=$(compose_stack -f "$OBSERVABILITY_COMPOSE" \
         --env-file "$ENV_FILE" config --services); then
         die "Observability compose validation failed; no lifecycle action was taken."
     fi
-    if ! volumes=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" \
+    if ! volumes=$(compose_stack -f "$OBSERVABILITY_COMPOSE" \
         --env-file "$ENV_FILE" config --volumes); then
         die "Observability volume validation failed; no lifecycle action was taken."
     fi
@@ -1711,7 +1754,7 @@ observability_remove_volumes() {
 
 observability_project_active() {
     local container_ids
-    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" \
+    container_ids=$(compose_stack -f "$OBSERVABILITY_COMPOSE" \
         --env-file "$ENV_FILE" ps -q "${OBS_SERVICES[@]}" 2> /dev/null) || return 1
     [ -n "$container_ids" ]
 }
@@ -1742,7 +1785,7 @@ observability_up() {
     p_muted "Compose: $(basename "$OBSERVABILITY_COMPOSE")"
     echo
     with_spinner "Starting observability stack" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         up -d "${OBS_SERVICES[@]}" || die "Observability start failed."
     # Not through with_spinner: it cannot run a shell function (see its header).
     p_step "Applying backend observability configuration"
@@ -1760,7 +1803,7 @@ observability_down() {
     observability_list_services
     echo
     with_spinner "Stopping observability stack" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         rm -sf "${OBS_SERVICES[@]}" || die "Observability stop failed."
     p_step "Restoring backend application configuration"
     observability_restore_backend_config || die "Backend configuration restore failed."
@@ -1785,7 +1828,7 @@ observability_reset() {
         ask_yes_no "Proceed with reset?" "n" || { p_warn "Operation cancelled."; return; }
     fi
     with_spinner "Removing observability containers" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         rm -sfv "${OBS_SERVICES[@]}" || die "Observability container removal failed."
     p_step "Removing observability volumes"
     observability_remove_volumes || die "Observability volume removal failed."
@@ -1803,13 +1846,13 @@ observability_status() {
     echo
 
     p_section "Containers"
-    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+    compose_stack -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         ps "${OBS_SERVICES[@]}"
     echo
 
     p_section "Resource usage"
     local container_ids
-    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+    container_ids=$(compose_stack -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
         ps -q "${OBS_SERVICES[@]}" 2>/dev/null)
     if [ -z "$container_ids" ]; then
         p_muted "No running containers — start the stack with 'observability up'."
@@ -1930,7 +1973,7 @@ retrieval_export_seed_timeout() {
 retrieval_list_services() {
     local services volumes expected key missing=""
     retrieval_export_seed_timeout
-    if ! services=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
+    if ! services=$(compose_stack -f "$RETRIEVAL_COMPOSE" \
         --env-file "$ENV_FILE" --profile retrieval-seed config --services); then
         for key in QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY; do
             [ -n "$(retrieval_setting "$key")" ] || missing="${missing:+$missing and }$key"
@@ -1940,7 +1983,7 @@ retrieval_list_services() {
         fi
         die "Retrieval compose validation failed — $missing must be set (make init); no lifecycle action was taken."
     fi
-    if ! volumes=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
+    if ! volumes=$(compose_stack -f "$RETRIEVAL_COMPOSE" \
         --env-file "$ENV_FILE" --profile retrieval-seed config --volumes); then
         die "Retrieval volume validation failed; no lifecycle action was taken."
     fi
@@ -1976,7 +2019,7 @@ retrieval_refuse_placeholder_keys() {
 retrieval_project_active() {
     local container_ids
     retrieval_export_seed_timeout
-    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" \
+    container_ids=$(compose_stack -f "$RETRIEVAL_COMPOSE" \
         --env-file "$ENV_FILE" ps -a -q "${RET_SERVICES[@]}" 2> /dev/null) || return 1
     [ -n "$container_ids" ]
 }
@@ -2012,12 +2055,12 @@ retrieval_seed() {
             break
         fi
         p_step "Seeding $seed"
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
             --profile retrieval-seed up -d --wait --wait-timeout "$timeout" "$seed" || rc=$?
         if [ "$rc" -ne 0 ] || [ "$ret_sig" -ne 0 ]; then
             break
         fi
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
             --profile retrieval-seed rm -sf "$seed" || rm_rc=$?
         if [ "$rm_rc" -ne 0 ]; then
             break
@@ -2026,7 +2069,7 @@ retrieval_seed() {
     # A failed or interrupted seed: remove both, the one that was running and
     # any left by a killed run.
     if [ "$rc" -ne 0 ] || [ "$ret_sig" -ne 0 ]; then
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
             --profile retrieval-seed rm -sf "${RET_SEED_SERVICES[@]}" || rm_rc=$?
     fi
     trap - INT TERM HUP
@@ -2072,7 +2115,7 @@ retrieval_up() {
     echo
     retrieval_seed
     with_spinner "Starting Qdrant and the inference servers" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
         up -d --wait --wait-timeout 900 "${RET_SERVICES[@]}" || die "Retrieval start failed."
     p_step "Applying backend retrieval configuration"
     retrieval_apply_backend_override || die "Backend retrieval configuration failed."
@@ -2089,7 +2132,7 @@ retrieval_down() {
     retrieval_list_services
     echo
     with_spinner "Removing retrieval containers" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+        compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
         --profile retrieval-seed rm -sf "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}" || die "Retrieval stop failed."
     p_step "Restoring backend application configuration"
     retrieval_restore_backend_config || die "Backend configuration restore failed."
@@ -2111,10 +2154,10 @@ retrieval_status() {
     # The seeds are listed too: a leftover one (its shell was killed during
     # the wait) is the only container with internet access.
     p_section "Containers"
-    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+    compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
         --profile retrieval-seed ps -a "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}"
     local seed_ids
-    seed_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+    seed_ids=$(compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
         --profile retrieval-seed ps -a -q "${RET_SEED_SERVICES[@]}" 2>/dev/null || true)
     if [ -n "$seed_ids" ]; then
         p_warn "A seed container exists and it has internet access. Unless a 'retrieval up' is seeding right now, remove it with ./orkestra.sh retrieval down."
@@ -2123,7 +2166,7 @@ retrieval_status() {
 
     p_section "Resource usage"
     local container_ids
-    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
+    container_ids=$(compose_stack -f "$RETRIEVAL_COMPOSE" --env-file "$ENV_FILE" \
         --profile retrieval-seed ps -q "${RET_SERVICES[@]}" "${RET_SEED_SERVICES[@]}" 2>/dev/null)
     if [ -z "$container_ids" ]; then
         p_muted "No running containers — start the stack with 'retrieval up'."
