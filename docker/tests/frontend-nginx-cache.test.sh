@@ -25,10 +25,13 @@ cd "$(dirname "$0")/../.."
 
 IMAGE=${NGINX_TEST_IMAGE:-nginx:alpine}
 fail=0
-containers=()
 work=$(mktemp -d)
+# start runs inside $(...), a subshell: it records each container id in a file,
+# because a variable it set would never reach this cleanup.
+containers="$work/containers"
+: >"$containers"
 cleanup() {
-  for c in "${containers[@]}"; do docker rm -f "$c" >/dev/null 2>&1 || true; done
+  while read -r c; do docker rm -f "$c" >/dev/null 2>&1 || true; done <"$containers"
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -52,7 +55,7 @@ start() {
   local name=$1 mount=$2; shift 2
   local cid
   cid=$(docker run -d --rm -p 127.0.0.1::80 -v "$root:/usr/share/nginx/html:ro" -v "$mount" "$@" "$IMAGE")
-  containers+=("$cid")
+  echo "$cid" >>"$containers"
   local port
   port=$(docker port "$cid" 80/tcp | head -n1 | sed 's/.*://')
   for _ in $(seq 1 50); do
