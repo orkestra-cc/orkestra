@@ -79,7 +79,12 @@ type PushUserResult struct {
 	Attempted int
 	Delivered int
 	Disabled  int // device tokens disabled because the provider rejected them
-	Error     string
+	// Error explains a failed or partial result. For provider outcomes it
+	// lists the undelivered devices by driver reason code, e.g.
+	// "delivery failed: fcm_auth ×2, transient ×1" or
+	// "partially delivered: fcm_unregistered ×1". Never a token, never the
+	// provider's own text.
+	Error string
 }
 
 // PushResult carries one PushUserResult per requested user.

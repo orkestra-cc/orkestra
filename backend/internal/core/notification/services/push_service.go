@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +19,12 @@ const (
 	pushSessionUnavail  = "session check unavailable"
 	pushDeviceLookupErr = "device lookup failed"
 	pushKeyPrefix       = "push:"
+	// pushWriteTimeout bounds each write made after the driver call (the
+	// dead-token disables and the delivery-log rows). Those writes run
+	// detached from the caller's cancellation: once the provider has
+	// answered, losing them would drop the idempotency row (a retry would
+	// resend) or keep a dead token active.
+	pushWriteTimeout = 5 * time.Second
 )
 
 // PushDriverProvider yields the active push driver for one send.
@@ -73,6 +81,28 @@ type pushUserState struct {
 	done      bool                 // result final, no send needed
 	idemKey   string
 	logStatus string
+	failures  map[string]int // undelivered outcomes by driver reason
+}
+
+// formatPushReasons renders reason counts in a stable order, e.g.
+// "fcm_auth ×2, transient ×1". Reasons are driver codes, never tokens.
+func formatPushReasons(counts map[string]int) string {
+	reasons := make([]string, 0, len(counts))
+	for r := range counts {
+		reasons = append(reasons, r)
+	}
+	sort.Strings(reasons)
+	parts := make([]string, len(reasons))
+	for i, r := range reasons {
+		parts[i] = fmt.Sprintf("%s ×%d", r, counts[r])
+	}
+	return strings.Join(parts, ", ")
+}
+
+// writeCtx detaches a post-send write from the caller's cancellation and
+// bounds it with pushWriteTimeout.
+func writeCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), pushWriteTimeout)
 }
 
 func pushIdemKey(key, user string) string {
@@ -162,6 +192,7 @@ func (p *PushService) SendPush(ctx context.Context, req iface.PushRequest) (*ifa
 	if len(msgs) > 0 {
 		outcomes = driver.Send(ctx, msgs)
 	}
+	failures := map[string]int{} // undelivered outcomes of the whole send, by reason
 	for i, m := range msgs {
 		st := owners[i]
 		st.res.Attempted++
@@ -171,20 +202,44 @@ func (p *PushService) SendPush(ctx context.Context, req iface.PushRequest) (*ifa
 		} else {
 			o = PushOutcome{Reason: "transient"}
 		}
-		switch {
-		case o.Delivered:
+		if o.Delivered {
 			st.res.Delivered++
-		case o.Permanent:
-			reason := o.Reason
-			if reason == "" {
+			continue
+		}
+		reason := o.Reason
+		if reason == "" {
+			if o.Permanent {
 				reason = models.DeviceDisabledFCMInvalid
+			} else {
+				reason = "transient"
 			}
-			if derr := p.devices.DisableByToken(ctx, m.Token, reason, p.now()); derr != nil {
+		}
+		if st.failures == nil {
+			st.failures = map[string]int{}
+		}
+		st.failures[reason]++
+		failures[reason]++
+		if o.Permanent {
+			wctx, cancel := writeCtx(ctx)
+			derr := p.devices.DisableByToken(wctx, m.Token, reason, p.now())
+			cancel()
+			if derr != nil {
 				p.logger.Warn("notification: push disable token failed", "device_ref", tokenPrefix(m.Token), "error", derr)
 			} else {
 				st.res.Disabled++
 			}
 		}
+	}
+	// One Warn per distinct failure reason per send: the reason code, how
+	// many devices it hit and the driver. Never a token, and never the
+	// provider's own text (the module's error contract).
+	reasons := make([]string, 0, len(failures))
+	for r := range failures {
+		reasons = append(reasons, r)
+	}
+	sort.Strings(reasons)
+	for _, r := range reasons {
+		p.logger.Warn("notification: push delivery failed", "reason", r, "count", failures[r], "driver", driver.Name())
 	}
 
 	out := &iface.PushResult{Users: make([]iface.PushUserResult, 0, len(states))}
@@ -197,9 +252,10 @@ func (p *PushService) SendPush(ctx context.Context, req iface.PushRequest) (*ifa
 				st.res.Status = iface.PushStatusDelivered
 			case st.res.Delivered > 0:
 				st.res.Status = iface.PushStatusPartial
+				st.res.Error = "partially delivered: " + formatPushReasons(st.failures)
 			default:
 				st.res.Status = iface.PushStatusFailed
-				st.res.Error = "delivery failed"
+				st.res.Error = "delivery failed: " + formatPushReasons(st.failures)
 			}
 		}
 		out.Users = append(out.Users, st.res)
@@ -315,7 +371,9 @@ func (p *PushService) record(ctx context.Context, req iface.PushRequest, provide
 		doc.SentAt = &now
 		doc.IdempotencyKey = st.idemKey
 	}
-	if err := p.log.Create(ctx, doc); err != nil {
+	wctx, cancel := writeCtx(ctx)
+	defer cancel()
+	if err := p.log.Create(wctx, doc); err != nil {
 		p.logger.Warn("notification: push log write failed", "user", st.res.UserUUID, "error", err)
 	}
 }
