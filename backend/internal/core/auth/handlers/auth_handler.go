@@ -203,7 +203,10 @@ func NewAuthHandler(
 // currentSessionID returns the JWT sid claim from the request context, or
 // "" when the caller is unauthenticated or carrying a pre-sid token.
 func currentSessionID(ctx context.Context) string {
-	sid, _ := middleware.GetSessionID(ctx)
+	if sid, ok := middleware.GetSessionID(ctx); ok {
+		return sid
+	}
+	sid, _ := ctxauth.GetSessionID(ctx)
 	return sid
 }
 
@@ -1516,6 +1519,19 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := h.authService.TerminateSessionByUUID(ctx, userUUID, deviceID); err != nil {
 			logger.Warn("logout session termination degraded",
 				slog.String("outcome", revocationFailureOutcome(err)))
+		}
+	}
+
+	// A bearer-authenticated logout without a verifiable refresh cookie
+	// (typical for mobile) names no device, so the branches above ended
+	// nothing. Terminate the bearer's own session doc so every
+	// session-ending path flips isActive (push stops with the session).
+	if !req.AllDevices {
+		if sid := currentSessionID(ctx); sid != "" {
+			if err := h.authService.TerminateCurrentSession(ctx, userUUID, sid); err != nil {
+				logger.Warn("logout current session termination degraded",
+					slog.String("outcome", revocationFailureOutcome(err)))
+			}
 		}
 	}
 
