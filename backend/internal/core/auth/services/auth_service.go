@@ -250,6 +250,10 @@ type AuthService interface {
 	GetSessionCountByUUID(ctx context.Context, userUUID string) (int, error)
 	RenameSessionByUUID(ctx context.Context, userUUID string, deviceID, deviceName string) error
 	TerminateSessionByUUID(ctx context.Context, userUUID string, deviceID string) error
+	// TerminateCurrentSession ends one session by id (the JWT sid): refresh
+	// tokens, session doc and Redis sid. No-op for an unknown session or
+	// one owned by another user.
+	TerminateCurrentSession(ctx context.Context, userUUID, sessionUUID string) error
 	TerminateAllSessionsByUUID(ctx context.Context, userUUID string) error
 
 	// Enhanced token management with UUID and risk assessment
@@ -1324,6 +1328,66 @@ func (s *authService) FindAccountsForConsolidation(ctx context.Context, email st
 	}
 	return []*iface.User{convertUserResponseToAuthModel(userResponse)}, nil
 }
+
+// ActiveSessions implements iface.SessionActivityReader for this tier: true
+// for each id whose session doc is isActive and unexpired and, when a
+// revocation store is wired, not in the revocation set.
+// A session therefore reads ended once it expires (idle TTL or max age) or
+// once a revocation runs revokeSessionInternal on it: password change,
+// admin or self revoke, refresh replay, and logout. Logout reaches it only
+// when the request identifies the session: a verified bearer access token
+// of that session (TerminateCurrentSession on its sid) or a verified
+// refresh cookie (TerminateSessionByUUID on the cookie's device). A logout
+// carrying neither ends nothing. The doc is authoritative, Redis is defense
+// in depth and a Redis error is logged at Warn and ignored so push never
+// hard-depends on Redis.
+// Unknown ids are absent from the map; empty input does not query.
+func (s *authService) ActiveSessions(ctx context.Context, sessionIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(sessionIDs))
+	if len(sessionIDs) == 0 || s.authSessionRepo == nil {
+		return out, nil
+	}
+	docs, err := s.authSessionRepo.GetActiveByUUIDs(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range docs {
+		if d == nil {
+			continue
+		}
+		if s.sessionRevocation != nil {
+			revoked, rerr := s.sessionRevocation.IsRevoked(ctx, d.UUID)
+			if rerr != nil {
+				slog.Default().Warn("auth: session revocation lookup failed; trusting the session doc",
+					slog.String("error", rerr.Error()))
+			} else if revoked {
+				continue
+			}
+		}
+		out[d.UUID] = true
+	}
+	return out, nil
+}
+
+// TerminateCurrentSession ends the single session sessionUUID of userUUID
+// (refresh tokens, session doc, Redis sid) — the logout path of a bearer
+// caller that has no verifiable refresh cookie. A session that is unknown
+// or belongs to another user is a silent no-op (logout is idempotent).
+func (s *authService) TerminateCurrentSession(ctx context.Context, userUUID, sessionUUID string) error {
+	if userUUID == "" || sessionUUID == "" || s.authSessionRepo == nil {
+		return nil
+	}
+	sess, err := s.authSessionRepo.GetByUUID(ctx, sessionUUID)
+	if err != nil {
+		return err
+	}
+	if sess == nil || sess.UserUUID != userUUID {
+		return nil
+	}
+	return s.revokeSessionInternal(ctx, sessionUUID, "user_logout")
+}
+
+var _ iface.SessionActivityReader = (*authService)(nil)
 
 // GetUserSessionsByUUID lists active (isActive && !expired) sessions
 // for the user, sorted most-recent-first. The IsCurrent flag is left

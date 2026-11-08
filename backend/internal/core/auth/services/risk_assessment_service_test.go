@@ -554,3 +554,7 @@ func TestAssessLoginRisk_FactorCountErrorDoesNotAbort(t *testing.T) {
 		t.Errorf("partial failure: want new_ip only (%v), got %v", WeightNewIP, got.Score)
 	}
 }
+
+func (s *stubSessionRepo) GetActiveByUUIDs(_ context.Context, _ []string) ([]*models.AuthSessionDoc, error) {
+	return nil, nil
+}

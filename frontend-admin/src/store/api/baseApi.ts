@@ -877,7 +877,10 @@ export const baseApi = createApi({
     // Retrieval — core retrieval module admin surface (ADR-0023)
     'RetrievalCorpora',
     'RetrievalTenantIndexing',
-    'RetrievalSearchLog'
+    'RetrievalSearchLog',
+    // Jobs — core jobs module admin surface (job list + run history)
+    'Jobs',
+    'JobRuns'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,

@@ -18,6 +18,10 @@ type AuthSessionRepository interface {
 	GetByUUID(ctx context.Context, uuid string) (*models.AuthSessionDoc, error)
 	GetByUserAndDevice(ctx context.Context, userUUID, deviceID string) (*models.AuthSessionDoc, error)
 	GetActiveSessionsByUser(ctx context.Context, userUUID string) ([]*models.AuthSessionDoc, error)
+	// GetActiveByUUIDs returns, in this tier's collection, the sessions among
+	// uuids that are isActive and not expired, in one $in query. Empty input
+	// returns nil without querying.
+	GetActiveByUUIDs(ctx context.Context, uuids []string) ([]*models.AuthSessionDoc, error)
 
 	// Session updates
 	UpdateLastActivity(ctx context.Context, uuid string) error
@@ -222,6 +226,35 @@ func (r *authSessionRepository) GetByUserAndDevice(ctx context.Context, userUUID
 	}
 
 	return &result, nil
+}
+
+func (r *authSessionRepository) GetActiveByUUIDs(ctx context.Context, uuids []string) ([]*models.AuthSessionDoc, error) {
+	if len(uuids) == 0 {
+		return nil, nil
+	}
+	filter := bson.M{
+		"uuid":      bson.M{"$in": uuids},
+		"isActive":  true,
+		"expiresAt": bson.M{"$gt": time.Now()},
+	}
+	//tenantscope:allow system: sessions are looked up by globally unique session uuid inside this tier's collection
+	cursor, err := r.collection.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find active sessions by uuid: %w", err)
+	}
+	defer cursor.Close(ctx)
+	var out []*models.AuthSessionDoc
+	for cursor.Next(ctx) {
+		var s models.AuthSessionDoc
+		if err := cursor.Decode(&s); err != nil {
+			return nil, fmt.Errorf("failed to decode session: %w", err)
+		}
+		out = append(out, &s)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate sessions: %w", err)
+	}
+	return out, nil
 }
 
 func (r *authSessionRepository) GetActiveSessionsByUser(ctx context.Context, userUUID string) ([]*models.AuthSessionDoc, error) {

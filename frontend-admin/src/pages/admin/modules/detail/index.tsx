@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, useBlocker, useParams, useSearchParams } from 'react-router';
+import {
+  Link,
+  Navigate,
+  useBlocker,
+  useParams,
+  useSearchParams
+} from 'react-router';
 import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
@@ -24,6 +30,7 @@ import ModuleConfigPanel from './ModuleConfigPanel';
 import ModuleDependencyCard from './ModuleDependencyCard';
 import ModuleSaveBar from './ModuleSaveBar';
 import AdminSectionHost from './AdminSectionHost';
+import JobsModulePage from '../jobs';
 import LoggingModulePage from '../logging';
 import { hasPageRail } from '../configModel';
 import { useModuleConfigController } from '../useModuleConfigController';
@@ -679,12 +686,28 @@ const GenericModuleDetailPage: React.FC = () => {
 
 const ModuleDetailPage: React.FC = () => {
   const { moduleName } = useParams<{ moduleName: string }>();
+  const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
 
   // Keep specialized workspaces at a component boundary. Each branch owns
   // and executes its own complete hook set, so adding the logging page never
   // makes the generic detail page's hooks conditional.
   if (moduleName === 'logging') {
     return <LoggingModulePage />;
+  }
+
+  // The jobs workspace owns /admin/modules/jobs; `?view=settings` is its
+  // door to the generic page, where the module's own configuration lives.
+  if (moduleName === 'jobs') {
+    if (searchParams.get('view') !== 'settings') return <JobsModulePage />;
+    return (
+      <>
+        <Link to="?" className="d-inline-block mb-3 fs-10">
+          {t('adminJobs.backToJobs')}
+        </Link>
+        <GenericModuleDetailPage />
+      </>
+    );
   }
 
   return <GenericModuleDetailPage />;

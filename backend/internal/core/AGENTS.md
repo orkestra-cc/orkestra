@@ -7,12 +7,12 @@ _Parent: [../../AGENTS.md](../../AGENTS.md)_
 
 ## What this is
 
-The ten modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, runtime log-level admin, language-model access (credentials, models, grants, gateway), corpora and hybrid search (retrieval), and the compliance plane (audit + GDPR DSR). Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
+The eleven modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, runtime log-level admin, language-model access (credentials, models, grants, gateway), corpora and hybrid search (retrieval), and the compliance plane (audit + GDPR DSR). Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
 
 Load order is topologically sorted from each module's `Dependencies()` by `ModuleRegistry.InitAll` (`pkg/sdk/module/registry.go:115-217`):
 
 ```
-user → notification → tenant → authz → auth → navigation → logging → llm → retrieval → compliance
+user → notification → tenant → authz → auth → navigation → logging → jobs → llm → retrieval → compliance
 ```
 
 The registry walks this DAG, constructs each module, auto-creates its MongoDB collections, seeds its module_configs document, collects its nav items, wires its services into the registry, and registers its routes behind a gate (core routes are not gated — the gate only applies to optional addons).
@@ -30,6 +30,7 @@ The AGENTS.md is the **contract** (invariants, wiring, rules — read before edi
 | **auth** | Email/password + OAuth 2.1, JWT issuance, sessions-per-device, refresh rotation | [auth/AGENTS.md](auth/AGENTS.md) | [auth](../../../docs/site/modules/core/auth.mdx) |
 | **navigation** | Role-filtered sidebar aggregated from every module's `NavItems()` + persisted ordering overrides via `/admin/modules/navigation` | [navigation/AGENTS.md](navigation/AGENTS.md) | [navigation](../../../docs/site/modules/core/navigation.mdx) |
 | **logging** | Runtime log-level admin (ADR-0005 Phase F): atomic-snapshot `LevelResolver` swap behind `PerModuleLevelHandler` | [logging/AGENTS.md](logging/AGENTS.md) | [logging](../../../docs/site/modules/core/logging.mdx) |
+| **jobs** | Background job scheduler: jobs declared through `module.HasJobs`, Mongo lease (at most one run in progress), durable retries, run log, `/admin/modules/jobs` workspace (ADR-0024) | [jobs/AGENTS.md](jobs/AGENTS.md) | [jobs](../../../docs/site/modules/core/jobs.mdx) |
 | **llm** | Org-scoped LLM API-key credentials (envelope-sealed), model catalog with capabilities and purposes, per-user grants, `iface.LLMGateway` for addons (ADR-0022) | [llm/AGENTS.md](llm/AGENTS.md) | [llm](../../../docs/site/modules/core/llm.mdx) |
 | **retrieval** | Corpora, hybrid search with tenant-scoped BM25, principal filter; Qdrant behind an engine driver; admin console page and routes (ADR-0023) | [retrieval/AGENTS.md](retrieval/AGENTS.md) | [retrieval](../../../docs/site/modules/core/retrieval.mdx) |
 | **compliance** | Audit trail (`iface.AuditSink`) + GDPR DSR (`iface.PIIProducer` export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009, always-on) | [compliance/AGENTS.md](compliance/AGENTS.md) | [compliance](../../../docs/site/modules/core/compliance.mdx) |

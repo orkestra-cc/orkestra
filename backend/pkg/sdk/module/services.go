@@ -161,6 +161,11 @@ const (
 	// capability IDs when building the admin catalog UI or validating grants.
 	ServiceCapabilityRegistry ServiceKey = "system.capability_registry"
 
+	// ServiceJobCatalog is the boot-time catalog of module-contributed
+	// background jobs (HasJobs) collected after InitAll. Registered empty
+	// before any Init. Value: *jobs.Catalog.
+	ServiceJobCatalog ServiceKey = "jobs.catalog"
+
 	// ServiceFirstAdminClaimer gates the platform's one-time super_admin seat.
 	// Registered by main.go wiring; consumed by password auth + setup wizard
 	// to race-proof their first-user heuristic. Value: *systeminit.Repo

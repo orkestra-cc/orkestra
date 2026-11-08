@@ -130,6 +130,21 @@ type NotificationService struct {
 	// through. It does not — see the fail-closed branch there. Transactional
 	// sends never touch this field regardless of whether it is wired.
 	optouts repository.MarketingOptoutRepository
+
+	// push is nil until SetPush wires it; SendPush then reports
+	// ErrPushUnavailable.
+	push *PushService
+}
+
+// SetPush wires the push channel (iface.PushSender).
+func (s *NotificationService) SetPush(p *PushService) { s.push = p }
+
+// SendPush implements iface.PushSender by delegating to the push service.
+func (s *NotificationService) SendPush(ctx context.Context, req iface.PushRequest) (*iface.PushResult, error) {
+	if s.push == nil {
+		return nil, fmt.Errorf("%w: push service not wired", iface.ErrPushUnavailable)
+	}
+	return s.push.SendPush(ctx, req)
 }
 
 func NewNotificationService(

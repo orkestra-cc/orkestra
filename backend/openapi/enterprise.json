@@ -3600,6 +3600,422 @@
         ],
         "type": "object"
       },
+      "JobsJobView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobsJobView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "attempt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "defaultEnabled": {
+            "type": "boolean"
+          },
+          "defaultSchedule": {
+            "$ref": "#/components/schemas/JobsScheduleView"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "lastRun": {
+            "$ref": "#/components/schemas/JobsLastRunView"
+          },
+          "maxAttempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "module": {
+            "type": "string"
+          },
+          "moduleStarted": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nextRunAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "overridden": {
+            "type": "boolean"
+          },
+          "retryAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runRequestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/JobsScheduleView"
+          },
+          "timeoutSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "module",
+          "name",
+          "title",
+          "defaultSchedule",
+          "schedule",
+          "timezone",
+          "enabled",
+          "defaultEnabled",
+          "overridden",
+          "moduleStarted",
+          "running",
+          "attempt",
+          "timeoutSeconds",
+          "maxAttempts",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "JobsLastRunView": {
+        "additionalProperties": false,
+        "properties": {
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "status",
+          "startedAt",
+          "finishedAt",
+          "durationMs"
+        ],
+        "type": "object"
+      },
+      "JobsListBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobsListBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobsJobView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "type": "object"
+      },
+      "JobsPreviewBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobsPreviewBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "cron": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "everySeconds": {
+            "format": "int64",
+            "maximum": 31622400,
+            "type": "integer"
+          },
+          "kind": {
+            "description": "every or cron",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA zone; defaults to the module timezone",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "JobsPreviewResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobsPreviewResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "next": {
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "next",
+          "description"
+        ],
+        "type": "object"
+      },
+      "JobsRunView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "details": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "droppedDetails": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "replica": {
+            "type": "string"
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "scheduledFor": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "trigger": {
+            "enum": [
+              "schedule",
+              "manual",
+              "retry",
+              "catchup"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "trigger",
+          "status",
+          "attempt",
+          "startedAt",
+          "durationMs"
+        ],
+        "type": "object"
+      },
+      "JobsRunsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobsRunsBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "nextCursor": {
+            "description": "Pass as cursor to read the next page; absent on the last page",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/JobsRunView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "type": "object"
+      },
+      "JobsScheduleInput": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "description": "5-field cron expression for a cron schedule, e.g. 0 2 * * *",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "everySeconds": {
+            "description": "Interval in seconds for an every schedule (60 to 31622400)",
+            "format": "int64",
+            "maximum": 31622400,
+            "type": "integer"
+          },
+          "kind": {
+            "description": "every or cron",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "JobsScheduleView": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "type": "string"
+          },
+          "everySeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "every",
+              "cron",
+              "manual"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "JobsUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobsUpdateBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "The job's revision as read; a stale one answers 409 jobs.revision_conflict",
+            "format": "int64",
+            "type": "integer"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/JobsScheduleInput",
+            "description": "Replaces the schedule; not allowed on a manual job"
+          },
+          "timezone": {
+            "description": "IANA zone for cron schedules; an empty string removes the override",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      },
       "LLMAccountCompleteRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -6878,6 +7294,9 @@
           "provider": {
             "type": "string"
           },
+          "push": {
+            "$ref": "#/components/schemas/PushStats"
+          },
           "recipientAddress": {
             "type": "string"
           },
@@ -6912,6 +7331,211 @@
           "recipientAddress",
           "status",
           "createdAt"
+        ],
+        "type": "object"
+      },
+      "NotificationPushDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NotificationPushDevice.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "appVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "lastSeenAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deviceId",
+          "platform",
+          "active",
+          "createdAt",
+          "lastSeenAt"
+        ],
+        "type": "object"
+      },
+      "NotificationPushDevicesOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NotificationPushDevicesOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationPushDevice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "type": "object"
+      },
+      "NotificationPushRegisterInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NotificationPushRegisterInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "appVersion": {
+            "description": "App version, informational",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "platform": {
+            "description": "Device platform",
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "description": "Provider push token of the device",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "platform"
+        ],
+        "type": "object"
+      },
+      "NotificationPushTestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NotificationPushTestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "body": {
+            "description": "Defaults to \"Test push notification\"",
+            "type": "string"
+          },
+          "tier": {
+            "description": "operator or client",
+            "type": "string"
+          },
+          "title": {
+            "description": "Defaults to \"Orkestra test\"",
+            "type": "string"
+          },
+          "userUuid": {
+            "description": "Recipient user",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tier",
+          "userUuid"
+        ],
+        "type": "object"
+      },
+      "NotificationPushTestOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NotificationPushTestOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationPushUserResult"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "type": "object"
+      },
+      "NotificationPushUserResult": {
+        "additionalProperties": false,
+        "properties": {
+          "attempted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "delivered": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "disabled": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "userUuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userUuid",
+          "status",
+          "attempted",
+          "delivered",
+          "disabled"
         ],
         "type": "object"
       },
@@ -8229,6 +8853,29 @@
         "required": [
           "rowsDeleted",
           "rowsAnonymized"
+        ],
+        "type": "object"
+      },
+      "PushStats": {
+        "additionalProperties": false,
+        "properties": {
+          "attempted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "delivered": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "disabled": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "attempted",
+          "delivered",
+          "disabled"
         ],
         "type": "object"
       },
@@ -13962,6 +14609,398 @@
         "tags": [
           "Compliance",
           "SOC2"
+        ]
+      }
+    },
+    "/v1/admin/jobs": {
+      "get": {
+        "description": "Every registered job with its declared and effective schedule, state and last run.",
+        "operationId": "admin-jobs-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsListBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "List background jobs",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/v1/admin/jobs/schedule-preview": {
+      "post": {
+        "description": "The next five due times of an every or cron schedule, computed by the backend's parser, and a one-line description.",
+        "operationId": "admin-jobs-schedule-preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobsPreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsPreviewResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Preview a schedule",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/v1/admin/jobs/{key}": {
+      "get": {
+        "operationId": "admin-jobs-get",
+        "parameters": [
+          {
+            "description": "Job key, \u003cmodule\u003e.\u003cname\u003e",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "Job key, \u003cmodule\u003e.\u003cname\u003e",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsJobView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Get a background job",
+        "tags": [
+          "Jobs"
+        ]
+      },
+      "patch": {
+        "description": "Changes the operator override (enabled, schedule, timezone) with optimistic concurrency on revision. A change of the effective schedule reschedules the job from now.",
+        "operationId": "admin-jobs-update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobsUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsJobView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Override a job's schedule or enable it",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/v1/admin/jobs/{key}/override": {
+      "delete": {
+        "description": "Removes the operator override so the job follows the schedule and enabled state its module declares.",
+        "operationId": "admin-jobs-clear-override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The job's revision as read",
+            "explode": false,
+            "in": "query",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "description": "The job's revision as read",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsJobView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Restore a job's defaults",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/v1/admin/jobs/{key}/run": {
+      "post": {
+        "description": "Requests one run; the first free replica takes it under the job's lease. Allowed on a disabled job, not on a job of a stopped module.",
+        "operationId": "admin-jobs-run",
+        "parameters": [
+          {
+            "description": "Job key, \u003cmodule\u003e.\u003cname\u003e",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "Job key, \u003cmodule\u003e.\u003cname\u003e",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsJobView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Run a job now",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/v1/admin/jobs/{key}/runs": {
+      "get": {
+        "description": "Run history, newest first, keyset-paginated with nextCursor. Details carry no personal data.",
+        "operationId": "admin-jobs-runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by status: running, succeeded, failed, timed_out, abandoned, interrupted or skipped",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "Filter by status: running, succeeded, failed, timed_out, abandoned, interrupted or skipped",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsRunsBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "List a job's runs",
+        "tags": [
+          "Jobs"
         ]
       }
     },
@@ -23030,6 +24069,192 @@
           }
         ],
         "summary": "Update a notification preference",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/v1/notifications/push/devices": {
+      "get": {
+        "operationId": "client-notifications-push-list-devices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPushDevicesOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List my push devices",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/v1/notifications/push/devices/{deviceId}": {
+      "delete": {
+        "description": "Idempotent: 204 whenever the device row exists for this user, including one already disabled (its original reason is kept); 404 only when the id was never registered.",
+        "operationId": "client-notifications-push-remove-device",
+        "parameters": [
+          {
+            "description": "Device id",
+            "in": "path",
+            "name": "deviceId",
+            "required": true,
+            "schema": {
+              "description": "Device id",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unregister a push device",
+        "tags": [
+          "Notifications"
+        ]
+      },
+      "put": {
+        "operationId": "client-notifications-push-register-device",
+        "parameters": [
+          {
+            "description": "Stable id of the device, chosen by the app",
+            "in": "path",
+            "name": "deviceId",
+            "required": true,
+            "schema": {
+              "description": "Stable id of the device, chosen by the app",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPushRegisterInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPushDevice"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Register or refresh a push device",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/v1/notifications/push/test": {
+      "post": {
+        "operationId": "notifications-push-test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPushTestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPushTestOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send a test push notification to one user",
         "tags": [
           "Notifications"
         ]

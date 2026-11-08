@@ -1373,3 +1373,7 @@ func loginSentinel(err error) error {
 	}
 	return nil
 }
+
+func (r *gateSessionRepo) GetActiveByUUIDs(context.Context, []string) ([]*authModels.AuthSessionDoc, error) {
+	panic("not used")
+}

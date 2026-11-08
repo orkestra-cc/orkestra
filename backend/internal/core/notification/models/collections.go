@@ -22,6 +22,10 @@ const (
 	// deliberately separate from NotificationSuppressionsCollection, which
 	// blocks every notification (transactional included).
 	NotificationMarketingOptoutsCollection = "notification_marketing_optouts"
+
+	// DeviceTokensCollection holds push device tokens: one row per
+	// tier+user+device, bound to the auth session id.
+	DeviceTokensCollection = "notification_device_tokens"
 )
 
 // Notification categories used for preference lookup and template IDs.
@@ -80,6 +84,7 @@ const (
 // Channel identifiers.
 const (
 	ChannelEmail = "email"
+	ChannelPush  = "push"
 )
 
 // Delivery statuses.
@@ -88,4 +93,9 @@ const (
 	StatusSent       = "sent"
 	StatusFailed     = "failed"
 	StatusSuppressed = "suppressed"
+	// Push-only: some, not all, of a user's devices accepted the message.
+	StatusPartial = "partial"
+	// Push-only: the user had no usable device (none registered, or every
+	// registered one belonged to an ended session).
+	StatusSkippedNoDevice = "skipped_no_device"
 )

@@ -6,17 +6,19 @@ sidebar_position: 1
 
 # Module Catalog
 
-Orkestra ships **10 core modules** (always loaded) and an **empty optional-addon catalog** — per [ADR-0006](/adrs/collapse-to-core-only-base) the base is **core-only**. A fork adds its own verticals in-tree through the same `Module` seam the core uses. The table further down lists the verticals the core-only pivot removed; their archived `orkestra-cc/orkestra-<name>` repos are kept for forks to crib from.
+Orkestra ships **11 core modules** (always loaded) and an **empty optional-addon catalog** — per [ADR-0006](/adrs/collapse-to-core-only-base) the base is **core-only**. A fork adds its own verticals in-tree through the same `Module` seam the core uses. The table further down lists the verticals the core-only pivot removed; their archived `orkestra-cc/orkestra-<name>` repos are kept for forks to crib from.
 
 ## Core modules
 
 Always loaded. Topologically sorted by their `Dependencies()`:
 
-`user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `llm` → `retrieval` → `compliance`
+`user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `jobs` → `llm` → `retrieval` → `compliance`
 
 See [Core modules](/modules/core/user) and the rest under that section. ([compliance](/modules/core/compliance) was re-homed from an addon back into core by [ADR-0009](/adrs/core-compliance-module).)
 
 [`llm`](/modules/core/llm) ([ADR-0022](/adrs/core-llm-module)) is the ninth core module: language-model credentials, models, grants and the `LLMGateway` addons consume. It is catalogued before `compliance` so compliance can hand it the KMS provider and audit sink.
+
+[`jobs`](/modules/core/jobs) ([ADR-0024](https://github.com/orkestra-cc/orkestra/blob/dev/docs/adr/0024-core-jobs-module.md)) is the eleventh core module: the scheduler for the background jobs other modules declare through `module.HasJobs`, with a cluster-wide lease, durable retries, a run log and an operator workspace at `/admin/modules/jobs`.
 
 [`retrieval`](/modules/core/retrieval) ([ADR-0023](/adrs/core-retrieval-module)) is the tenth core module: corpus registration, indexing and hybrid search over tenant data on a Qdrant engine, with an operator console page for corpus health, score diagnostics and the audited search log. It is catalogued after `llm` and before `compliance`, which will hand it the audit sink.
 
