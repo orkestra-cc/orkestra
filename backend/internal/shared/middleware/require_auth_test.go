@@ -1186,3 +1186,26 @@ func TestRequireAuth_VerifiableRejections_CarryNoUnavailableCode(t *testing.T) {
 		})
 	}
 }
+
+func TestRequireAuth_StampsCtxauthSessionID(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	var got string
+	var ok bool
+	h := f.mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok = ctxauth.GetSessionID(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+f.issueTokenWithSID("u-1", "sid-xyz"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	resp.Body.Close()
+	if !ok || got != "sid-xyz" {
+		t.Fatalf("ctxauth.GetSessionID = %q,%v want sid-xyz", got, ok)
+	}
+}

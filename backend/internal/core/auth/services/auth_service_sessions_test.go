@@ -378,3 +378,18 @@ func contains(slice []string, s string) bool {
 	}
 	return false
 }
+
+func (r *fakeAuthSessionRepo) GetActiveByUUIDs(_ context.Context, uuids []string) ([]*authModels.AuthSessionDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []*authModels.AuthSessionDoc{}
+	for _, id := range uuids {
+		d, ok := r.byUUID[id]
+		if !ok || !d.IsActive || (!d.ExpiresAt.IsZero() && d.ExpiresAt.Before(time.Now())) {
+			continue
+		}
+		cp := *d
+		out = append(out, &cp)
+	}
+	return out, nil
+}

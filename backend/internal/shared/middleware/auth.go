@@ -516,6 +516,9 @@ func (m *AuthMiddleware) sendAccessTokenExpired(w http.ResponseWriter) {
 func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, claims *models.JWTClaims, next http.Handler) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, ctxauth.KeyUserUUID, claims.UserUUID)
+	if claims.SessionID != "" {
+		ctx = context.WithValue(ctx, ctxauth.KeySessionID, claims.SessionID)
+	}
 	ctx = context.WithValue(ctx, ctxauth.KeyUserEmail, claims.Email)
 	ctx = context.WithValue(ctx, ctxauth.KeySystemRole, claims.SystemRole)
 	ctx = context.WithValue(ctx, ctxClaims, claims)
@@ -946,6 +949,9 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 		if err == nil {
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, ctxauth.KeyUserUUID, claims.UserUUID)
+			if claims.SessionID != "" {
+				ctx = context.WithValue(ctx, ctxauth.KeySessionID, claims.SessionID)
+			}
 			ctx = context.WithValue(ctx, ctxauth.KeyUserEmail, claims.Email)
 			ctx = context.WithValue(ctx, ctxauth.KeySystemRole, claims.SystemRole)
 			ctx = context.WithValue(ctx, ctxClaims, claims)

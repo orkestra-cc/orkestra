@@ -1325,6 +1325,31 @@ func (s *authService) FindAccountsForConsolidation(ctx context.Context, email st
 	return []*iface.User{convertUserResponseToAuthModel(userResponse)}, nil
 }
 
+// ActiveSessions implements iface.SessionActivityReader for this tier: the
+// result is true for each id whose session doc is isActive and unexpired.
+// It reads the doc state only. Redis revocation is not consulted: every
+// revocation path (logout, terminate, max-age cap, password reset) also
+// flips the doc, and the push use case tolerates the sub-second window.
+// Unknown ids are absent from the map; empty input does not query.
+func (s *authService) ActiveSessions(ctx context.Context, sessionIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(sessionIDs))
+	if len(sessionIDs) == 0 || s.authSessionRepo == nil {
+		return out, nil
+	}
+	docs, err := s.authSessionRepo.GetActiveByUUIDs(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range docs {
+		if d != nil {
+			out[d.UUID] = true
+		}
+	}
+	return out, nil
+}
+
+var _ iface.SessionActivityReader = (*authService)(nil)
+
 // GetUserSessionsByUUID lists active (isActive && !expired) sessions
 // for the user, sorted most-recent-first. The IsCurrent flag is left
 // unset — the HTTP handler stamps it by comparing each
