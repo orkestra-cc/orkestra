@@ -5,9 +5,9 @@ sidebar_position: 2
 
 # notification
 
-All outbound email, behind one narrow interface. Any module delivers mail through `iface.NotificationSender` without knowing anything about transport, rendering, preferences, or suppressions. The primary consumer today is [auth](/modules/core/auth) — verification and password-reset messages.
+All outbound email and push notifications, behind narrow interfaces. Any module delivers mail through `iface.NotificationSender` without knowing anything about transport, rendering, preferences, or suppressions. The primary consumer today is [auth](/modules/core/auth) — verification and password-reset messages.
 
-The interface was designed multi-channel from the start (SMS, push, webhook), but **only email is implemented**.
+The module is multi-channel by design. **Email** is the original channel; **push** (Firebase Cloud Messaging) is described in [Push notifications](#push-notifications). SMS and webhook are not implemented.
 
 ## It boots in `noop` mode
 
@@ -17,7 +17,7 @@ To send real mail, switch `email.provider` to `smtp` at `/admin/modules/notifica
 
 ## Config
 
-Fifteen flat keys — seeded from env vars on first boot and owned by the ConfigService afterwards — plus one record list. `/admin/modules/notification` renders them as a four-group rail:
+Eighteen flat keys — seeded from env vars on first boot and owned by the ConfigService afterwards — plus one record list. `/admin/modules/notification` renders them as a five-group rail:
 
 | Group | Keys |
 |---|---|
@@ -25,6 +25,7 @@ Fifteen flat keys — seeded from env vars on first boot and owned by the Config
 | **Sender profiles** | `email.senders` — a repeatable list of senders, each with its own transport and identity ([ADR-0019](/adrs/notification-multi-sender)) |
 | **Sender** | `email.from_address`, `email.from_name`, `email.reply_to` — the identity of the default transport |
 | **Branding & templates** | `app.name`, `app.support_email`, `app.default_locale` |
+| **Push** | `push.provider` (`noop` or `fcm`), `push.fcm.service_account_json` (secret), `push.fcm.project_id` (optional) |
 
 The SMTP fields carry a `DependsOn` on `email.provider`, so a default `noop` install shows **one** visible Delivery field until you switch the provider — the connection settings appear only once they can matter. `email.smtp.password` and every profile's secret are `FieldSecret`: AES-256-GCM at rest, never read from plain env after bootstrap.
 
@@ -132,28 +133,53 @@ Every attachment is checked **after** the preference and marketing opt-out check
 
 A refusal — whether caught before the driver runs, or reported back by the driver itself — sets `failureReason: "attachment_rejected"` on the row and on `NotificationResult.FailureReason`. An idempotent replay of the same send returns that same `FailureReason` from the stored row, so a caller can react to "this failed because of its attachment" without depending on the original error, which a replay does not repeat.
 
+## Push notifications
+
+Modules send a push through `iface.PushSender`, the same registered object as the email sender: `module.GetTyped[iface.PushSender](services, module.ServiceNotificationSender)`. A request names one tier (`operator` or `client`), up to 500 user UUIDs, a preference `category`, a `type` (`transactional` or `marketing`), a title (≤ 200 characters), an optional body (≤ 1000) and a `data` map (≤ 3 KiB; the FCM-reserved keys `from`, `notification`, `message_type`, `google.*` and `gcm.*` are refused). The result has one status per user: `delivered`, `partial`, `failed`, `skipped_preference`, `skipped_no_device` or `skipped_duplicate`.
+
+By default (`push.provider = noop`) pushes are only logged, with the first 8 characters of the token. Set the provider to `fcm` and paste a Firebase service-account key (Firebase Cloud Messaging API enabled) to deliver. A device token is disabled when FCM answers `UNREGISTERED` or says the token itself is invalid; any other failure is treated as temporary and the token stays active.
+
+Pushes honour the same preferences as email, on channel `push`: transactional pushes are always delivered, marketing pushes respect the user's opt-out. Each user gets one row in the delivery log (`channel: push`) with counts of attempted, delivered and disabled devices. The title is kept; the body, data and tokens are not. An `idempotencyKey` makes a repeated request a no-op per user for one hour; the key is remembered only after a push was delivered (fully or partly), so a failed attempt can be retried with the same key. The check protects sequential retries, not two identical requests sent at the same instant.
+
+### What the app must do
+
+The mobile or web app registers its FCM token with its own authenticated session. The routes exist on both tiers (operator: `/v1/notifications/push/devices…`, client tier: the same paths on the client API):
+
+| Call | When |
+|---|---|
+| `PUT /v1/notifications/push/devices/{deviceId}` with `{token, platform, appVersion?}` | **After every login** and **whenever FCM rotates the token**. `deviceId` is a stable id of the installation (1–128 characters of `A-Za-z0-9._:-`); `platform` is `ios`, `android` or `web`. Calling it again refreshes the registration. |
+| `DELETE /v1/notifications/push/devices/{deviceId}` | **On logout**. It is idempotent: it answers 204 for any device the user registered, even one already disabled, and 404 only for an id that was never registered. |
+| `GET /v1/notifications/push/devices` | Optional: lists the user's registrations. Tokens are never returned. |
+
+A token is tied to the sign-in session that registered it. When that session ends (logout, password change, revocation, token-replay detection) or expires, pushes to it stop on their own, and the server disables the registration the next time it notices (at the next send or in the daily cleanup). If the session check cannot be made, the push is not sent: the user is reported `failed`. A registration also lapses after 60 days without a refresh, and a registration that stays disabled for 90 days is deleted. Registering a token that another user or device already holds moves it to the new owner.
+
+Administrators with `notification.log.read` and `notification.test` can send a test push to one user with `POST /v1/notifications/push/test`.
+
+The daily job `notification.push_tokens_cleanup` (see [jobs](/modules/core/jobs)) performs the session, 60-day and 90-day cleanup; it does nothing when the session readers are unavailable.
+
 ## Routes
 
 | Surface | Paths | Gate |
 |---|---|---|
 | Public | `GET /v1/notifications/unsubscribe`, `POST /v1/notifications/unsubscribe` | none — both consume a token and always return a generic success; the `POST` is the RFC 8058 one-click endpoint a mail client's own button calls, body ignored beyond `?token=` |
 | User | `GET` / `PUT /v1/notifications/preferences` | `guest`+ |
-| Admin | `GET /v1/notifications` (delivery log; filters `category`, `status`, `sender`), `POST /v1/notifications/test` (`{to, sender?}` — proves one profile end to end), and the four `…/templates` operations | `administrator` |
+| Push (user) | `PUT` / `DELETE /v1/notifications/push/devices/{deviceId}`, `GET /v1/notifications/push/devices` (both tiers) | `guest`+ |
+| Admin | `GET /v1/notifications` (delivery log; filters `category`, `status`, `sender`), `POST /v1/notifications/test` (`{to, sender?}` — proves one profile end to end), and the four `…/templates` operations (plus `POST /v1/notifications/push/test`, which also needs `notification.test`) | `administrator` |
 
 `POST /v1/notifications/test` sends through the default profile, or the profile named by `sender` — the only check that sees a profile's secret before real mail depends on it.
 
 ## Storage
 
-Eight collections: `notification_messages` (90-day TTL), `notification_templates`, `notification_preferences`, `notification_suppressions`, `notification_unsubscribe_tokens` (30-day TTL), and `notification_marketing_optouts` (no TTL — an opt-out never expires; it is removed only by the audited, consent-driven lift of `MarketingOptoutManager`, and recorded by its sibling; see "RFC 8058 one-click unsubscribe" above). The remaining two, `operator_unsubscribe_tokens` and `client_unsubscribe_tokens`, are declared placeholders for a future tier-split cutover (ADR-0003 PR-B) — indexed on boot but not yet read or written by anything, including this one-click work.
+Nine collections: `notification_messages` (90-day TTL), `notification_templates`, `notification_preferences`, `notification_suppressions`, `notification_unsubscribe_tokens` (30-day TTL), and `notification_marketing_optouts` (no TTL — an opt-out never expires; it is removed only by the audited, consent-driven lift of `MarketingOptoutManager`, and recorded by its sibling; see "RFC 8058 one-click unsubscribe" above). The remaining two, `operator_unsubscribe_tokens` and `client_unsubscribe_tokens`, are declared placeholders for a future tier-split cutover (ADR-0003 PR-B) — indexed on boot but not yet read or written by anything, including this one-click work. The ninth, `notification_device_tokens`, holds the push registrations.
 
 ## GDPR
 
-Registers an `iface.PIIProducer` for the subject `notification`. Export returns the delivered-message history plus per-category preferences; erasure deletes both under either mode. Suppressions are keyed by email address rather than user UUID, so they ride the auth/email erasure path instead of this producer.
+Registers an `iface.PIIProducer` for the subject `notification`. Export returns the delivered-message history, per-category preferences and the user's push devices (without tokens); erasure deletes all three under either mode. Suppressions are keyed by email address rather than user UUID, so they ride the auth/email erasure path instead of this producer.
 
 **The marketing opt-out is retained past erasure, by design.** `notification_marketing_optouts` is address-keyed the same way suppressions are, and nothing in this platform deletes it for any data-subject request, under either erase mode. This is deliberate, for the same reason a suppression record survives too: deleting the fact that an address asked to stop receiving marketing would let a future marketing send to that same address go out again — exactly what the opt-out exists to prevent. Erasing your data does not opt you back in. The only deliberate removal is a consumer module that collects explicit consent lifting the opt-out through the audited `MarketingOptoutManager` seam; an admin endpoint for operators is still a follow-up.
 
 :::note Not in this module
-No SMS, push, or webhook implementations. No async queue — every send is synchronous, though `NotificationResult.Status` reserves `queued` for a future upgrade. No marketing automation, segmentation, or A/B testing. No bounce or complaint ingestion: suppressions are added manually until the SMTP provider offers a webhook. DKIM signing is the relay's job.
+No SMS or webhook implementations, and no web-push beyond what FCM provides. No async queue — every send is synchronous, though `NotificationResult.Status` reserves `queued` for a future upgrade. No marketing automation, segmentation, or A/B testing. No bounce or complaint ingestion: suppressions are added manually until the SMTP provider offers a webhook. DKIM signing is the relay's job.
 
 **Never bypass the orchestrator** by calling the email sender directly — preferences, suppressions, idempotency, and the delivery log all hang off it.
 :::

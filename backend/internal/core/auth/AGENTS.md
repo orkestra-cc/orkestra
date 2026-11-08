@@ -1726,6 +1726,9 @@ No single interface is exposed from this module — its concrete services are co
 
 - **`iface.JWTProvider`** (`pkg/sdk/iface/interfaces.go:56-62`) — just `GenerateAccessToken(user *User) (string, error)`. Consumed by the dev module to mint test tokens.
 
+- **`iface.SessionActivityReader`** (`pkg/sdk/iface/push.go`) — `ActiveSessions(ctx, sessionIDs) (map[string]bool, error)`, implemented by **both** tier `authService`s (`ServiceAuthService`, `ServiceClientAuthService`) and consumed by `notification` for the push session filter and the `push_tokens_cleanup` job. A session id maps to `true` only when its session document is `isActive` and unexpired **and** the sid is not in the Redis revocation set. The document is authoritative: a Redis lookup error is logged at Warn and ignored, so push never hard-depends on Redis. Unknown ids are absent (read as false); empty input returns an empty map without a query. Invariant that keeps this honest: every session-ending path flips the document **and** pushes the sid to Redis. `TerminateCurrentSession(ctx, userUUID, sessionUUID)` is the bearer-only logout (no verifiable refresh cookie): it ends that one session (refresh rows, document, Redis sid), an unknown or foreign session is a silent no-op.
+- **`sid` in the request context.** `AuthMiddleware` stamps the JWT `sid` claim (stable across refresh rotation) so handlers read it with `ctxauth.GetSessionID(ctx)`; the notification device registry binds each push token to it.
+
 Everything else (`services.AuthService`, `services.JWTService`, `services.PasswordService`, `services.PasswordAuthService`) is fetched with `MustGetTyped[*services.X]` by `cmd/server/main.go` or by middleware. This is intentional — the surface is too broad to pin as an interface today.
 
 ## Key invariants

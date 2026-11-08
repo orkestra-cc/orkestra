@@ -1,4 +1,4 @@
-# Module: Notification — Email delivery, templates, preferences
+# Module: Notification — Email and push delivery, templates, preferences
 
 _Path: `/backend/internal/core/notification`_
 _Parent: [../../../AGENTS.md](../../../AGENTS.md)_
@@ -13,7 +13,7 @@ _Parent: [../../../AGENTS.md](../../../AGENTS.md)_
 
 Core module that owns all outbound email for Orkestra. Exposes a single narrow interface (`iface.NotificationSender`) so any other module can deliver mail without caring about transport, rendering, preferences or suppressions.
 
-Primary consumer today is the auth module (verification, password reset). Designed multi-channel from the ground up so SMS, push and webhook channels can slot in later — only email is implemented in v1.
+Primary consumer today is the auth module (verification, password reset). Designed multi-channel from the ground up. Email is the original channel; **push** (FCM) is the second, published as `iface.PushSender` (see [Push channel](#push-channel)). SMS and webhook are not implemented.
 
 ## What it owns
 
@@ -29,6 +29,7 @@ Primary consumer today is the auth module (verification, password reset). Design
 | Orchestration + idempotency | `services/notification_service.go`   |
 | Delivery log           | `repository/notification_repository.go`    |
 | HTTP endpoints         | `handlers/notification_handler.go`         |
+| Push: device registry, drivers, send, cleanup | `repository/device_token_repository.go`, `services/push_driver*.go`, `services/push_service.go`, `services/push_cleanup.go`, `handlers/push_handler.go` |
 
 ## MongoDB collections
 
@@ -44,6 +45,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 | `operator_unsubscribe_tokens`       | same shape as above                               | 30 days on `expiresAt` |
 | `client_unsubscribe_tokens`         | same shape as above                               | 30 days on `expiresAt` |
 | `notification_marketing_optouts`    | `address` unique                                  | **none — an opt-out never expires** (lifted only through `MarketingOptoutManager`) |
+| `notification_device_tokens`        | `uuid` unique, `tier+userUuid+deviceId` unique, `token` unique **partial on `active:true`**, `tier+userUuid+active`, `lastSeenAt`, `disabledAt` (sparse) | none — the cleanup job deletes (see Push channel) |
 
 `operator_unsubscribe_tokens` and `client_unsubscribe_tokens` are ADR-0003 PR-B placeholders for a future tier-split cutover — declared and indexed so the migration has nothing to create later, but nothing in this module (or this branch's one-click work) reads or writes either one today; `notification_unsubscribe_tokens` stays the sole authoritative token collection until that cutover.
 
@@ -315,15 +317,51 @@ Registered in three groups with different middleware:
 
 - `GET /v1/notifications/preferences` — list current user's preferences
 - `PUT /v1/notifications/preferences` — update one `{category, channel, optedIn}` tuple
+- `PUT|DELETE /v1/notifications/push/devices/{deviceId}`, `GET /v1/notifications/push/devices` — the caller's push registrations; also mounted on the client tier (operation ids prefixed `client-`). See Push channel.
 
 ### Admin (`administrator` role)
 
 - `GET /v1/notifications` — paginated delivery log; filters: `category`, `status`, `sender` (profile slug). Every row carries `provider` and `senderSlug`, so *which* profile sent or refused a message is answerable per row.
 - `POST /v1/notifications/test` — `{to, subject?, bodyText?, sender?}`; `sender` names a profile slug (default: the `*` profile). Bypasses preferences, idempotency, the durable marketing opt-out and the delivery log — it calls the driver directly, so an address on `notification_marketing_optouts` still receives a test send. 404 `notification.sender_not_found`, 422 `notification.sender_incomplete` (driver unknown or a required field — secret included — missing), 502 `notification.send_failed` with the bounded diagnostic. This is the only way to prove a profile whose gap is a secret.
+- `POST /v1/notifications/push/test` — test push to one user; needs `notification.log.read` (group gate) **and** `notification.test`. See Push channel.
 - `GET /v1/notifications/templates` — list all templates
 - `GET /v1/notifications/templates/{templateId}?locale=en` — fetch a single template
 - `PUT /v1/notifications/templates/{templateId}` — override a template (sets `isSystem=false`)
 - `DELETE /v1/notifications/templates/{templateId}?locale=en` — delete an override; next `Start()` reseeds the system default
+
+## Push channel
+
+`iface.PushSender` (`pkg/sdk/iface/push.go`) is implemented by the same object registered as `ServiceNotificationSender`: resolve it with `module.GetTyped[iface.PushSender](services, module.ServiceNotificationSender)`. Addons never import this module. A push is addressed to **user UUIDs of one tier** (`operator` or `client`); the module fans out to every active device of each user.
+
+**`PushRequest` limits** (`Validate`, every failure wraps `ErrPushInvalidRequest`): 1..500 users, `Title` required ≤ 200 runes, `Body` ≤ 1000 runes, `Data` ≤ 3 KiB (sum of key+value bytes) with FCM-reserved keys (`from`, `notification`, `message_type`, prefixes `google.` / `gcm.`) refused, `Type` transactional|marketing, `Priority` ""|high|normal. Driver unavailable → `ErrPushUnavailable`. The result carries one `PushUserResult` per requested user: `delivered | partial | failed | skipped_preference | skipped_no_device | skipped_duplicate`.
+
+**Pipeline (`services/push_service.go::SendPush`), per user:** idempotency check, then `CanDeliver(user, category, "push", type)` (transactional is never opted out; marketing honours the channel-`push` preference), then active device tokens of the tier, then the **session filter**, then one driver call for the whole request, then permanent failures disable the token, then one delivery-log row per user (`channel: "push"`, `NotificationDoc.Push` carries attempted/delivered/disabled counts; the title is the subject; body, data and token are never stored).
+
+**Fail-closed rules.**
+- Idempotency lookup error: that user is `failed` (`idempotency check unavailable`), nothing is sent.
+- Preference lookup error: `failed`, nothing is sent.
+- Session filter: a token is sent to only if its auth session is active. No `SessionActivityReader` for the tier, or a reader error: the user is `failed` (`session check unavailable`), nothing is sent and **nothing is disabled**. A token whose session is ended (or that has no session id) is disabled with reason `session_ended`.
+- The idempotency key (`push:<key>:<userUuid>`) is stored **only on `delivered` and `partial` log rows**, so a `failed` or `skipped_no_device` attempt can be retried with the same key.
+
+**Deferred behaviours (known, accepted in review).**
+- The delivery-log write is **best-effort**: a failed write is logged at Warn and the result is still returned. A push can therefore be delivered without a log row, and then a retry with the same key is not deduplicated.
+- The idempotency check is **not atomic across concurrent identical requests**: it is a read of the log, and the row is written after delivery, so two requests with the same key racing each other can both deliver. It protects sequential retries, not concurrent duplicates. Callers that need that must serialise on their side.
+
+**Drivers** (`services/push_driver*.go`; the active one is resolved per send from `push.provider`): `noop` (default; logs the first 8 characters of the token only) and `fcm` (HTTP v1, OAuth2 service-account JWT flow). The FCM driver marks a token **permanent** (device row disabled) only on error code `UNREGISTERED` (`fcm_unregistered`) or on `INVALID_ARGUMENT` whose detail concerns the token (`fcm_invalid`). A bare HTTP 404 without an `UNREGISTERED` errorCode is `fcm_not_found`, **transient** (project or endpoint misconfiguration must not wipe the device table). Every other failure is transient and leaves the token active. **A token is never logged beyond its first 8 characters.**
+
+**Config group "Push"** (`push.provider` noop|fcm, `push.fcm.service_account_json` secret via `FCM_SERVICE_ACCOUNT_JSON`, `push.fcm.project_id` optional, defaults to the `project_id` of the JSON). The FCM fields show only when the provider is `fcm`.
+
+**Collection `notification_device_tokens`** (`models/device_token.go`): one row per `tier + userUuid + deviceId`, bound to the auth session id (`sessionId`, the JWT `sid`). The push token belongs to the device: registering it for another user/device disables the previous active owner with reason `reassigned` (partial unique index on active `token`). `disabledReason` is one of `logout`, `reassigned`, `fcm_unregistered`, `fcm_invalid`, `session_ended`, `stale`, `erased`. `Token` is `json:"-"`.
+
+**Routes.** Self-service on both tiers, gated by `RequireGlobal()`; the tier comes from the mount and is never read from the request (a `tier` in the body is rejected 422). `PUT /v1/notifications/push/devices/{deviceId}` registers or refreshes (needs a `sid` in the token, else 401 `notification.push_session_missing`; refresh sets `lastSeenAt`, reactivates and rebinds the session). `DELETE …/{deviceId}` is **idempotent**: 204 whenever the row exists for this user and tier in any state (an already disabled row stays disabled with its original reason), 404 `notification.push_device_not_found` only when the id was never registered. `GET …/devices` lists the caller's rows (no token). `POST /v1/notifications/push/test` (operator router, `notification.log.read` + `notification.test`) sends a test push to one user of either tier.
+
+**Session binding.** Auth implements `iface.SessionActivityReader` on both tier services (`ActiveSessions`): true only for a session doc that is active and unexpired and not in the Redis revocation set (Redis errors are logged and ignored; the doc is authoritative). The handler reads the session id with `ctxauth.GetSessionID`. Consequence: logout, password change, revoke and refresh-replay all stop pushes to that session's device without the app having to unregister.
+
+**Cleanup job `notification.push_tokens_cleanup`** (jobs framework, declared by `Jobs()`, every 24 h, `services/push_cleanup.go`): pages active tokens in batches of 500 (`ListActiveBatch`), disables those whose session is not active (`session_ended`), then `DisableStale(now-60d)` on `lastSeenAt`, then `DeleteDisabledBefore(now-90d)`. Run details: `sessionEnded`, `stale`, `deleted`. With no session reader at all it returns an error and changes nothing; if only one tier's reader is missing, that tier's tokens are skipped and the run ends with an error after pruning.
+
+**GDPR.** The PII producer exports the user's device rows (both tiers, no token) as `pushDevices` and erases them in both erase modes.
+
+**Not here:** per-device channel preferences, topics/segments, scheduled push, receipts/analytics beyond the log row, web-push (VAPID), APNs without FCM, an async queue.
 
 ## Service contract for consumers
 
@@ -701,7 +739,7 @@ module compose and preview notification templates without importing this module'
 
 ## What's NOT in this module
 
-- SMS, push, webhook channels — interface is designed for them, no implementations yet
+- SMS and webhook channels — interface is designed for them, no implementations yet (push is implemented, see Push channel)
 - Async delivery via NATS JetStream — all sends are synchronous in v1; `NotificationResult.Status` reserves `"queued"` for a future async upgrade
 - Marketing automation, segmentation, A/B testing — transactional only
 - Bounce and complaint ingestion — suppressions must be added manually via the repository until the SMTP provider offers a webhook
@@ -727,5 +765,6 @@ module compose and preview notification templates without importing this module'
 - [Root AGENTS.md](../../../../AGENTS.md) — module map and architecture
 - [`pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `NotificationSender` + `SenderDirectory` interface definitions and the sender sentinels
 - [ADR-0019](../../../../docs/adr/0019-notification-multi-sender.md) — sender profiles, category routing, the driver seam
+- [ADR-0024](../../../../docs/adr/0024-core-jobs-module.md) — jobs framework that runs `push_tokens_cleanup`
 - [ADR-0021](../../../../docs/adr/0021-explicit-sender-selection.md) — explicit sender selection under operator policy
 - [`docs/site/architecture/authentication-flow.mdx`](../../../../docs/site/architecture/authentication-flow.mdx) — how auth consumes this module
