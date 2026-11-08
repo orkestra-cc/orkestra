@@ -10,6 +10,7 @@ import (
 
 	"github.com/orkestra/backend/pkg/sdk/capability"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/jobs"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -194,6 +195,8 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	deps.Services.Register(ServiceCapabilityRegistry, capReg)
 	prefReg := NewUserPreferenceRegistry()
 	deps.Services.Register(ServiceUserPreferenceRegistry, prefReg)
+	jobCatalog := jobs.NewCatalog()
+	deps.Services.Register(ServiceJobCatalog, jobCatalog)
 
 	// Initialize ALL modules in registration order.
 	// Core modules: fatal on error. Non-core: attempt Init and track failures.
@@ -239,8 +242,35 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	// a known capability and to surface the catalog in the admin UI.
 	r.registerCapabilities(capReg)
 	r.registerUserPreferences(prefReg)
+	r.registerJobs(jobCatalog)
 
 	return nil
+}
+
+// registerJobs collects the jobs modules declare. A module whose definitions
+// are invalid contributes none of them: it is logged and skipped, and never
+// blocks other modules.
+func (r *ModuleRegistry) registerJobs(catalog *jobs.Catalog) {
+	for _, m := range r.initialized {
+		r.registerModuleJobs(catalog, m)
+	}
+	r.logger.Info("Registered job catalog", slog.Int("count", len(catalog.List())))
+}
+
+// registerModuleJobs adds one module's jobs to the catalog. InitAll calls it
+// for every initialized module, RetryInit for a module recovered after a
+// failed boot.
+func (r *ModuleRegistry) registerModuleJobs(catalog *jobs.Catalog, m Module) {
+	defs := JobsOf(m)
+	if len(defs) == 0 {
+		return
+	}
+	if err := catalog.Register(m.Name(), defs); err != nil {
+		r.logger.Warn("job contribution rejected",
+			slog.String("module", m.Name()),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // registerUserPreferences collects the optional per-user preference schemas
@@ -641,6 +671,12 @@ func (r *ModuleRegistry) RetryInit(name string) error {
 	// collected from the modules that initialized at boot.
 	if reg, ok := GetTyped[*UserPreferenceRegistry](r.deps.Services, ServiceUserPreferenceRegistry); ok {
 		r.registerModulePreferences(reg, m)
+	}
+
+	// And its jobs, for the same reason.
+	if catalog, ok := GetTyped[*jobs.Catalog](r.deps.Services, ServiceJobCatalog); ok {
+		r.registerModuleJobs(catalog, m)
+		r.logger.Info("Registered job catalog", slog.Int("count", len(catalog.List())))
 	}
 
 	return nil

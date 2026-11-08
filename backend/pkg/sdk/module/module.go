@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/pkg/sdk/capability"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/jobs"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -97,6 +98,13 @@ type HasPermissions interface {
 // entitlement to the capability ID.
 type HasCapabilities interface {
 	Capabilities() []capability.Capability
+}
+
+// HasJobs lets a module contribute background jobs (scheduled or manual) to
+// the core jobs module. The registry collects them after Init into the
+// *jobs.Catalog published as ServiceJobCatalog.
+type HasJobs interface {
+	Jobs() []jobs.Definition
 }
 
 // HasProfileSections and HasUserPreferences (user_preferences.go) let a
@@ -359,6 +367,14 @@ func PermissionsOf(m Module) []iface.PermissionSpec {
 func CapabilitiesOf(m Module) []capability.Capability {
 	if c, ok := m.(HasCapabilities); ok {
 		return c.Capabilities()
+	}
+	return nil
+}
+
+// JobsOf returns the module's job definitions, or nil.
+func JobsOf(m Module) []jobs.Definition {
+	if c, ok := m.(HasJobs); ok {
+		return c.Jobs()
 	}
 	return nil
 }
