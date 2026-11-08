@@ -733,6 +733,22 @@ const NotificationSenderDriverNoOneClick = "notification.sender_driver_no_one_cl
 // require_one_click_unsubscribe is on. 422.
 const NotificationPublicBaseURLMissing = "notification.public_base_url_missing"
 
+// NotificationPushInvalidRequest: a push request or device registration
+// failed validation (tier, user list, title/body/data limits). 422.
+const NotificationPushInvalidRequest = "notification.push_invalid_request"
+
+// NotificationPushDeviceNotFound: the caller has no push device with that id
+// in the tier of the route. 404.
+const NotificationPushDeviceNotFound = "notification.push_device_not_found"
+
+// NotificationPushSessionMissing: the access token carries no session id
+// (sid), so a device cannot be bound to a session. 401.
+const NotificationPushSessionMissing = "notification.push_session_missing"
+
+// NotificationPushUnavailable: push delivery is not configured or the
+// provider is down. 503.
+const NotificationPushUnavailable = "notification.push_unavailable"
+
 // --- compliance ---
 
 // CompliancePolicyNotFound signals that the compliance policy, or the

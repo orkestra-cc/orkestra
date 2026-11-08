@@ -20,6 +20,7 @@ type NotificationModule struct {
 	svc         *services.NotificationService
 	drivers     *services.DriverRegistry
 	pushDrivers *services.PushDriverFactory // per-send push driver
+	pushHandler *handlers.PushHandler       // device registry + admin test push
 	handler     *handlers.NotificationHandler
 	reconciler  *services.OptoutReconciler
 
@@ -366,6 +367,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	}))
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
+	m.pushHandler = handlers.NewPushHandler(repository.NewDeviceTokenRepository(deps.DB), m.svc)
 
 	deps.Services.Register(module.ServiceNotificationSender, m.svc)
 	deps.Services.Register(module.ServiceMarketingOptoutManager,
@@ -405,10 +407,30 @@ func (m *NotificationModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.handler.RegisterUserRoutes(api)
 	})
 
+	// Push device registry: self-service on both tiers. The tier is fixed by
+	// the mount, never read from the request.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.pushHandler.RegisterDeviceRoutes(api, iface.PushTierOperator, "")
+	})
+	if ri.Client != nil && ri.Client.ProtectedRouter != nil {
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			api := humachi.New(r, ri.APIConfig)
+			m.pushHandler.RegisterDeviceRoutes(api, iface.PushTierClient, "client-")
+		})
+	}
+
 	// Admin endpoints: platform-level (delivery log, templates, test email).
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireSystemPermission("notification.log.read"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterAdminRoutes(api)
+		// The test push needs its own permission on top of the group's.
+		r.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireSystemPermission("notification.test"))
+			m.pushHandler.RegisterAdminTestRoute(humachi.New(r, ri.APIConfig))
+		})
 	})
 }
