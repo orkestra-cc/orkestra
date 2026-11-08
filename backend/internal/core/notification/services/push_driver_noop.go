@@ -28,7 +28,7 @@ func (d *noopPushDriver) Send(ctx context.Context, msgs []PushMessage) []PushOut
 		}
 		sort.Strings(keys)
 		d.logger.Info("notification: push (noop driver)",
-			"token_prefix", tokenPrefix(m.Token), "title_len", len(m.Title), "data_keys", keys, "platform", m.Platform)
+			"device_ref", tokenPrefix(m.Token), "title_len", len(m.Title), "data_keys", keys, "platform", m.Platform)
 		out[i] = PushOutcome{Delivered: true}
 	}
 	return out

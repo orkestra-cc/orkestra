@@ -113,7 +113,15 @@ func (p *PushService) SendPush(ctx context.Context, req iface.PushRequest) (*ifa
 		}
 		byUser[u] = st
 		if st.idemKey != "" {
-			if ex, _ := p.log.FindByIdempotencyKey(ctx, st.idemKey, p.now().Add(-p.ttl)); ex != nil {
+			ex, ierr := p.log.FindByIdempotencyKey(ctx, st.idemKey, p.now().Add(-p.ttl))
+			if ierr != nil {
+				// Fail closed: without the dedup answer a retry could deliver twice.
+				p.logger.Error("notification: push idempotency lookup failed", "error", ierr)
+				st.res.Status, st.res.Error, st.done = iface.PushStatusFailed, "idempotency check unavailable", true
+				st.idemKey = ""
+				continue
+			}
+			if ex != nil {
 				st.res.Status, st.done = iface.PushStatusSkippedDuplicate, true
 				continue
 			}
@@ -172,7 +180,7 @@ func (p *PushService) SendPush(ctx context.Context, req iface.PushRequest) (*ifa
 				reason = models.DeviceDisabledFCMInvalid
 			}
 			if derr := p.devices.DisableByToken(ctx, m.Token, reason, p.now()); derr != nil {
-				p.logger.Warn("notification: push disable token failed", "token_prefix", tokenPrefix(m.Token), "error", derr)
+				p.logger.Warn("notification: push disable token failed", "device_ref", tokenPrefix(m.Token), "error", derr)
 			} else {
 				st.res.Disabled++
 			}
@@ -244,7 +252,7 @@ func (p *PushService) resolveDevices(ctx context.Context, req iface.PushRequest,
 		}
 		if t.SessionID == "" || (!sessErr && !active[t.SessionID]) {
 			if derr := p.devices.DisableByToken(ctx, t.Token, models.DeviceDisabledSessionEnded, p.now()); derr != nil {
-				p.logger.Warn("notification: push disable token failed", "token_prefix", tokenPrefix(t.Token), "error", derr)
+				p.logger.Warn("notification: push disable token failed", "device_ref", tokenPrefix(t.Token), "error", derr)
 			} else {
 				st.res.Disabled++
 			}

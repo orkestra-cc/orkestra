@@ -237,6 +237,7 @@ func (r *authSessionRepository) GetActiveByUUIDs(ctx context.Context, uuids []st
 		"isActive":  true,
 		"expiresAt": bson.M{"$gt": time.Now()},
 	}
+	//tenantscope:allow system: sessions are looked up by globally unique session uuid inside this tier's collection
 	cursor, err := r.collection.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find active sessions by uuid: %w", err)

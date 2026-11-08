@@ -81,6 +81,7 @@ func (r *deviceTokenRepo) Upsert(ctx context.Context, d *models.DeviceToken, now
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		// The token belongs to the device: free it from any other owner.
+		//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 		_, err := r.col().UpdateMany(ctx, bson.D{
 			{Key: "token", Value: d.Token},
 			{Key: "active", Value: true},
@@ -90,6 +91,7 @@ func (r *deviceTokenRepo) Upsert(ctx context.Context, d *models.DeviceToken, now
 			return nil, err
 		}
 		var out models.DeviceToken
+		//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 		err = r.col().FindOneAndUpdate(ctx, key, update, opts).Decode(&out)
 		if err == nil {
 			return &out, nil
@@ -105,6 +107,7 @@ func (r *deviceTokenRepo) Upsert(ctx context.Context, d *models.DeviceToken, now
 }
 
 func (r *deviceTokenRepo) Disable(ctx context.Context, tier, userUUID, deviceID, reason string, now time.Time) (bool, error) {
+	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 	res, err := r.col().UpdateOne(ctx, bson.D{
 		{Key: "tier", Value: tier},
 		{Key: "userUuid", Value: userUUID},
@@ -118,6 +121,7 @@ func (r *deviceTokenRepo) Disable(ctx context.Context, tier, userUUID, deviceID,
 }
 
 func (r *deviceTokenRepo) DisableByToken(ctx context.Context, token, reason string, now time.Time) error {
+	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 	_, err := r.col().UpdateMany(ctx, bson.D{
 		{Key: "token", Value: token},
 		{Key: "active", Value: true},
@@ -126,6 +130,7 @@ func (r *deviceTokenRepo) DisableByToken(ctx context.Context, token, reason stri
 }
 
 func (r *deviceTokenRepo) find(ctx context.Context, filter bson.D, opts ...*options.FindOptions) ([]models.DeviceToken, error) {
+	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 	cur, err := r.col().Find(ctx, filter, opts...)
 	if err != nil {
 		return nil, err
@@ -163,6 +168,7 @@ func (r *deviceTokenRepo) ListActiveBatch(ctx context.Context, afterUUID string,
 }
 
 func (r *deviceTokenRepo) DisableStale(ctx context.Context, seenBefore time.Time, now time.Time) (int64, error) {
+	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 	res, err := r.col().UpdateMany(ctx, bson.D{
 		{Key: "active", Value: true},
 		{Key: "lastSeenAt", Value: bson.D{{Key: "$lt", Value: seenBefore}}},
@@ -174,6 +180,7 @@ func (r *deviceTokenRepo) DisableStale(ctx context.Context, seenBefore time.Time
 }
 
 func (r *deviceTokenRepo) DeleteDisabledBefore(ctx context.Context, before time.Time) (int64, error) {
+	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 	res, err := r.col().DeleteMany(ctx, bson.D{
 		{Key: "active", Value: false},
 		{Key: "disabledAt", Value: bson.D{{Key: "$lt", Value: before}}},
@@ -185,6 +192,7 @@ func (r *deviceTokenRepo) DeleteDisabledBefore(ctx context.Context, before time.
 }
 
 func (r *deviceTokenRepo) DeleteForUser(ctx context.Context, tier, userUUID string) (int64, error) {
+	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
 	res, err := r.col().DeleteMany(ctx, bson.D{{Key: "tier", Value: tier}, {Key: "userUuid", Value: userUUID}})
 	if err != nil {
 		return 0, err

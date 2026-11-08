@@ -19,8 +19,9 @@ var _ iface.PushSender = (*NotificationService)(nil)
 
 type fakePushLog struct {
 	repository.NotificationRepository
-	mu   sync.Mutex
-	rows []*models.NotificationDoc
+	findErr error
+	mu      sync.Mutex
+	rows    []*models.NotificationDoc
 }
 
 func (f *fakePushLog) Create(_ context.Context, d *models.NotificationDoc) error {
@@ -36,6 +37,9 @@ func (f *fakePushLog) FindByIdempotencyKey(_ context.Context, key string, _ time
 	defer f.mu.Unlock()
 	if key == "" {
 		return nil, nil
+	}
+	if f.findErr != nil {
+		return nil, f.findErr
 	}
 	for _, r := range f.rows {
 		if r.IdempotencyKey == key {
@@ -461,5 +465,24 @@ func TestNotificationService_SendPushWithoutPushServiceUnavailable(t *testing.T)
 	s := &NotificationService{}
 	if _, err := s.SendPush(context.Background(), pushReq("u1")); !errors.Is(err, iface.ErrPushUnavailable) {
 		t.Fatal(err)
+	}
+}
+
+func TestSendPush_IdempotencyLookupErrorFailsClosed(t *testing.T) {
+	h := newPushHarness(t)
+	h.addDevice("u1", "tok-1", "s1")
+	h.log.findErr = errors.New("mongo down")
+	req := pushReq("u1")
+	req.IdempotencyKey = "k"
+	u := h.send(t, req)
+	if u.Status != iface.PushStatusFailed || u.Error != "idempotency check unavailable" {
+		t.Fatalf("%+v", u)
+	}
+	if len(h.driver.sent) != 0 || len(h.devices.disabled) != 0 {
+		t.Fatal("must not send or disable")
+	}
+	// no key: lookup is not consulted, delivery proceeds
+	if u := h.send(t, pushReq("u1")); u.Status != iface.PushStatusDelivered {
+		t.Fatalf("%+v", u)
 	}
 }
