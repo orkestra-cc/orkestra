@@ -84,6 +84,7 @@ const (
 // Channel identifiers.
 const (
 	ChannelEmail = "email"
+	ChannelPush  = "push"
 )
 
 // Delivery statuses.
@@ -92,4 +93,9 @@ const (
 	StatusSent       = "sent"
 	StatusFailed     = "failed"
 	StatusSuppressed = "suppressed"
+	// Push-only: some, not all, of a user's devices accepted the message.
+	StatusPartial = "partial"
+	// Push-only: the user had no usable device (none registered, or every
+	// registered one belonged to an ended session).
+	StatusSkippedNoDevice = "skipped_no_device"
 )

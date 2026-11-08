@@ -19,7 +19,7 @@ type NotificationModule struct {
 	module.BaseModule
 	svc         *services.NotificationService
 	drivers     *services.DriverRegistry
-	pushDrivers *services.PushDriverFactory // per-send push driver (Task 4 push service consumes it)
+	pushDrivers *services.PushDriverFactory // per-send push driver
 	handler     *handlers.NotificationHandler
 	reconciler  *services.OptoutReconciler
 
@@ -346,6 +346,24 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		},
 	)
 	m.svc.SetOptouts(optoutRepo)
+	// Auth inits after notification, so the per-tier session readers are
+	// looked up lazily on every send.
+	registry := deps.Services
+	m.svc.SetPush(services.NewPushService(services.PushDeps{
+		LogRepo: logRepo,
+		Prefs:   m.svc.PreferenceService(),
+		Devices: repository.NewDeviceTokenRepository(deps.DB),
+		Drivers: m.pushDrivers,
+		Sessions: func(tier string) iface.SessionActivityReader {
+			key := module.ServiceAuthService
+			if tier == iface.PushTierClient {
+				key = module.ServiceClientAuthService
+			}
+			r, _ := registry.Get(key).(iface.SessionActivityReader)
+			return r
+		},
+		Logger: deps.Logger,
+	}))
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
 

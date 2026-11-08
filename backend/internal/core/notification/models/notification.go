@@ -34,6 +34,16 @@ type NotificationDoc struct {
 	// FailureReason classifies a failed row (iface.FailureAttachmentRejected);
 	// returned again by the idempotent replay.
 	FailureReason string `bson:"failureReason,omitempty" json:"failureReason,omitempty"`
+	// Push carries the device counts of a push row (channel "push"). Never
+	// the token, title body or payload.
+	Push *PushStats `bson:"push,omitempty" json:"push,omitempty"`
+}
+
+// PushStats are the per-user device counts of one push delivery row.
+type PushStats struct {
+	Attempted int `bson:"attempted" json:"attempted"`
+	Delivered int `bson:"delivered" json:"delivered"`
+	Disabled  int `bson:"disabled" json:"disabled"`
 }
 
 // AttachmentMeta is what the delivery log keeps of an attachment: its
