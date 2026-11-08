@@ -420,3 +420,23 @@ func TestRunsQuery(t *testing.T) {
 		t.Errorf("unknown key: %v", err)
 	}
 }
+
+// I4: an input error quoting the operator's input stays within 200
+// characters, whoever calls the service.
+func TestInputMessagesClipped(t *testing.T) {
+	long := strings.Repeat("Z", 1000)
+	err := ValidateTimezone(long)
+	if !errors.Is(err, ErrInvalidTimezone) {
+		t.Fatalf("err = %v", err)
+	}
+	if msg := InputMessage(err, ""); len([]rune(msg)) > 200 || strings.Contains(msg, long) {
+		t.Fatalf("timezone message is %d characters", len([]rune(msg)))
+	}
+	_, _, err = parseSchedule(ScheduleInput{Kind: "cron", Cron: strings.Repeat("9", 1000) + " * * * *"})
+	if !errors.Is(err, ErrInvalidSchedule) {
+		t.Fatalf("err = %v", err)
+	}
+	if msg := InputMessage(err, ""); len([]rune(msg)) > 200 || !strings.HasSuffix(msg, "…") {
+		t.Fatalf("schedule message is %d characters: %q", len([]rune(msg)), msg)
+	}
+}

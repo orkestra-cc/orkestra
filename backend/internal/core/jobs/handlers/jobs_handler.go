@@ -9,6 +9,9 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+	"unicode/utf8"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/orkestra/backend/internal/core/jobs/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
@@ -33,8 +36,8 @@ func New(svc *services.AdminService, logger *slog.Logger) *Handler {
 // JobsScheduleInput is an operator schedule.
 type JobsScheduleInput struct {
 	Kind         string `json:"kind" doc:"every or cron"`
-	EverySeconds int64  `json:"everySeconds,omitempty" doc:"Interval in seconds for an every schedule (60 to 31622400)"`
-	Cron         string `json:"cron,omitempty" doc:"5-field cron expression for a cron schedule, e.g. 0 2 * * *"`
+	EverySeconds int64  `json:"everySeconds,omitempty" maximum:"31622400" doc:"Interval in seconds for an every schedule (60 to 31622400)"`
+	Cron         string `json:"cron,omitempty" maxLength:"128" doc:"5-field cron expression for a cron schedule, e.g. 0 2 * * *"`
 }
 
 func (s *JobsScheduleInput) input() *services.ScheduleInput {
@@ -60,15 +63,15 @@ type JobsUpdateBody struct {
 	Revision int64              `json:"revision" doc:"The job's revision as read; a stale one answers 409 jobs.revision_conflict"`
 	Enabled  *bool              `json:"enabled,omitempty"`
 	Schedule *JobsScheduleInput `json:"schedule,omitempty" doc:"Replaces the schedule; not allowed on a manual job"`
-	Timezone *string            `json:"timezone,omitempty" doc:"IANA zone for cron schedules; an empty string removes the override"`
+	Timezone *string            `json:"timezone,omitempty" maxLength:"64" doc:"IANA zone for cron schedules; an empty string removes the override"`
 }
 
 // JobsPreviewBody is a schedule to preview.
 type JobsPreviewBody struct {
 	Kind         string `json:"kind" doc:"every or cron"`
-	EverySeconds int64  `json:"everySeconds,omitempty"`
-	Cron         string `json:"cron,omitempty"`
-	Timezone     string `json:"timezone,omitempty" doc:"IANA zone; defaults to the module timezone"`
+	EverySeconds int64  `json:"everySeconds,omitempty" maximum:"31622400"`
+	Cron         string `json:"cron,omitempty" maxLength:"128"`
+	Timezone     string `json:"timezone,omitempty" maxLength:"64" doc:"IANA zone; defaults to the module timezone"`
 }
 
 // JobsPreviewResult lists the next due times of a schedule.
@@ -193,6 +196,27 @@ func (h *Handler) Preview(ctx context.Context, req *PreviewRequest) (*PreviewRes
 		return nil, h.fail(ctx, "preview", err)
 	}
 	return &PreviewResponse{Body: JobsPreviewResult{Next: next, Description: desc}}, nil
+}
+
+// maxEchoRunes bounds a request value echoed back in an error.
+const maxEchoRunes = 64
+
+// ClipEchoedValues is a Huma transformer for the jobs routes. Huma's
+// validation errors carry the offending value in errors[].value; it cuts
+// every string value there to maxEchoRunes, so an over-long cron or timezone
+// (rejected by its maxLength) does not come back whole.
+func ClipEchoedValues(_ huma.Context, _ string, v any) (any, error) {
+	if em, ok := v.(*huma.ErrorModel); ok {
+		for _, d := range em.Errors {
+			if d == nil {
+				continue
+			}
+			if s, ok := d.Value.(string); ok && utf8.RuneCountInString(s) > maxEchoRunes {
+				d.Value = string([]rune(s)[:maxEchoRunes]) + "…"
+			}
+		}
+	}
+	return v, nil
 }
 
 // errNotReady answers a request that reached the routes before Init built

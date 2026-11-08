@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -36,13 +37,17 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		// over an empty service so the document does not depend on Init.
 		h = handlers.New(nil, nil)
 	}
+	// Same document and transformers as every module, plus one that cuts
+	// request values echoed in validation errors.
+	cfg := ri.APIConfig
+	cfg.Transformers = append(slices.Clone(cfg.Transformers), handlers.ClipEchoedValues)
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.jobs.read"))
-		registerReadRoutes(humachi.New(r, ri.APIConfig), h)
+		registerReadRoutes(humachi.New(r, cfg), h)
 	})
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.jobs.manage"))
-		registerManageRoutes(humachi.New(r, ri.APIConfig), h)
+		registerManageRoutes(humachi.New(r, cfg), h)
 	})
 }
 

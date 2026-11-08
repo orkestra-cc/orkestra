@@ -107,3 +107,72 @@ func TestPreviewOverHTTP(t *testing.T) {
 		t.Errorf("invalid cron: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// boundedRouter mounts the preview and PATCH operations with the jobs
+// routes' transformer, as routes.go does.
+func boundedRouter() *chi.Mux {
+	svc := services.New(services.Options{Now: func() time.Time { return time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC) }})
+	h := New(svc, quietLogger())
+	router := chi.NewRouter()
+	cfg := huma.DefaultConfig("test", "1.0.0")
+	cfg.Transformers = append(cfg.Transformers, ClipEchoedValues)
+	api := humachi.New(router, cfg)
+	huma.Register(api, huma.Operation{OperationID: "preview", Method: http.MethodPost, Path: "/preview"}, h.Preview)
+	huma.Register(api, huma.Operation{OperationID: "update", Method: http.MethodPatch, Path: "/jobs/{key}"}, h.Update)
+	return router
+}
+
+// I4: cron and timezone strings are bounded on PATCH and preview; the
+// rejected value is not echoed back whole, and a parser message quoting the
+// input stays within 200 characters.
+func TestScheduleInputsBounded(t *testing.T) {
+	router := boundedRouter()
+	long := "0,0" + strings.Repeat(",0", 59) + " * * * *" // 129 characters, a valid cron
+	if len(long) != 129 {
+		t.Fatalf("len = %d", len(long))
+	}
+	longTZ := strings.Repeat("A", 65)
+	cases := []struct {
+		name, method, path, body, echoed string
+	}{
+		{"preview cron", http.MethodPost, "/preview", `{"kind":"cron","cron":"` + long + `"}`, long},
+		{"preview timezone", http.MethodPost, "/preview", `{"kind":"cron","cron":"0 2 * * *","timezone":"` + longTZ + `"}`, longTZ},
+		{"preview everySeconds", http.MethodPost, "/preview", `{"kind":"every","everySeconds":31622401}`, ""},
+		{"patch cron", http.MethodPatch, "/jobs/m.a", `{"revision":1,"schedule":{"kind":"cron","cron":"` + long + `"}}`, long},
+		{"patch timezone", http.MethodPatch, "/jobs/m.a", `{"revision":1,"timezone":"` + longTZ + `"}`, longTZ},
+		{"patch everySeconds", http.MethodPatch, "/jobs/m.a", `{"revision":1,"schedule":{"kind":"every","everySeconds":31622401}}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			if tc.echoed != "" && strings.Contains(rec.Body.String(), tc.echoed) {
+				t.Fatalf("the rejected value is echoed whole: %s", rec.Body)
+			}
+		})
+	}
+
+	// 128 characters pass the cap; the parser's message, which quotes the
+	// minute field, is cut to 200 characters.
+	bad := "61" + strings.Repeat(",0", 59) + " * * * *"
+	if len(bad) != 128 {
+		t.Fatalf("len = %d", len(bad))
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader(`{"kind":"cron","cron":"`+bad+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	var e errcode.Error
+	_ = json.Unmarshal(rec.Body.Bytes(), &e)
+	if rec.Code != http.StatusUnprocessableEntity || e.Code != errcode.JobsInvalidSchedule || !strings.Contains(e.Detail, "minute") {
+		t.Fatalf("invalid 128-char cron: %d %s", rec.Code, rec.Body)
+	}
+	if n := len([]rune(e.Detail)); n > 200 {
+		t.Fatalf("detail is %d characters: %q", n, e.Detail)
+	}
+}

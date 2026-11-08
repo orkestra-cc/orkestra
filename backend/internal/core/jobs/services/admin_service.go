@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/orkestra/backend/internal/core/jobs/models"
 	"github.com/orkestra/backend/internal/core/jobs/repository"
@@ -56,7 +57,19 @@ func InputMessage(err error, fallback string) string {
 }
 
 func inputErr(kind error, format string, a ...any) error {
-	return &InputError{Kind: kind, Msg: fmt.Sprintf(format, a...)}
+	return &InputError{Kind: kind, Msg: clipMessage(fmt.Sprintf(format, a...))}
+}
+
+// maxMessageRunes bounds an input error message: some quote the operator's
+// input (the cron field, the zone name).
+const maxMessageRunes = 200
+
+// clipMessage cuts s to maxMessageRunes runes, ending in "…" when cut.
+func clipMessage(s string) string {
+	if utf8.RuneCountInString(s) <= maxMessageRunes {
+		return s
+	}
+	return string([]rune(s)[:maxMessageRunes-1]) + "…"
 }
 
 // Audit actions. Metadata carries the job key and the override before and
@@ -386,7 +399,7 @@ func parseSchedule(in ScheduleInput) (models.ScheduleSpec, sdkjobs.Schedule, err
 	if err != nil {
 		// The parser's message names the offending cron field and value,
 		// e.g. `cron: minute field "61": value 61 out of range 0-59`.
-		return spec, sdkjobs.Schedule{}, &InputError{Kind: ErrInvalidSchedule, Msg: "Invalid schedule: " + err.Error()}
+		return spec, sdkjobs.Schedule{}, &InputError{Kind: ErrInvalidSchedule, Msg: clipMessage("Invalid schedule: " + err.Error())}
 	}
 	return spec, sched, nil
 }
