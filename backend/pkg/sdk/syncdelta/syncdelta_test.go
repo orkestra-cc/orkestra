@@ -40,7 +40,7 @@ func TestDecodeCursorInvalid(t *testing.T) {
 func TestFilterShape(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
 	h := now.Add(-StableHorizon)
-	if got, want := Filter(nil, now), (bson.M{"updatedAt": bson.M{"$lte": h}}); !reflect.DeepEqual(got, want) {
+	if got, want := Filter(nil, now, "_id"), (bson.M{"updatedAt": bson.M{"$lte": h}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("nil: %v", got)
 	}
 	cur := &Cursor{UpdatedAt: now.Add(-time.Hour), ID: "x"}
@@ -51,10 +51,10 @@ func TestFilterShape(t *testing.T) {
 			bson.M{"updatedAt": cur.UpdatedAt, "_id": bson.M{"$gt": "x"}},
 		}},
 	}}
-	if got := Filter(cur, now); !reflect.DeepEqual(got, want) {
+	if got := Filter(cur, now, "_id"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("cur: %v", got)
 	}
-	if !reflect.DeepEqual(Sort(), bson.D{{Key: "updatedAt", Value: 1}, {Key: "_id", Value: 1}}) {
+	if !reflect.DeepEqual(Sort("_id"), bson.D{{Key: "updatedAt", Value: 1}, {Key: "_id", Value: 1}}) {
 		t.Fatal("sort")
 	}
 }
@@ -78,9 +78,10 @@ func (r row) IsDeleted() bool    { return r.del }
 func (r row) SyncID() string     { return r.id }
 
 func TestBuildPage(t *testing.T) {
+	now0 := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	rows := []row{{"a", base, false}, {"b", base.Add(time.Second), true}, {"c", base.Add(2 * time.Second), false}}
-	p := BuildPage(rows, 2, nil)
+	p := BuildPage(rows, 2, nil, now0)
 	if !p.HasMore || len(p.Items) != 1 || p.Items[0].id != "a" || !reflect.DeepEqual(p.Deleted, []string{"b"}) {
 		t.Fatalf("%+v", p)
 	}
@@ -89,14 +90,16 @@ func TestBuildPage(t *testing.T) {
 		t.Fatalf("cursor %+v", cur)
 	}
 	prev := &Cursor{UpdatedAt: base, ID: "z"}
-	p = BuildPage[row](nil, 2, prev)
-	if p.HasMore || p.Cursor != EncodeCursor(*prev) || p.Items == nil || p.Deleted == nil {
+	p = BuildPage[row](nil, 2, prev, now0)
+	want := *prev
+	want.IssuedAt = Horizon(now0)
+	if p.HasMore || p.Cursor != EncodeCursor(want) || p.Items == nil || p.Deleted == nil {
 		t.Fatalf("%+v", p)
 	}
 	if b, _ := json.Marshal(p); string(b) != `{"items":[],"deleted":[],"cursor":"`+p.Cursor+`","hasMore":false}` {
 		t.Fatal(string(b))
 	}
-	if p = BuildPage[row](nil, 2, nil); p.Cursor != "" {
+	if p = BuildPage[row](nil, 2, nil, now0); p.Cursor != "" {
 		t.Fatal("empty cursor expected")
 	}
 }
@@ -190,5 +193,38 @@ func TestConflictErrorHuma(t *testing.T) {
 	}
 	if b.Status != 409 || b.Code != "sync.conflict" || b.CurrentVersion != 7 || b.Current["name"] != "n" || b.Detail == "" {
 		t.Fatalf("%s", resp.Body.String())
+	}
+}
+
+func TestEmptyPageReissuesCursor(t *testing.T) {
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	prev := &Cursor{UpdatedAt: now.Add(-40 * 24 * time.Hour), ID: "z", IssuedAt: now.Add(-24 * time.Hour)}
+	p := BuildPage[row](nil, 10, prev, now)
+	c, err := DecodeCursor(p.Cursor)
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	if !c.IssuedAt.Equal(Horizon(now)) || !c.UpdatedAt.Equal(prev.UpdatedAt) || c.ID != "z" {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestCheckExpiredUsesIssuedAt(t *testing.T) {
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	quiet := &Cursor{UpdatedAt: now.Add(-40 * 24 * time.Hour), ID: "a", IssuedAt: now.Add(-24 * time.Hour)}
+	if err := CheckExpired(quiet, now, DefaultTombstoneRetention); err != nil {
+		t.Fatalf("quiet collection must not expire: %v", err)
+	}
+	old := &Cursor{UpdatedAt: now, ID: "a", IssuedAt: now.Add(-31 * 24 * time.Hour)}
+	if !errors.Is(CheckExpired(old, now, DefaultTombstoneRetention), ErrCursorExpired) {
+		t.Fatal("old issuance must expire")
+	}
+	legacy := &Cursor{UpdatedAt: now.Add(-40 * 24 * time.Hour), ID: "a"}
+	if !errors.Is(CheckExpired(legacy, now, DefaultTombstoneRetention), ErrCursorExpired) {
+		t.Fatal("zero IssuedAt falls back to UpdatedAt")
+	}
+	rt, _ := DecodeCursor(EncodeCursor(*quiet))
+	if !rt.IssuedAt.Equal(quiet.IssuedAt) {
+		t.Fatal("IssuedAt round trip")
 	}
 }

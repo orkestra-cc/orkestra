@@ -10,8 +10,11 @@
 // a cursor older than the retention yields ErrCursorExpired (410) and the
 // client must do a full resync.
 //
-// Documents must store updatedAt as a BSON date and use a comparable _id
-// (string) so the (updatedAt, _id) order is total.
+// Documents must store updatedAt as a BSON date. Ties between equal updatedAt
+// are broken by a string field named by the caller (idField of Filter and
+// Sort): string-keyed collections pass "_id"; ObjectID-keyed ones pass their
+// string "uuid" field (Orkestra convention). Cursors carry IssuedAt, the
+// horizon of the response that issued them, which is what expiry measures.
 //
 // Error envelope: {"status","title","detail","code"} with the Code*
 // constants below; CursorExpiredError, InvalidCursorError,
