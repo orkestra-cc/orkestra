@@ -133,6 +133,18 @@
     }
   },
   "errors": {
+    "jobs": {
+      "not_found": "No job with this key is registered.",
+      "revision_conflict": "The job changed since it was loaded. It has been reloaded; try again.",
+      "already_running": "The job is running now; wait for the run to finish.",
+      "already_requested": "A run of this job is already waiting for a free replica.",
+      "module_stopped": "The job's module is not started, so its jobs do not run.",
+      "invalid_schedule": "The schedule is not valid",
+      "manual_schedule_locked": "This job runs only on request; its schedule cannot be changed.",
+      "invalid_timezone": "The timezone is not an IANA zone name.",
+      "invalid_query": "The run history filter is not valid.",
+      "persistence_failed": "The job state could not be read or written. Try again."
+    },
     "401": {
       "insufficientPermissions": "Insufficient Permissions",
       "accessDenied": "Access Denied",
@@ -1821,6 +1833,143 @@
       "validation": "Check the service account name and try again.",
       "generic": "Something went wrong. Please try again.",
       "credentialCap": "This service account already has two active credentials. Revoke one before issuing another."
+    }
+  },
+  "adminJobs": {
+    "title": "Background jobs",
+    "subtitle": "Jobs declared by modules: schedule, state and run history.",
+    "loading": "Loading jobs…",
+    "loadingAria": "Loading jobs workspace",
+    "loadingJobs": "Loading jobs…",
+    "loadFailed": "Failed to load the jobs. Try again shortly.",
+    "empty": "No module has declared a job.",
+    "moduleSettings": "Module settings",
+    "backToJobs": "Back to jobs",
+    "overridden": "Edited",
+    "columns": {
+      "job": "Job",
+      "module": "Module",
+      "schedule": "Schedule",
+      "status": "Status",
+      "lastRun": "Last run",
+      "nextRun": "Next run",
+      "actions": "Actions"
+    },
+    "schedule": {
+      "every": "every {{value}} {{unit}}",
+      "cron": "cron {{expr}} ({{zone}})",
+      "cronShort": "cron {{expr}}",
+      "manual": "manual",
+      "units": {
+        "s": "s",
+        "min": "min",
+        "h": "h",
+        "d": "d"
+      }
+    },
+    "status": {
+      "disabled": "Disabled",
+      "moduleStopped": "Module stopped",
+      "running": "Running",
+      "retryPending": "Retry pending",
+      "lastOk": "Last run OK",
+      "lastFailed": "Last run failed",
+      "lastSkipped": "Last run skipped",
+      "neverRun": "Not run yet"
+    },
+    "actions": {
+      "enableAria": "Enable {{title}}",
+      "editSchedule": "Edit schedule",
+      "editScheduleAria": "Edit schedule of {{title}}",
+      "runNow": "Run now",
+      "runNowAria": "Run {{title}} now",
+      "reset": "Reset to default",
+      "resetAria": "Reset {{title}} to default"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "schedule": "Schedule",
+      "runs": "Runs"
+    },
+    "overview": {
+      "key": "Key",
+      "declared": "Declared schedule",
+      "offByDefault": "off by default",
+      "retryAt": "Retry",
+      "attempt_one": "attempt {{count}}",
+      "attempt_other": "attempt {{count}}",
+      "runRequested": "Run requested",
+      "timeout": "Timeout",
+      "maxAttempts": "Max attempts",
+      "revision": "Revision",
+      "lastRun": "Last run"
+    },
+    "editor": {
+      "declaredDefault": "The module declares: {{schedule}}.",
+      "kind": "Schedule type",
+      "kindEvery": "Every N minutes",
+      "kindCron": "Cron expression",
+      "everyMinutes": "Every (minutes)",
+      "cron": "Cron expression",
+      "cronHelp": "Five fields: minute hour day-of-month month day-of-week.",
+      "timezone": "Timezone",
+      "timezoneHelp": "IANA zone name. Leave empty to follow the module timezone.",
+      "preview": "Next runs",
+      "nextRuns": "Next runs",
+      "previewIdle": "Enter a valid schedule to preview its next runs.",
+      "previewLoading": "Computing…",
+      "save": "Save schedule",
+      "manualLocked": "This job runs only on request; it has no schedule to edit.",
+      "overriddenNote": "This job's schedule or enabled state was changed from what its module declares.",
+      "restoreDefaults": "Restore declared defaults",
+      "errors": {
+        "minutes": "Enter a whole number of minutes between 1 and 527040.",
+        "cron": "Enter a cron expression.",
+        "timezone": "The timezone name is too long."
+      }
+    },
+    "runs": {
+      "filterLabel": "Status",
+      "filterAria": "Filter by status",
+      "allStatuses": "All statuses",
+      "loading": "Loading runs…",
+      "loadFailed": "Failed to load the run history.",
+      "empty": "No runs recorded.",
+      "loadMore": "Load more",
+      "showDetails": "Show details",
+      "hideDetails": "Hide details",
+      "dropped": "{{count}} value(s) not recorded",
+      "columns": {
+        "started": "Started",
+        "status": "Status",
+        "trigger": "Trigger",
+        "attempt": "Attempt",
+        "duration": "Duration",
+        "details": "Details"
+      },
+      "status": {
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "timed_out": "Timed out",
+        "abandoned": "Abandoned",
+        "interrupted": "Interrupted",
+        "skipped": "Skipped"
+      },
+      "trigger": {
+        "schedule": "Schedule",
+        "manual": "Manual",
+        "retry": "Retry",
+        "catchup": "Catch-up"
+      }
+    },
+    "toasts": {
+      "runRequested": "{{title}} will run on the next free replica.",
+      "reset": "{{title}} restored to its declared defaults.",
+      "scheduleSaved": "Schedule of {{title}} saved."
+    },
+    "errors": {
+      "generic": "The operation failed. Try again."
     }
   },
   "adminObservability": {

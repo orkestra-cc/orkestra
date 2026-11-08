@@ -133,6 +133,18 @@
     }
   },
   "errors": {
+    "jobs": {
+      "not_found": "Nessun job registrato con questa chiave.",
+      "revision_conflict": "Il job è cambiato dopo il caricamento. È stato ricaricato: riprova.",
+      "already_running": "Il job è in esecuzione: attendi la fine dell'esecuzione.",
+      "already_requested": "Un'esecuzione di questo job è già in attesa di una replica libera.",
+      "module_stopped": "Il modulo del job non è avviato, quindi i suoi job non vengono eseguiti.",
+      "invalid_schedule": "La pianificazione non è valida",
+      "manual_schedule_locked": "Questo job parte solo su richiesta: la pianificazione non è modificabile.",
+      "invalid_timezone": "Il fuso orario non è un nome di zona IANA.",
+      "invalid_query": "Il filtro dello storico non è valido.",
+      "persistence_failed": "Impossibile leggere o scrivere lo stato del job. Riprova."
+    },
     "401": {
       "insufficientPermissions": "Permessi insufficienti",
       "accessDenied": "Accesso negato",
@@ -1821,6 +1833,143 @@
       "validation": "Controlla il nome dell'account di servizio e riprova.",
       "generic": "Qualcosa è andato storto. Riprova.",
       "credentialCap": "Questo account di servizio ha già due credenziali attive. Revocane una prima di emetterne un'altra."
+    }
+  },
+  "adminJobs": {
+    "title": "Job in background",
+    "subtitle": "I job dichiarati dai moduli: pianificazione, stato e storico delle esecuzioni.",
+    "loading": "Caricamento dei job…",
+    "loadingAria": "Caricamento dell'area job",
+    "loadingJobs": "Caricamento dei job…",
+    "loadFailed": "Impossibile caricare i job. Riprova tra poco.",
+    "empty": "Nessun modulo ha dichiarato un job.",
+    "moduleSettings": "Impostazioni del modulo",
+    "backToJobs": "Torna ai job",
+    "overridden": "Modificato",
+    "columns": {
+      "job": "Job",
+      "module": "Modulo",
+      "schedule": "Pianificazione",
+      "status": "Stato",
+      "lastRun": "Ultima esecuzione",
+      "nextRun": "Prossima esecuzione",
+      "actions": "Azioni"
+    },
+    "schedule": {
+      "every": "ogni {{value}} {{unit}}",
+      "cron": "cron {{expr}} ({{zone}})",
+      "cronShort": "cron {{expr}}",
+      "manual": "manuale",
+      "units": {
+        "s": "s",
+        "min": "min",
+        "h": "h",
+        "d": "g"
+      }
+    },
+    "status": {
+      "disabled": "Disabilitato",
+      "moduleStopped": "Modulo fermo",
+      "running": "In esecuzione",
+      "retryPending": "Nuovo tentativo in attesa",
+      "lastOk": "Ultima esecuzione riuscita",
+      "lastFailed": "Ultima esecuzione fallita",
+      "lastSkipped": "Ultima esecuzione saltata",
+      "neverRun": "Mai eseguito"
+    },
+    "actions": {
+      "enableAria": "Abilita {{title}}",
+      "editSchedule": "Modifica pianificazione",
+      "editScheduleAria": "Modifica la pianificazione di {{title}}",
+      "runNow": "Esegui ora",
+      "runNowAria": "Esegui {{title}} ora",
+      "reset": "Ripristina predefinito",
+      "resetAria": "Ripristina {{title}} al predefinito"
+    },
+    "tabs": {
+      "overview": "Panoramica",
+      "schedule": "Pianificazione",
+      "runs": "Esecuzioni"
+    },
+    "overview": {
+      "key": "Chiave",
+      "declared": "Pianificazione dichiarata",
+      "offByDefault": "disattivato di default",
+      "retryAt": "Nuovo tentativo",
+      "attempt_one": "tentativo {{count}}",
+      "attempt_other": "tentativo {{count}}",
+      "runRequested": "Esecuzione richiesta",
+      "timeout": "Timeout",
+      "maxAttempts": "Tentativi massimi",
+      "revision": "Revisione",
+      "lastRun": "Ultima esecuzione"
+    },
+    "editor": {
+      "declaredDefault": "Il modulo dichiara: {{schedule}}.",
+      "kind": "Tipo di pianificazione",
+      "kindEvery": "Ogni N minuti",
+      "kindCron": "Espressione cron",
+      "everyMinutes": "Ogni (minuti)",
+      "cron": "Espressione cron",
+      "cronHelp": "Cinque campi: minuto ora giorno-del-mese mese giorno-della-settimana.",
+      "timezone": "Fuso orario",
+      "timezoneHelp": "Nome di zona IANA. Lascia vuoto per seguire il fuso del modulo.",
+      "preview": "Prossime esecuzioni",
+      "nextRuns": "Prossime esecuzioni",
+      "previewIdle": "Inserisci una pianificazione valida per vedere le prossime esecuzioni.",
+      "previewLoading": "Calcolo in corso…",
+      "save": "Salva pianificazione",
+      "manualLocked": "Questo job parte solo su richiesta: non ha una pianificazione da modificare.",
+      "overriddenNote": "La pianificazione o lo stato di abilitazione di questo job differisce da quanto dichiara il suo modulo.",
+      "restoreDefaults": "Ripristina i valori dichiarati",
+      "errors": {
+        "minutes": "Inserisci un numero intero di minuti tra 1 e 527040.",
+        "cron": "Inserisci un'espressione cron.",
+        "timezone": "Il nome del fuso orario è troppo lungo."
+      }
+    },
+    "runs": {
+      "filterLabel": "Stato",
+      "filterAria": "Filtra per stato",
+      "allStatuses": "Tutti gli stati",
+      "loading": "Caricamento delle esecuzioni…",
+      "loadFailed": "Impossibile caricare lo storico delle esecuzioni.",
+      "empty": "Nessuna esecuzione registrata.",
+      "loadMore": "Carica altre",
+      "showDetails": "Mostra dettagli",
+      "hideDetails": "Nascondi dettagli",
+      "dropped": "{{count}} valore/i non registrato/i",
+      "columns": {
+        "started": "Avvio",
+        "status": "Stato",
+        "trigger": "Origine",
+        "attempt": "Tentativo",
+        "duration": "Durata",
+        "details": "Dettagli"
+      },
+      "status": {
+        "running": "In esecuzione",
+        "succeeded": "Riuscita",
+        "failed": "Fallita",
+        "timed_out": "Scaduta",
+        "abandoned": "Abbandonata",
+        "interrupted": "Interrotta",
+        "skipped": "Saltata"
+      },
+      "trigger": {
+        "schedule": "Pianificazione",
+        "manual": "Manuale",
+        "retry": "Nuovo tentativo",
+        "catchup": "Recupero"
+      }
+    },
+    "toasts": {
+      "runRequested": "{{title}} verrà eseguito dalla prima replica libera.",
+      "reset": "{{title}} ripristinato ai valori dichiarati.",
+      "scheduleSaved": "Pianificazione di {{title}} salvata."
+    },
+    "errors": {
+      "generic": "Operazione non riuscita. Riprova."
     }
   },
   "adminObservability": {
