@@ -996,3 +996,21 @@ func TestCompleteGivesUp(t *testing.T) {
 		t.Fatal("run record not finished")
 	}
 }
+
+// Wake makes a sleeping loop poll at once: a run requested through the admin
+// API starts without waiting for the poll interval.
+func TestWakePollsNow(t *testing.T) {
+	var calls atomic.Int32
+	h := newHarness(t, Options{PollInterval: time.Hour}, def("a", func(context.Context, *jobs.Run) error { calls.Add(1); return nil }))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.e.Start(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	// The first poll finds nothing due; let the loop go to sleep.
+	time.Sleep(20 * time.Millisecond)
+	if _, err := h.states.RequestRun(context.Background(), "m.a", "u1", h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.e.Wake()
+	waitFor(t, func() bool { return calls.Load() == 1 })
+}

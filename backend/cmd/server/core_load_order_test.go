@@ -17,6 +17,9 @@ import (
 // retrieval sits after llm (it declares llm as a dependency, so the
 // topology forces it) and before compliance, which pushes its audit sink
 // into the retrieval service from its own Init.
+// jobs sits right after logging: it declares no dependency (catalog,
+// module-state reader and audit sink are resolved from the service registry
+// when used), so its place is the catalog's.
 func TestCoreModulesLoadOrder(t *testing.T) {
 	// main.go registers the core modules one by one (Register, not
 	// RegisterAll), so the catalog order is the init order; mirror that.
@@ -36,7 +39,7 @@ func TestCoreModulesLoadOrder(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"user", "notification", "tenant", "authz", "auth", "navigation", "logging", "llm", "retrieval", "compliance"}
+	want := []string{"user", "notification", "tenant", "authz", "auth", "navigation", "logging", "jobs", "llm", "retrieval", "compliance"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("core load order = %v, want %v", got, want)
 	}

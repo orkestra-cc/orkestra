@@ -722,6 +722,13 @@ func (e *Engine) release(h *runHandle) {
 	}
 	e.mu.Unlock()
 	close(h.done)
+	e.Wake() // capacity freed
+}
+
+// Wake makes the loop poll now instead of at its next wake time. The admin
+// API calls it after a run request or an override change on this replica;
+// other replicas see the change on their next poll. It never blocks.
+func (e *Engine) Wake() {
 	select {
 	case e.kick <- struct{}{}:
 	default:

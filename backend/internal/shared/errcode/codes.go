@@ -421,6 +421,45 @@ const LoggingConfigConflict = "logging.config_conflict"
 // underlying cause is logged server-side and never enters the response. 500.
 const LoggingPersistenceFailed = "logging.persistence_failed"
 
+// --- jobs ---
+
+// JobsNotFound signals that no registered job has the requested key. 404.
+const JobsNotFound = "jobs.not_found"
+
+// JobsRevisionConflict signals that the job changed since the caller read it
+// (another operator edit, or a run that finished): reload and retry. 409.
+const JobsRevisionConflict = "jobs.revision_conflict"
+
+// JobsAlreadyRunning signals a run request for a job that is running now. 409.
+const JobsAlreadyRunning = "jobs.already_running"
+
+// JobsAlreadyRequested signals a run request for a job that already has one
+// waiting for a free replica. 409.
+const JobsAlreadyRequested = "jobs.already_requested"
+
+// JobsModuleStopped signals a run request for a job whose module is not
+// started: a stopped module runs no jobs. 409.
+const JobsModuleStopped = "jobs.module_stopped"
+
+// JobsInvalidSchedule signals a schedule override or preview that does not
+// parse or is out of bounds; the detail names the offending cron field. 422.
+const JobsInvalidSchedule = "jobs.invalid_schedule"
+
+// JobsManualScheduleLocked signals a schedule override on a job its module
+// declares manual-only. 422.
+const JobsManualScheduleLocked = "jobs.manual_schedule_locked"
+
+// JobsInvalidTimezone signals a timezone that is not an IANA name. 422.
+const JobsInvalidTimezone = "jobs.invalid_timezone"
+
+// JobsInvalidQuery signals a run-history filter outside the contract: an
+// unknown status or a malformed cursor. 400.
+const JobsInvalidQuery = "jobs.invalid_query"
+
+// JobsPersistenceFailed signals that the job state or run history could not
+// be read or written. The cause is logged server-side. 500.
+const JobsPersistenceFailed = "jobs.persistence_failed"
+
 // --- llm ---
 
 // LLMNotConfigured: the organization has no active model at all. 503.

@@ -90,6 +90,18 @@
 //     permissions at all, which is a louder condition than the one
 //     above and deserves its own alert.
 //
+// The core jobs module (spec J20) adds three, labelled by job, the catalog
+// key "<module>.<name>" (closed: the set of jobs registered at boot):
+//
+//   - orkestra_jobs_runs_total — finished runs by job and status
+//     (succeeded / failed / timed_out / interrupted / abandoned / skipped;
+//     anything else collapses to "unknown").
+//   - orkestra_jobs_run_duration_seconds — wall time of the runs this
+//     replica executed. Abandoned and skipped runs never executed here and
+//     are counted only.
+//   - orkestra_jobs_lease_lost_total — runs cancelled because this replica
+//     lost the lease (or could not renew it until it expired).
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -146,6 +158,11 @@ type Collector struct {
 	compliancePolicySnapshotAge    prometheus.Gauge
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
+
+	// jobs*: the core jobs scheduler (spec J20). job is a catalog key.
+	jobsRuns        *prometheus.CounterVec
+	jobsRunDuration *prometheus.HistogramVec
+	jobsLeaseLost   *prometheus.CounterVec
 
 	// entitlementLag is a GaugeFunc that reads lastApply on every scrape;
 	// the map is keyed by tenant kind ("internal" | "external"). Stored
@@ -372,6 +389,38 @@ func (c *Collector) buildMetrics() {
 		[]string{"tier"},
 	)
 
+	c.jobsRuns = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "jobs",
+			Name:      "runs_total",
+			Help:      "Finished background-job runs by job key and status: succeeded, failed, timed_out, interrupted, abandoned (its replica died), skipped (a missed slot of a SkipMissed job).",
+		},
+		// job is a catalog key (closed at boot); status one of jobStatuses.
+		[]string{"job", "status"},
+	)
+
+	c.jobsRunDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "orkestra",
+			Subsystem: "jobs",
+			Name:      "run_duration_seconds",
+			Help:      "Wall time of the background-job runs this replica executed, by job key. Abandoned and skipped runs are not observed.",
+			Buckets:   []float64{0.1, 0.5, 1, 5, 15, 30, 60, 300, 900, 1800, 3600},
+		},
+		[]string{"job"},
+	)
+
+	c.jobsLeaseLost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "jobs",
+			Name:      "lease_lost_total",
+			Help:      "Background-job runs cancelled because this replica lost the job's lease, or could not renew it before it expired.",
+		},
+		[]string{"job"},
+	)
+
 	c.authzCacheInvalidationFailures = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "orkestra",
@@ -455,7 +504,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.llmRequests, c.llmTokens, c.llmSIWCLinks, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.llmRequests, c.llmTokens, c.llmSIWCLinks, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge, c.jobsRuns, c.jobsRunDuration, c.jobsLeaseLost} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -657,6 +706,34 @@ func (c *Collector) RecordLLMTokens(provider, direction string, n int64) {
 		return
 	}
 	c.llmTokens.WithLabelValues(collapse(provider, llmProviders), collapse(direction, llmDirections)).Add(float64(n))
+}
+
+// jobStatuses are the terminal run statuses of the jobs module.
+var jobStatuses = map[string]struct{}{
+	"succeeded": {}, "failed": {}, "timed_out": {}, "interrupted": {}, "abandoned": {}, "skipped": {},
+}
+
+// RecordJobRun counts one finished run of job (a catalog key) with status
+// and, unless the run never executed in this process (abandoned, skipped),
+// observes its duration. An unknown status collapses to "unknown".
+func (c *Collector) RecordJobRun(job, status string, d time.Duration) {
+	if c == nil || c.jobsRuns == nil {
+		return
+	}
+	s := collapse(status, jobStatuses)
+	c.jobsRuns.WithLabelValues(job, s).Inc()
+	if s == "abandoned" || s == "skipped" {
+		return
+	}
+	c.jobsRunDuration.WithLabelValues(job).Observe(d.Seconds())
+}
+
+// RecordJobLeaseLost counts one run of job cancelled for a lost lease.
+func (c *Collector) RecordJobLeaseLost(job string) {
+	if c == nil || c.jobsLeaseLost == nil {
+		return
+	}
+	c.jobsLeaseLost.WithLabelValues(job).Inc()
 }
 
 func collapse(v string, allowed map[string]struct{}) string {
