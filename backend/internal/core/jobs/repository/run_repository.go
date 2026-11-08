@@ -54,6 +54,8 @@ func DecodeRunCursor(s string) (*RunCursor, error) {
 // RunRepository persists run records.
 type RunRepository interface {
 	Insert(ctx context.Context, r *models.RunRecord) error
+	// Finish writes the outcome of a run that is still running; a record
+	// already in a terminal status is left unchanged.
 	Finish(ctx context.Context, id, status, errText string, finishedAt time.Time, durationMs int64, details map[string]any, dropped int) error
 	MarkIfRunning(ctx context.Context, id, status string, finishedAt time.Time) error
 	List(ctx context.Context, key, status string, before *RunCursor, limit int) ([]models.RunRecord, *RunCursor, error)
@@ -89,8 +91,10 @@ func (r *runRepo) Finish(ctx context.Context, id, status, errText string, finish
 	if len(unset) > 0 {
 		upd["$unset"] = unset
 	}
+	// Only a running record is finished: a terminal status written first
+	// (abandoned by another replica, interrupted by Stop) wins.
 	//tenantscope:allow platform-level scheduler run history.
-	_, err := r.coll.UpdateOne(ctx, bson.M{"_id": id}, upd)
+	_, err := r.coll.UpdateOne(ctx, bson.M{"_id": id, "status": models.StatusRunning}, upd)
 	return err
 }
 

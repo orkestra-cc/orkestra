@@ -35,14 +35,17 @@ type Override struct {
 	Timezone string        `bson:"timezone,omitempty" json:"timezone,omitempty"`
 }
 
-// Lease marks a job as running on a replica until Until.
+// Lease marks a job as running on a replica until Until. Trigger, Attempt,
+// SlotAt and StartedAt describe the run that holds it, so a replica taking
+// over an expired lease can account for the abandoned run.
 type Lease struct {
-	Owner   string     `bson:"owner" json:"owner"`
-	RunID   string     `bson:"runId" json:"runId"`
-	Trigger string     `bson:"trigger" json:"trigger"`
-	Until   time.Time  `bson:"until" json:"until"`
-	Attempt int        `bson:"attempt" json:"attempt"`
-	SlotAt  *time.Time `bson:"slotAt,omitempty" json:"slotAt,omitempty"`
+	Owner     string     `bson:"owner" json:"owner"`
+	RunID     string     `bson:"runId" json:"runId"`
+	Trigger   string     `bson:"trigger" json:"trigger"`
+	Until     time.Time  `bson:"until" json:"until"`
+	Attempt   int        `bson:"attempt" json:"attempt"`
+	SlotAt    *time.Time `bson:"slotAt,omitempty" json:"slotAt,omitempty"`
+	StartedAt time.Time  `bson:"startedAt" json:"startedAt"`
 }
 
 // LastRun summarises the most recent finished run.

@@ -337,3 +337,103 @@ func TestDeleteOlderThan(t *testing.T) {
 		t.Fatalf("remaining: %+v", items)
 	}
 }
+
+// An operator edit that lands while a run is in flight changes the stored
+// fingerprint; the completion computed from the claim-time state must not
+// overwrite the edited nextRunAt nor schedule a retry.
+func TestCompleteRespectsConcurrentOverride(t *testing.T) {
+	r := newStates(t)
+	ctx := context.Background()
+	claim := func(key string) {
+		t.Helper()
+		if err := r.EnsureState(ctx, key, "m", "fp", tp(t0), t0); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := r.Get(ctx, key)
+		if st, err := r.Claim(ctx, key, s.Revision, models.Lease{RunID: "r-" + key, Until: t0.Add(time.Minute)}, t0); err != nil || st == nil {
+			t.Fatalf("claim %s: %v %v", key, st, err)
+		}
+	}
+	failed := func(key string) Completion {
+		return Completion{
+			LastRun:           models.LastRun{RunID: "r-" + key, Status: models.StatusFailed, StartedAt: t0, FinishedAt: t0},
+			ExpectFingerprint: "fp",
+			SetNext:           true,
+			NextRunAt:         tp(t0.Add(time.Hour)),
+			RetryAt:           tp(t0.Add(time.Minute)),
+			RetrySlotAt:       tp(t0),
+			Attempt:           1,
+		}
+	}
+
+	// 1. Unchanged fingerprint: the completion applies in full.
+	claim("same")
+	if ok, err := r.Complete(ctx, "same", "r-same", failed("same")); err != nil || !ok {
+		t.Fatalf("complete same: %v %v", ok, err)
+	}
+	got, _ := r.Get(ctx, "same")
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(t0.Add(time.Hour)) ||
+		got.RetryAt == nil || !got.RetryAt.Equal(t0.Add(time.Minute)) ||
+		got.RetrySlotAt == nil || !got.RetrySlotAt.Equal(t0) || got.Attempt != 1 {
+		t.Fatalf("same fingerprint: %+v", got)
+	}
+
+	// 2. Disabled during the run: no next slot, no retry.
+	claim("off")
+	s, _ := r.Get(ctx, "off")
+	off := false
+	if _, err := r.SetOverride(ctx, "off", s.Revision, &models.Override{Enabled: &off}, "fp-off", nil, "op", t0); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := r.Complete(ctx, "off", "r-off", failed("off")); err != nil || !ok {
+		t.Fatalf("complete off: %v %v", ok, err)
+	}
+	got, _ = r.Get(ctx, "off")
+	if got.NextRunAt != nil || got.RetryAt != nil || got.RetrySlotAt != nil || got.Attempt != 0 {
+		t.Fatalf("disabled job got scheduled: next=%v retry=%v slot=%v attempt=%d", got.NextRunAt, got.RetryAt, got.RetrySlotAt, got.Attempt)
+	}
+	if got.Lease != nil || got.LastRun == nil || got.LastRun.Status != models.StatusFailed || got.Fingerprint != "fp-off" {
+		t.Fatalf("run fields not applied: %+v", got)
+	}
+
+	// 3. Schedule changed during the run: the operator's nextRunAt survives.
+	claim("moved")
+	s, _ = r.Get(ctx, "moved")
+	edited := t0.Add(5 * time.Hour)
+	o := &models.Override{Schedule: &models.ScheduleSpec{Kind: "every", EverySeconds: 18000}}
+	if _, err := r.SetOverride(ctx, "moved", s.Revision, o, "fp-moved", &edited, "op", t0); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := r.Complete(ctx, "moved", "r-moved", failed("moved")); err != nil || !ok {
+		t.Fatalf("complete moved: %v %v", ok, err)
+	}
+	got, _ = r.Get(ctx, "moved")
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(edited) {
+		t.Fatalf("operator nextRunAt overwritten: %v", got.NextRunAt)
+	}
+	if got.RetryAt != nil || got.Attempt != 0 {
+		t.Fatalf("retry scheduled after edit: %v %d", got.RetryAt, got.Attempt)
+	}
+	if got.Revision != 3 { // claim, override, complete
+		t.Fatalf("revision = %d, want 3", got.Revision)
+	}
+}
+
+// A run record that already reached a terminal status (abandoned by another
+// replica, interrupted by Stop) is not overwritten by a late Finish.
+func TestFinishKeepsTerminalStatus(t *testing.T) {
+	db := newTestDB(t)
+	r := NewRunRepository(db.Collection(models.RunsCollection))
+	ctx := context.Background()
+	_ = r.Insert(ctx, &models.RunRecord{ID: "a", Key: "k", Status: models.StatusRunning, StartedAt: t0})
+	if err := r.MarkIfRunning(ctx, "a", models.StatusAbandoned, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Finish(ctx, "a", models.StatusSucceeded, "", t0.Add(time.Second), 1000, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	items, _, _ := r.List(ctx, "k", "", nil, 10)
+	if len(items) != 1 || items[0].Status != models.StatusAbandoned {
+		t.Fatalf("terminal status overwritten: %+v", items)
+	}
+}

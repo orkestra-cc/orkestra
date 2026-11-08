@@ -22,14 +22,23 @@ var (
 )
 
 // Completion is the state update applied when a run finishes.
+//
+// The schedule fields (NextRunAt when SetNext, RetryAt, RetrySlotAt, Attempt)
+// were computed from the state seen at claim time. They are applied only while
+// the stored fingerprint still equals ExpectFingerprint: an operator edit (or a
+// reconcile) that landed during the run changed the fingerprint, and its
+// nextRunAt must survive. On a mismatch nextRunAt is left as stored, no retry
+// is kept (retryAt and retrySlotAt are removed, attempt is reset to 0) and only
+// the run fields (lastRun, lease, request) are written.
 type Completion struct {
-	LastRun      models.LastRun
-	SetNext      bool
-	NextRunAt    *time.Time
-	RetryAt      *time.Time
-	RetrySlotAt  *time.Time
-	Attempt      int
-	ClearRequest bool
+	LastRun           models.LastRun
+	SetNext           bool
+	NextRunAt         *time.Time
+	RetryAt           *time.Time
+	RetrySlotAt       *time.Time
+	Attempt           int
+	ClearRequest      bool
+	ExpectFingerprint string
 }
 
 // StateRepository persists per-job state and implements the atomic claim.
@@ -254,27 +263,33 @@ func (r *stateRepo) Renew(ctx context.Context, key, runID string, until time.Tim
 }
 
 func (r *stateRepo) Complete(ctx context.Context, key, runID string, upd Completion) (bool, error) {
-	set := bson.M{"lastRun": upd.LastRun, "attempt": upd.Attempt}
-	unset := bson.M{"lease": ""}
-	put := func(field string, t *time.Time) {
+	same := bson.M{"$eq": bson.A{"$fingerprint", upd.ExpectFingerprint}}
+	// guarded writes value (or removes the field when nil) only while the
+	// fingerprint is unchanged; otherwise it yields `otherwise`.
+	guarded := func(t *time.Time, otherwise any) bson.M {
+		var v any = "$$REMOVE"
 		if t != nil {
-			set[field] = *t
-		} else {
-			unset[field] = ""
+			v = bson.M{"$literal": *t}
 		}
+		return bson.M{"$cond": bson.A{same, v, otherwise}}
 	}
-	put("retryAt", upd.RetryAt)
-	put("retrySlotAt", upd.RetrySlotAt)
+	set := bson.M{
+		"lastRun":     bson.M{"$literal": upd.LastRun},
+		"attempt":     bson.M{"$cond": bson.A{same, bson.M{"$literal": upd.Attempt}, 0}},
+		"retryAt":     guarded(upd.RetryAt, "$$REMOVE"),
+		"retrySlotAt": guarded(upd.RetrySlotAt, "$$REMOVE"),
+		"revision":    bson.M{"$add": bson.A{"$revision", 1}},
+	}
 	if upd.SetNext {
-		put("nextRunAt", upd.NextRunAt)
+		set["nextRunAt"] = guarded(upd.NextRunAt, "$nextRunAt")
 	}
+	unset := bson.A{"lease"}
 	if upd.ClearRequest {
-		unset["runRequestedAt"] = ""
-		unset["runRequestedBy"] = ""
+		unset = append(unset, "runRequestedAt", "runRequestedBy")
 	}
+	pipeline := bson.A{bson.M{"$set": set}, bson.M{"$unset": unset}}
 	//tenantscope:allow platform-level scheduler state.
-	res, err := r.coll.UpdateOne(ctx, bson.M{"_id": key, "lease.runId": runID},
-		bson.M{"$set": set, "$unset": unset, "$inc": bson.M{"revision": 1}})
+	res, err := r.coll.UpdateOne(ctx, bson.M{"_id": key, "lease.runId": runID}, pipeline)
 	if err != nil {
 		return false, err
 	}
