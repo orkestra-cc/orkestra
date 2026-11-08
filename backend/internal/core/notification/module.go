@@ -374,7 +374,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	}
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
-	m.pushHandler = handlers.NewPushHandler(repository.NewDeviceTokenRepository(deps.DB), m.svc)
+	m.pushHandler = handlers.NewPushHandler(repository.NewDeviceTokenRepository(deps.DB), m.svc, deps.Logger)
 
 	deps.Services.Register(module.ServiceNotificationSender, m.svc)
 	deps.Services.Register(module.ServiceMarketingOptoutManager,

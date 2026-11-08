@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -22,11 +24,31 @@ import (
 type PushHandler struct {
 	devices repository.DeviceTokenRepository
 	sender  iface.PushSender
+	logger  *slog.Logger
 	now     func() time.Time
 }
 
-func NewPushHandler(devices repository.DeviceTokenRepository, sender iface.PushSender) *PushHandler {
-	return &PushHandler{devices: devices, sender: sender, now: time.Now}
+// NewPushHandler builds the handler; a nil logger falls back to slog.Default.
+func NewPushHandler(devices repository.DeviceTokenRepository, sender iface.PushSender, logger *slog.Logger) *PushHandler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &PushHandler{devices: devices, sender: sender, logger: logger, now: time.Now}
+}
+
+// logStoreError records the cause of a device-store failure that the client
+// sees only as a generic 500. A push token that a store error quotes (a
+// duplicate-key message names the key) is cut to its first 8 characters.
+func (h *PushHandler) logStoreError(op, tier string, err error, token string) {
+	msg := err.Error()
+	if token != "" {
+		ref := token
+		if len(ref) > 8 {
+			ref = ref[:8] + "…"
+		}
+		msg = strings.ReplaceAll(msg, token, ref)
+	}
+	h.logger.Error("notification: push device store failed", "op", op, "tier", tier, "error", msg)
 }
 
 // NotificationPushDevice is the public projection of a device row. It never
@@ -97,6 +119,7 @@ func (h *PushHandler) register(tier string) func(context.Context, *NotificationP
 			Token: in.Body.Token, Platform: in.Body.Platform, AppVersion: in.Body.AppVersion,
 		}, h.now().UTC())
 		if err != nil {
+			h.logStoreError("upsert", tier, err, in.Body.Token)
 			return nil, huma.Error500InternalServerError("device registration failed")
 		}
 		return &NotificationPushDeviceOutput{Body: pushDeviceView(row)}, nil
@@ -111,6 +134,7 @@ func (h *PushHandler) unregister(tier string) func(context.Context, *Notificatio
 		}
 		found, err := h.devices.Disable(ctx, tier, user, in.DeviceID, models.DeviceDisabledLogout, h.now().UTC())
 		if err != nil {
+			h.logStoreError("disable", tier, err, "")
 			return nil, huma.Error500InternalServerError("device removal failed")
 		}
 		if !found {
@@ -119,6 +143,7 @@ func (h *PushHandler) unregister(tier string) func(context.Context, *Notificatio
 			// keeps its original reason. Only an id that never existed is 404.
 			rows, err := h.devices.ListForUser(ctx, tier, user)
 			if err != nil {
+				h.logStoreError("list", tier, err, "")
 				return nil, huma.Error500InternalServerError("device removal failed")
 			}
 			exists := false
@@ -144,6 +169,7 @@ func (h *PushHandler) list(tier string) func(context.Context, *struct{}) (*Notif
 		}
 		rows, err := h.devices.ListForUser(ctx, tier, user)
 		if err != nil {
+			h.logStoreError("list", tier, err, "")
 			return nil, huma.Error500InternalServerError("device list failed")
 		}
 		out := &NotificationPushDevicesOutput{}

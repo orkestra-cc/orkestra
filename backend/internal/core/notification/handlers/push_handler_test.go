@@ -120,7 +120,7 @@ const regBody = `{"token":"tok-AAAAAAAAAAAA","platform":"android","appVersion":"
 
 func TestPushRegister_BindsSessionAndNeverReturnsToken(t *testing.T) {
 	devs := &fakeDevices{}
-	h := pushAPI(t, NewPushHandler(devs, nil), iface.PushTierOperator, "", false)
+	h := pushAPI(t, NewPushHandler(devs, nil, nil), iface.PushTierOperator, "", false)
 	rec := do(t, h, http.MethodPut, "/v1/notifications/push/devices/dev-1", regBody, authed)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -136,7 +136,7 @@ func TestPushRegister_BindsSessionAndNeverReturnsToken(t *testing.T) {
 
 func TestPushRegister_MissingSidIs401WithCode(t *testing.T) {
 	devs := &fakeDevices{}
-	h := pushAPI(t, NewPushHandler(devs, nil), iface.PushTierOperator, "", false)
+	h := pushAPI(t, NewPushHandler(devs, nil, nil), iface.PushTierOperator, "", false)
 	rec := do(t, h, http.MethodPut, "/v1/notifications/push/devices/dev-1", regBody, map[string]string{"X-User": "u1"})
 	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "notification.push_session_missing") {
 		t.Fatalf("want 401 push_session_missing, got %d %s", rec.Code, rec.Body)
@@ -147,7 +147,7 @@ func TestPushRegister_MissingSidIs401WithCode(t *testing.T) {
 }
 
 func TestPushRegister_InputValidation(t *testing.T) {
-	h := pushAPI(t, NewPushHandler(&fakeDevices{}, nil), iface.PushTierOperator, "", false)
+	h := pushAPI(t, NewPushHandler(&fakeDevices{}, nil, nil), iface.PushTierOperator, "", false)
 	cases := map[string]struct{ path, body string }{
 		"empty token":      {"/v1/notifications/push/devices/d", `{"token":"","platform":"ios"}`},
 		"token too long":   {"/v1/notifications/push/devices/d", `{"token":"` + strings.Repeat("a", 4097) + `","platform":"ios"}`},
@@ -170,7 +170,7 @@ func TestPushRegister_InputValidation(t *testing.T) {
 
 func TestPushList_NeverContainsAToken(t *testing.T) {
 	devs := &fakeDevices{}
-	h := pushAPI(t, NewPushHandler(devs, nil), iface.PushTierOperator, "", false)
+	h := pushAPI(t, NewPushHandler(devs, nil, nil), iface.PushTierOperator, "", false)
 	do(t, h, http.MethodPut, "/v1/notifications/push/devices/dev-1", regBody, authed)
 	rec := do(t, h, http.MethodGet, "/v1/notifications/push/devices", "", authed)
 	if rec.Code != http.StatusOK {
@@ -194,7 +194,7 @@ func TestPushList_NeverContainsAToken(t *testing.T) {
 
 func TestPushRemove_DisablesWithLogoutAndUnknownIs404(t *testing.T) {
 	devs := &fakeDevices{}
-	h := pushAPI(t, NewPushHandler(devs, nil), iface.PushTierOperator, "", false)
+	h := pushAPI(t, NewPushHandler(devs, nil, nil), iface.PushTierOperator, "", false)
 	do(t, h, http.MethodPut, "/v1/notifications/push/devices/dev-1", regBody, authed)
 	if rec := do(t, h, http.MethodDelete, "/v1/notifications/push/devices/dev-1", "", authed); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
@@ -212,7 +212,7 @@ func TestPushRemove_DisablesWithLogoutAndUnknownIs404(t *testing.T) {
 // 204 and keeps its original reason; only a device that never existed is 404.
 func TestPushRemove_IsIdempotent(t *testing.T) {
 	devs := &fakeDevices{}
-	h := pushAPI(t, NewPushHandler(devs, nil), iface.PushTierOperator, "", false)
+	h := pushAPI(t, NewPushHandler(devs, nil, nil), iface.PushTierOperator, "", false)
 	do(t, h, http.MethodPut, "/v1/notifications/push/devices/dev-1", regBody, authed)
 	devs.rows[0].Active, devs.rows[0].DisabledReason = false, models.DeviceDisabledFCMUnregistered
 	for i := 0; i < 2; i++ {
@@ -229,7 +229,7 @@ func TestPushRemove_IsIdempotent(t *testing.T) {
 }
 
 func TestPushRoutes_UnauthenticatedIs401(t *testing.T) {
-	h := pushAPI(t, NewPushHandler(&fakeDevices{}, nil), iface.PushTierOperator, "", false)
+	h := pushAPI(t, NewPushHandler(&fakeDevices{}, nil, nil), iface.PushTierOperator, "", false)
 	if rec := do(t, h, http.MethodGet, "/v1/notifications/push/devices", "", nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", rec.Code)
 	}
@@ -239,7 +239,7 @@ func TestPushRoutes_UnauthenticatedIs401(t *testing.T) {
 // only client rows, and a client body cannot choose another tier.
 func TestPushRoutes_ClientTierMount(t *testing.T) {
 	devs := &fakeDevices{}
-	ph := NewPushHandler(devs, nil)
+	ph := NewPushHandler(devs, nil, nil)
 	op := pushAPI(t, ph, iface.PushTierOperator, "", false)
 	cl := pushAPI(t, ph, iface.PushTierClient, "client-", false)
 	if rec := do(t, cl, http.MethodPut, "/v1/notifications/push/devices/dev-1", `{"token":"t-c","platform":"ios","tier":"operator"}`, authed); rec.Code != http.StatusUnprocessableEntity {
@@ -271,7 +271,7 @@ func TestPushRoutes_ClientTierMount(t *testing.T) {
 
 func TestPushTest_DefaultsAndResult(t *testing.T) {
 	s := &fakeSender{res: &iface.PushResult{Users: []iface.PushUserResult{{UserUUID: "u9", Status: iface.PushStatusDelivered, Attempted: 1, Delivered: 1}}}}
-	h := pushAPI(t, NewPushHandler(nil, s), "", "", true)
+	h := pushAPI(t, NewPushHandler(nil, s, nil), "", "", true)
 	rec := do(t, h, http.MethodPost, "/v1/notifications/push/test", `{"tier":"client","userUuid":"u9"}`, authed)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -300,7 +300,7 @@ func TestPushTest_ErrorMapping(t *testing.T) {
 		{iface.ErrPushUnavailable, http.StatusServiceUnavailable, "notification.push_unavailable"},
 	}
 	for _, c := range cases {
-		h := pushAPI(t, NewPushHandler(nil, &fakeSender{err: c.err}), "", "", true)
+		h := pushAPI(t, NewPushHandler(nil, &fakeSender{err: c.err}, nil), "", "", true)
 		rec := do(t, h, http.MethodPost, "/v1/notifications/push/test", `{"tier":"x","userUuid":"u"}`, authed)
 		if rec.Code != c.status || !strings.Contains(rec.Body.String(), c.code) {
 			t.Errorf("%v: want %d %s, got %d %s", c.err, c.status, c.code, rec.Code, rec.Body)
