@@ -12,6 +12,7 @@ import (
 	"github.com/orkestra/backend/internal/core/notification/repository"
 	"github.com/orkestra/backend/internal/core/notification/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/jobs"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
@@ -21,6 +22,7 @@ type NotificationModule struct {
 	drivers     *services.DriverRegistry
 	pushDrivers *services.PushDriverFactory // per-send push driver
 	pushHandler *handlers.PushHandler       // device registry + admin test push
+	pushCleanup *services.PushCleanup       // push_tokens_cleanup job body
 	handler     *handlers.NotificationHandler
 	reconciler  *services.OptoutReconciler
 
@@ -350,21 +352,26 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	// Auth inits after notification, so the per-tier session readers are
 	// looked up lazily on every send.
 	registry := deps.Services
+	sessionReader := func(tier string) iface.SessionActivityReader {
+		key := module.ServiceAuthService
+		if tier == iface.PushTierClient {
+			key = module.ServiceClientAuthService
+		}
+		r, _ := registry.Get(key).(iface.SessionActivityReader)
+		return r
+	}
 	m.svc.SetPush(services.NewPushService(services.PushDeps{
-		LogRepo: logRepo,
-		Prefs:   m.svc.PreferenceService(),
-		Devices: repository.NewDeviceTokenRepository(deps.DB),
-		Drivers: m.pushDrivers,
-		Sessions: func(tier string) iface.SessionActivityReader {
-			key := module.ServiceAuthService
-			if tier == iface.PushTierClient {
-				key = module.ServiceClientAuthService
-			}
-			r, _ := registry.Get(key).(iface.SessionActivityReader)
-			return r
-		},
-		Logger: deps.Logger,
+		LogRepo:  logRepo,
+		Prefs:    m.svc.PreferenceService(),
+		Devices:  repository.NewDeviceTokenRepository(deps.DB),
+		Drivers:  m.pushDrivers,
+		Sessions: sessionReader,
+		Logger:   deps.Logger,
 	}))
+	m.pushCleanup = &services.PushCleanup{
+		Devices:  repository.NewDeviceTokenRepository(deps.DB),
+		Sessions: sessionReader,
+	}
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
 	m.pushHandler = handlers.NewPushHandler(repository.NewDeviceTokenRepository(deps.DB), m.svc)
@@ -375,6 +382,27 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServiceNotificationTemplateSeeder,
 		module.NotificationTemplateSeeder(m.svc.TemplateService()))
 	return nil
+}
+
+// Jobs declares the daily push-token cleanup (jobs framework, key
+// notification.push_tokens_cleanup).
+func (m *NotificationModule) Jobs() []jobs.Definition {
+	return []jobs.Definition{{
+		Name:        "push_tokens_cleanup",
+		Title:       "Clean up push device tokens",
+		Description: "Disables push tokens whose auth session ended or that were not seen for 60 days, and deletes tokens disabled for more than 90 days. Does nothing when the session readers are unavailable.",
+		Schedule:    jobs.Every(24 * time.Hour),
+		Timeout:     15 * time.Minute,
+		Run:         m.runPushCleanup,
+	}}
+}
+
+func (m *NotificationModule) runPushCleanup(ctx context.Context, run *jobs.Run) error {
+	res, err := m.pushCleanup.Run(ctx)
+	run.Detail("sessionEnded", res.SessionEnded)
+	run.Detail("stale", res.Stale)
+	run.Detail("deleted", res.Deleted)
+	return err
 }
 
 func (m *NotificationModule) Start(ctx context.Context) error {
