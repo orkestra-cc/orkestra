@@ -105,6 +105,11 @@ func parseCronItem(item string, f cronField) (uint64, error) {
 		if err != nil || n < 1 {
 			return 0, fmt.Errorf("invalid step %q", stepPart)
 		}
+		// A step beyond the field's span selects one value at most, and a
+		// huge one would overflow the loop below.
+		if n > f.max-f.min {
+			return 0, fmt.Errorf("step %d is larger than the range %d-%d", n, f.min, f.max)
+		}
 		step = n
 	}
 	var lo, hi int

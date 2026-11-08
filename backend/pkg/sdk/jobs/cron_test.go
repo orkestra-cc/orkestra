@@ -32,6 +32,14 @@ func TestParseCron_Invalid(t *testing.T) {
 		{"* * 0 * *", "day-of-month"},
 		{"* * * * 8", "day-of-week"},
 		{"@reboot", "@reboot"},
+		// a step larger than the field's range is refused, naming the field
+		{"1/9223372036854775807 * * * *", "minute field"},
+		{"5/9223372036854775807 * * * *", "step 9223372036854775807 is larger than the range 0-59"},
+		{"*/61 * * * *", "minute field"},
+		{"* */24 * * *", "hour field"},
+		{"* * */31 * *", "day-of-month field"},
+		{"* * * */12 *", "month field"},
+		{"* * * * */8", "day-of-week field"},
 	}
 	for _, tc := range cases {
 		_, err := ParseCron(tc.expr)
