@@ -208,6 +208,26 @@ func TestPushRemove_DisablesWithLogoutAndUnknownIs404(t *testing.T) {
 	}
 }
 
+// Mobile logout retries must not see an error: an already-disabled row is a
+// 204 and keeps its original reason; only a device that never existed is 404.
+func TestPushRemove_IsIdempotent(t *testing.T) {
+	devs := &fakeDevices{}
+	h := pushAPI(t, NewPushHandler(devs, nil), iface.PushTierOperator, "", false)
+	do(t, h, http.MethodPut, "/v1/notifications/push/devices/dev-1", regBody, authed)
+	devs.rows[0].Active, devs.rows[0].DisabledReason = false, models.DeviceDisabledFCMUnregistered
+	for i := 0; i < 2; i++ {
+		if rec := do(t, h, http.MethodDelete, "/v1/notifications/push/devices/dev-1", "", authed); rec.Code != http.StatusNoContent {
+			t.Fatalf("delete #%d of a disabled row: %d %s", i, rec.Code, rec.Body)
+		}
+	}
+	if devs.rows[0].Active || devs.rows[0].DisabledReason != models.DeviceDisabledFCMUnregistered {
+		t.Fatalf("the original reason must survive: %+v", devs.rows[0])
+	}
+	if rec := do(t, h, http.MethodDelete, "/v1/notifications/push/devices/never", "", authed); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown device: %d", rec.Code)
+	}
+}
+
 func TestPushRoutes_UnauthenticatedIs401(t *testing.T) {
 	h := pushAPI(t, NewPushHandler(&fakeDevices{}, nil), iface.PushTierOperator, "", false)
 	if rec := do(t, h, http.MethodGet, "/v1/notifications/push/devices", "", nil); rec.Code != http.StatusUnauthorized {

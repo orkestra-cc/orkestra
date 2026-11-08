@@ -114,7 +114,23 @@ func (h *PushHandler) unregister(tier string) func(context.Context, *Notificatio
 			return nil, huma.Error500InternalServerError("device removal failed")
 		}
 		if !found {
-			return nil, errcode.NotFound(errcode.NotificationPushDeviceNotFound, "No active push device has that id.")
+			// Idempotent: a row that is already disabled (a retried logout,
+			// or one FCM or the cleanup retired first) is a success and
+			// keeps its original reason. Only an id that never existed is 404.
+			rows, err := h.devices.ListForUser(ctx, tier, user)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("device removal failed")
+			}
+			exists := false
+			for _, r := range rows {
+				if r.DeviceID == in.DeviceID {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				return nil, errcode.NotFound(errcode.NotificationPushDeviceNotFound, "No push device has that id.")
+			}
 		}
 		return &NotificationPushNoContent{}, nil
 	}
@@ -153,7 +169,8 @@ func (h *PushHandler) RegisterDeviceRoutes(api huma.API, tier, opPrefix string) 
 	huma.Register(api, huma.Operation{
 		OperationID: opPrefix + "notifications-push-remove-device", Method: http.MethodDelete,
 		Path: "/v1/notifications/push/devices/{deviceId}", Summary: "Unregister a push device",
-		Tags: tags, Security: sec, DefaultStatus: http.StatusNoContent,
+		Description: "Idempotent: 204 whenever the device row exists for this user, including one already disabled (its original reason is kept); 404 only when the id was never registered.",
+		Tags:        tags, Security: sec, DefaultStatus: http.StatusNoContent,
 	}, h.unregister(tier))
 	huma.Register(api, huma.Operation{
 		OperationID: opPrefix + "notifications-push-list-devices", Method: http.MethodGet,
