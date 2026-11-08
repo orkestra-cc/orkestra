@@ -683,6 +683,9 @@ func (r *ModuleRegistry) RetryInit(name string) error {
 }
 
 // StopAll shuts down all started modules in reverse initialization order.
+// Like StopModule, it marks each module not started; it does so just before
+// calling its Stop, so IsStarted already reports false while the module
+// shuts down and a consumer (the jobs scheduler) stops using it.
 func (r *ModuleRegistry) StopAll(ctx context.Context) {
 	r.mu.RLock()
 	// Build a list of started modules in init order, then reverse.
@@ -696,6 +699,9 @@ func (r *ModuleRegistry) StopAll(ctx context.Context) {
 	r.mu.RUnlock()
 
 	for _, m := range toStop {
+		r.mu.Lock()
+		delete(r.started, m.Name())
+		r.mu.Unlock()
 		if err := StopModule(ctx, m); err != nil {
 			r.logger.Error(fmt.Sprintf("Module %s stop failed", m.Name()),
 				slog.String("error", err.Error()))
