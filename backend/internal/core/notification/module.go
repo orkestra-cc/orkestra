@@ -146,6 +146,24 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 			// itself idempotent, not just the stored state.
 			{OrderedKeys: []module.IndexKey{{Field: "address", Direction: 1}}, Unique: true},
 		}},
+		{Name: models.DeviceTokensCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tier", Direction: 1},
+				{Field: "userUuid", Direction: 1},
+				{Field: "deviceId", Direction: 1},
+			}, Unique: true},
+			// A push token belongs to the device: at most one ACTIVE row per
+			// token (Upsert disables the previous owner's row first).
+			{Keys: map[string]int{"token": 1}, Unique: true, PartialFilter: map[string]any{"active": true}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tier", Direction: 1},
+				{Field: "userUuid", Direction: 1},
+				{Field: "active", Direction: 1},
+			}},
+			{Keys: map[string]int{"lastSeenAt": 1}},
+			{Keys: map[string]int{"disabledAt": 1}, Sparse: true},
+		}},
 	}
 }
 

@@ -22,6 +22,10 @@ const (
 	// deliberately separate from NotificationSuppressionsCollection, which
 	// blocks every notification (transactional included).
 	NotificationMarketingOptoutsCollection = "notification_marketing_optouts"
+
+	// DeviceTokensCollection holds push device tokens: one row per
+	// tier+user+device, bound to the auth session id.
+	DeviceTokensCollection = "notification_device_tokens"
 )
 
 // Notification categories used for preference lookup and template IDs.
