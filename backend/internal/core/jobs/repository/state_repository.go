@@ -29,9 +29,10 @@ var (
 // reconcile) that landed during the run changed the fingerprint, and its
 // nextRunAt must survive. On a mismatch nextRunAt is left as stored, no retry
 // is kept (retryAt and retrySlotAt are removed, attempt is reset to 0) and only
-// the run fields (lastRun, lease, request) are written.
+// the run fields (lastRun, lease, request) are written. A nil LastRun leaves
+// lastRun as stored (a claim that only released a stale lease).
 type Completion struct {
-	LastRun           models.LastRun
+	LastRun           *models.LastRun
 	SetNext           bool
 	NextRunAt         *time.Time
 	RetryAt           *time.Time
@@ -49,7 +50,10 @@ type StateRepository interface {
 	Reschedule(ctx context.Context, key string, revision int64, fingerprint string, nextRunAt *time.Time, now time.Time) (bool, error)
 	SetOverride(ctx context.Context, key string, revision int64, o *models.Override, fingerprint string, nextRunAt *time.Time, by string, now time.Time) (*models.State, error)
 	RequestRun(ctx context.Context, key, by string, now time.Time) (*models.State, error)
-	Due(ctx context.Context, now time.Time, limit int) ([]models.State, error)
+	// Due returns, among keys, the states whose lease is free and that are
+	// due (nextRunAt or retryAt reached, run requested) or carry an expired
+	// lease of a run that never completed.
+	Due(ctx context.Context, now time.Time, keys []string, limit int) ([]models.State, error)
 	Claim(ctx context.Context, key string, revision int64, lease models.Lease, now time.Time) (*models.State, error)
 	Renew(ctx context.Context, key, runID string, until time.Time) (bool, error)
 	Complete(ctx context.Context, key, runID string, upd Completion) (bool, error)
@@ -208,13 +212,19 @@ func (r *stateRepo) RequestRun(ctx context.Context, key, by string, now time.Tim
 	return nil, ErrRevisionConflict // lost a race between filter and re-read
 }
 
-func (r *stateRepo) Due(ctx context.Context, now time.Time, limit int) ([]models.State, error) {
+func (r *stateRepo) Due(ctx context.Context, now time.Time, keys []string, limit int) ([]models.State, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
 	filter := bson.M{"$and": bson.A{
+		bson.M{"_id": bson.M{"$in": keys}},
 		leaseFree(now),
 		bson.M{"$or": bson.A{
 			bson.M{"nextRunAt": bson.M{"$lte": now}},
 			bson.M{"retryAt": bson.M{"$lte": now}},
 			bson.M{"runRequestedAt": bson.M{"$ne": nil}},
+			// with leaseFree: an expired lease whose run never completed
+			bson.M{"lease.runId": bson.M{"$exists": true}},
 		}},
 	}}
 	opts := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}})
@@ -274,11 +284,13 @@ func (r *stateRepo) Complete(ctx context.Context, key, runID string, upd Complet
 		return bson.M{"$cond": bson.A{same, v, otherwise}}
 	}
 	set := bson.M{
-		"lastRun":     bson.M{"$literal": upd.LastRun},
 		"attempt":     bson.M{"$cond": bson.A{same, bson.M{"$literal": upd.Attempt}, 0}},
 		"retryAt":     guarded(upd.RetryAt, "$$REMOVE"),
 		"retrySlotAt": guarded(upd.RetrySlotAt, "$$REMOVE"),
 		"revision":    bson.M{"$add": bson.A{"$revision", 1}},
+	}
+	if upd.LastRun != nil {
+		set["lastRun"] = bson.M{"$literal": *upd.LastRun}
 	}
 	if upd.SetNext {
 		set["nextRunAt"] = guarded(upd.NextRunAt, "$nextRunAt")

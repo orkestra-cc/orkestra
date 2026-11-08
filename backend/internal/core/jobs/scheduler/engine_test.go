@@ -401,16 +401,47 @@ func TestLeaseLossCancelsRun(t *testing.T) {
 		t.Fatal("run ctx not cancelled on lease loss")
 	}
 	r := h.runs.all("m.a")[0]
-	if r.Status != models.StatusFailed && r.Status != models.StatusInterrupted {
-		t.Fatalf("status = %s", r.Status)
+	if r.Status != models.StatusFailed || !strings.HasPrefix(r.Error, "lease lost: ") {
+		t.Fatalf("record: %+v", r)
 	}
 	if h.metrics.lostCount("m.a") != 1 {
 		t.Fatalf("LeaseLost = %d, want 1", h.metrics.lostCount("m.a"))
 	}
 }
 
-func TestRenewErrorCancelsRun(t *testing.T) {
-	h := newHarness(t, Options{RenewInterval: 10 * time.Millisecond}, def("a", func(ctx context.Context, _ *jobs.Run) error {
+// Amended J8: a renew error is transient while the lease has time left.
+func TestRenewTransientErrorContinues(t *testing.T) {
+	release, closeRelease := releaser(t)
+	var cancelled atomic.Bool
+	h := newHarness(t, Options{RenewInterval: 5 * time.Millisecond}, def("a", func(ctx context.Context, _ *jobs.Run) error {
+		select {
+		case <-ctx.Done():
+			cancelled.Store(true)
+			return ctx.Err()
+		case <-release:
+			return nil
+		}
+	}))
+	var renews atomic.Int32
+	h.states.renew = func() (bool, error) {
+		if renews.Add(1) == 1 {
+			return false, errors.New("mongo blip")
+		}
+		return true, nil
+	}
+	h.clock.Add(time.Hour)
+	h.e.Tick(context.Background())
+	waitFor(t, func() bool { return renews.Load() >= 3 })
+	closeRelease()
+	h.e.drain()
+	if cancelled.Load() || h.metrics.lostCount("m.a") != 0 || h.runs.all("m.a")[0].Status != models.StatusSucceeded {
+		t.Fatalf("transient renew error cancelled the run: cancelled=%v lost=%d rec=%+v", cancelled.Load(), h.metrics.lostCount("m.a"), h.runs.all("m.a")[0])
+	}
+}
+
+// Renew errors that last until the lease would have expired cancel the run.
+func TestRenewErrorsUntilExpiryCancel(t *testing.T) {
+	h := newHarness(t, Options{RenewInterval: 5 * time.Millisecond}, def("a", func(ctx context.Context, _ *jobs.Run) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -418,11 +449,18 @@ func TestRenewErrorCancelsRun(t *testing.T) {
 			return nil
 		}
 	}))
-	h.states.renew = func() (bool, error) { return false, errors.New("mongo down") }
+	var renews atomic.Int32
+	h.states.renew = func() (bool, error) { renews.Add(1); return false, errors.New("mongo down") }
 	h.clock.Add(time.Hour)
-	h.tick(t)
+	h.e.Tick(context.Background())
+	waitFor(t, func() bool { return renews.Load() >= 3 })
+	if h.metrics.lostCount("m.a") != 0 {
+		t.Fatal("cancelled while the lease still had time")
+	}
+	h.clock.Add(3 * time.Minute) // past the 2m lease
+	h.e.drain()
 	if h.metrics.lostCount("m.a") != 1 || h.runs.all("m.a")[0].Status != models.StatusFailed {
-		t.Fatalf("renew error: lost=%d rec=%+v", h.metrics.lostCount("m.a"), h.runs.all("m.a")[0])
+		t.Fatalf("renew errors until expiry: lost=%d rec=%+v", h.metrics.lostCount("m.a"), h.runs.all("m.a")[0])
 	}
 }
 
@@ -818,5 +856,143 @@ func TestNoLocalDoubleRun(t *testing.T) {
 	}
 	if st := h.states.get("m.a"); st.LastRun == nil || st.LastRun.Status != models.StatusSucceeded {
 		t.Fatalf("lastRun: %+v", st.LastRun)
+	}
+}
+
+// Fix 1: a dead replica's run on a job disabled meanwhile is still booked
+// abandoned after the TTL, and nothing executes.
+func TestAbandonedRunOfDisabledJobBooked(t *testing.T) {
+	release, closeRelease := releaser(t)
+	var calls atomic.Int32
+	h := newHarness(t, Options{RenewInterval: time.Hour}, def("a", func(context.Context, *jobs.Run) error {
+		calls.Add(1)
+		<-release // replica A is dead: never renews, never completes
+		return nil
+	}))
+	h.clock.Add(time.Hour)
+	if n := h.e.Tick(context.Background()); n != 1 {
+		t.Fatalf("A launched %d", n)
+	}
+	waitFor(t, func() bool { return calls.Load() == 1 })
+	oldID := h.runs.all("m.a")[0].ID
+	st := h.states.get("m.a")
+	off := false
+	o := &models.Override{Enabled: &off}
+	eff, _ := EffectiveOf(h.e.cat.List()[0], &models.State{Override: o}, nil)
+	if _, err := h.states.SetOverride(context.Background(), "m.a", st.Revision, o, eff.Fingerprint, nil, "op", h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	b := New(h.e.cat, h.states, h.runs, Options{Replica: "b", Clock: h.clock, Metrics: h.metrics})
+	h.clock.Add(3 * time.Minute)
+	if n := b.Tick(context.Background()); n != 0 {
+		t.Fatalf("B launched %d for a disabled job", n)
+	}
+	b.drain()
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d", calls.Load())
+	}
+	if r := h.runs.byID(oldID); r.Status != models.StatusAbandoned {
+		t.Fatalf("dead run not booked: %+v", r)
+	}
+	st = h.states.get("m.a")
+	if st.Lease != nil || st.NextRunAt != nil || st.RetryAt != nil || st.LastRun == nil || st.LastRun.Status != models.StatusAbandoned {
+		t.Fatalf("state: %+v", st)
+	}
+	if n := b.Tick(context.Background()); n != 0 {
+		t.Fatal("booked state still due")
+	}
+	closeRelease()
+	h.e.drain()
+}
+
+// A leftover lease of a claim that executed nothing (no trigger) is released
+// without booking a phantom abandoned run.
+func TestBookkeepingLeaseReleasedQuietly(t *testing.T) {
+	h := newHarness(t, Options{}, def("a", ok))
+	st := h.states.get("m.a")
+	prev := &models.LastRun{RunID: "prev", Status: models.StatusSucceeded}
+	st.LastRun = prev
+	st.Lease = &models.Lease{Owner: "dead", RunID: "bk", Until: t0.Add(time.Minute)}
+	h.states.put(st)
+	h.clock.Add(5 * time.Minute)
+	if n := h.tick(t); n != 0 {
+		t.Fatalf("launched %d", n)
+	}
+	st = h.states.get("m.a")
+	if st.Lease != nil || st.LastRun == nil || st.LastRun.RunID != "prev" {
+		t.Fatalf("state: lease=%+v lastRun=%+v", st.Lease, st.LastRun)
+	}
+	if h.metrics.finishedCount("m.a", models.StatusAbandoned) != 0 {
+		t.Fatal("phantom abandoned run counted")
+	}
+}
+
+// Fix 2: unclaimable due states never crowd out a claimable one.
+func TestDueNotStarved(t *testing.T) {
+	h := newHarness(t, Options{}, def("z", ok))
+	for i := 0; i < 150; i++ {
+		h.states.put(models.State{Key: fmt.Sprintf("gone.j%03d", i), Module: "gone", Fingerprint: "x", NextRunAt: tp(t0)})
+	}
+	cat := h.e.cat
+	if err := cat.Register("stopped", []jobs.Definition{def("s", ok)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.e.opt.ModuleStarted = func(m string) bool { return m != "stopped" }
+	h.clock.Add(time.Hour)
+	if n := h.tick(t); n != 1 {
+		t.Fatalf("launched %d, want the one claimable job", n)
+	}
+	if len(h.runs.all("m.z")) != 1 || len(h.runs.all("stopped.s")) != 0 {
+		t.Fatal("wrong job ran")
+	}
+}
+
+// Fix 3: a failing outcome write is retried while the lease is held; the run
+// is booked as it ended and no lease loss is counted.
+func TestCompleteRetried(t *testing.T) {
+	h := newHarness(t, Options{}, def("a", ok))
+	h.clock.Add(time.Hour)
+	h.states.mu.Lock()
+	h.states.completeErrs = 2
+	h.states.mu.Unlock()
+	if n := h.tick(t); n != 1 {
+		t.Fatalf("launched %d", n)
+	}
+	st := h.states.get("m.a")
+	if st.Lease != nil || st.LastRun == nil || st.LastRun.Status != models.StatusSucceeded || st.RetryAt != nil || st.Attempt != 0 {
+		t.Fatalf("state: %+v", st)
+	}
+	if !st.NextRunAt.Equal(h.clock.Now().Add(time.Hour)) {
+		t.Fatalf("next = %v", st.NextRunAt)
+	}
+	if h.metrics.lostCount("m.a") != 0 {
+		t.Fatal("LeaseLost counted for a write failure")
+	}
+	if h.states.completes != 3 {
+		t.Fatalf("Complete calls = %d, want 3", h.states.completes)
+	}
+}
+
+// When every attempt fails, the lease is left to expire and no lease loss is
+// counted.
+func TestCompleteGivesUp(t *testing.T) {
+	h := newHarness(t, Options{}, def("a", ok))
+	h.clock.Add(time.Hour)
+	h.states.mu.Lock()
+	h.states.completeErrs = 10
+	h.states.mu.Unlock()
+	h.tick(t)
+	st := h.states.get("m.a")
+	if st.Lease == nil {
+		t.Fatal("lease released although the outcome was not written")
+	}
+	if h.metrics.lostCount("m.a") != 0 {
+		t.Fatal("LeaseLost counted for a write failure")
+	}
+	if h.runs.all("m.a")[0].Status != models.StatusSucceeded {
+		t.Fatal("run record not finished")
 	}
 }

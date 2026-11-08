@@ -40,6 +40,9 @@ type fakeStates struct {
 	// renew, when set, decides the outcome of every Renew call.
 	renew       func() (bool, error)
 	reschedules int
+	// completeErrs makes the next n Complete calls fail.
+	completeErrs int
+	completes    int
 }
 
 func newFakeStates() *fakeStates { return &fakeStates{docs: map[string]models.State{}} }
@@ -152,19 +155,24 @@ func (f *fakeStates) RequestRun(_ context.Context, key, by string, now time.Time
 	return &s, nil
 }
 
-func (f *fakeStates) Due(_ context.Context, now time.Time, limit int) ([]models.State, error) {
+func (f *fakeStates) Due(_ context.Context, now time.Time, keys []string, limit int) ([]models.State, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.dueErr != nil {
 		return nil, f.dueErr
 	}
+	want := map[string]bool{}
+	for _, k := range keys {
+		want[k] = true
+	}
 	var out []models.State
 	for _, s := range f.docs {
-		if !leaseFree(s, now) {
+		if !want[s.Key] || !leaseFree(s, now) {
 			continue
 		}
 		due := (s.NextRunAt != nil && !s.NextRunAt.After(now)) ||
-			(s.RetryAt != nil && !s.RetryAt.After(now)) || s.RunRequestedAt != nil
+			(s.RetryAt != nil && !s.RetryAt.After(now)) || s.RunRequestedAt != nil ||
+			(s.Lease != nil && s.Lease.RunID != "")
 		if due {
 			out = append(out, s)
 		}
@@ -214,12 +222,19 @@ func (f *fakeStates) Renew(_ context.Context, key, runID string, until time.Time
 func (f *fakeStates) Complete(_ context.Context, key, runID string, upd repository.Completion) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.completes++
+	if f.completeErrs > 0 {
+		f.completeErrs--
+		return false, errors.New("mongo unavailable")
+	}
 	s, ok := f.docs[key]
 	if !ok || s.Lease == nil || s.Lease.RunID != runID {
 		return false, nil
 	}
-	lr := upd.LastRun
-	s.LastRun = &lr
+	if upd.LastRun != nil {
+		lr := *upd.LastRun
+		s.LastRun = &lr
+	}
 	s.Lease = nil
 	if s.Fingerprint == upd.ExpectFingerprint {
 		s.Attempt, s.RetryAt, s.RetrySlotAt = upd.Attempt, upd.RetryAt, upd.RetrySlotAt

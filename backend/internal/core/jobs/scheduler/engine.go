@@ -65,6 +65,10 @@ const (
 	unhealthyAfter = 5 * time.Minute
 	maxErrorBytes  = 2048
 	dueBatch       = 100
+	// A failed outcome write is retried this many times in all, waiting
+	// completeBackoff, then twice that, between attempts.
+	completeAttempts = 3
+	completeBackoff  = 100 * time.Millisecond
 )
 
 var (
@@ -214,6 +218,11 @@ func (e *Engine) defaultLocation() *time.Location {
 // reschedules every state whose fingerprint no longer matches its effective
 // schedule (a code default changed, or the module timezone). States with an
 // invalid override are logged and left alone.
+//
+// A fingerprint change reschedules from now: the next due time is computed
+// strictly after now, so a slot that was already due under the old schedule
+// is skipped, not run. Tick applies the same rule to a due state that
+// drifted.
 func (e *Engine) Reconcile(ctx context.Context) error {
 	now := e.now()
 	loc := e.defaultLocation()
@@ -289,8 +298,12 @@ func (e *Engine) Tick(ctx context.Context) int {
 	if stopping || free <= 0 {
 		return 0
 	}
+	keys := e.claimableKeys()
+	if len(keys) == 0 {
+		return 0
+	}
 	now := e.now()
-	due, err := e.states.Due(ctx, now, dueBatch)
+	due, err := e.states.Due(ctx, now, keys, dueBatch)
 	e.observe(err)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
@@ -343,6 +356,21 @@ func (e *Engine) Tick(ctx context.Context) int {
 	return launched
 }
 
+// claimableKeys lists the catalog keys this replica may claim: the job's
+// module is started and the job is not running here. Due is restricted to
+// them, so states nobody can claim (removed jobs, stopped modules) never
+// crowd claimable ones out of the batch.
+func (e *Engine) claimableKeys() []string {
+	entries := e.cat.List()
+	keys := make([]string, 0, len(entries))
+	for _, en := range entries {
+		if e.opt.ModuleStarted(en.Module) && !e.isRunning(en.Key) {
+			keys = append(keys, en.Key)
+		}
+	}
+	return keys
+}
+
 func (e *Engine) isRunning(key string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -375,7 +403,9 @@ func (e *Engine) decide(entry jobs.Entry, eff Effective, st models.State, now ti
 		l := *st.Lease
 		p.abandoned = &l
 		// A lease without a trigger belonged to a claim that executed
-		// nothing; there is no attempt to account for.
+		// nothing; there is no attempt to account for. The retry backoff
+		// counts from l.Until, the earliest moment a takeover is legal (the
+		// run was last known alive at its last renew, l.Until - LeaseTTL).
 		if l.Trigger != "" {
 			o := e.outcome(entry.Def, eff, p.base, jobs.Trigger(l.Trigger), l.Attempt, l.SlotAt, true, false, l.Until, now)
 			if o.setNext {
@@ -480,7 +510,9 @@ func (e *Engine) claimAndStart(ctx context.Context, entry jobs.Entry, eff Effect
 		return false // another replica won, or the state moved
 	}
 	log := e.log.With("job_key", entry.Key, "run_id", runID, "trigger", string(p.trigger), "attempt", p.attempt)
-	if p.abandoned != nil {
+	// A leftover lease without a trigger ran nothing: release it quietly.
+	deadRun := p.abandoned != nil && p.abandoned.Trigger != ""
+	if deadRun {
 		e.markAbandoned(entry.Key, p.abandoned, now)
 	}
 	switch {
@@ -488,8 +520,10 @@ func (e *Engine) claimAndStart(ctx context.Context, entry jobs.Entry, eff Effect
 		c := e.completion(entry, eff, p, false, false, now)
 		c.SetNext, c.NextRunAt = true, p.base.NextRunAt
 		c.RetryAt, c.RetrySlotAt, c.Attempt = p.base.RetryAt, p.base.RetrySlotAt, p.base.Attempt
-		c.LastRun = models.LastRun{RunID: p.abandoned.RunID, Status: models.StatusAbandoned, StartedAt: p.abandoned.StartedAt, FinishedAt: now}
-		e.complete(log, entry.Key, runID, c)
+		if deadRun {
+			c.LastRun = &models.LastRun{RunID: p.abandoned.RunID, Status: models.StatusAbandoned, StartedAt: p.abandoned.StartedAt, FinishedAt: now}
+		}
+		_, _ = e.complete(log, entry.Key, runID, c)
 		return false
 	case p.skip:
 		e.skip(log, entry, eff, p, runID, now)
@@ -560,39 +594,52 @@ func (e *Engine) skip(log *slog.Logger, entry jobs.Entry, eff Effective, p plan,
 	}
 	cancel()
 	c := e.completion(entry, eff, p, false, false, now)
-	c.LastRun = models.LastRun{RunID: runID, Status: models.StatusSkipped, StartedAt: now, FinishedAt: now}
-	e.complete(log, entry.Key, runID, c)
+	c.LastRun = &models.LastRun{RunID: runID, Status: models.StatusSkipped, StartedAt: now, FinishedAt: now}
+	_, _ = e.complete(log, entry.Key, runID, c)
 	e.opt.Metrics.RunFinished(entry.Key, models.StatusSkipped, 0)
 	log.Info("missed job run skipped")
 }
 
-// complete writes c with a fresh timeout and reports whether the lease was
-// still ours.
-func (e *Engine) complete(log *slog.Logger, key, runID string, c repository.Completion) bool {
-	wctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-	defer cancel()
-	ok, err := e.states.Complete(wctx, key, runID, c)
-	if err != nil {
-		log.Error("jobs: writing the run outcome failed", "error", err)
-		return false
+// complete writes c, each attempt with a fresh timeout. A write error is
+// retried (the caller still holds, and keeps renewing, the lease); ok=false
+// with a nil error means the lease is no longer ours. When every attempt
+// fails, the error is returned and the lease is left to expire.
+func (e *Engine) complete(log *slog.Logger, key, runID string, c repository.Completion) (bool, error) {
+	var err error
+	wait := completeBackoff
+	for attempt := 1; attempt <= completeAttempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(wait)
+			wait *= 2
+		}
+		wctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+		var ok bool
+		ok, err = e.states.Complete(wctx, key, runID, c)
+		cancel()
+		if err != nil {
+			log.Warn("jobs: writing the run outcome failed", "write_attempt", attempt, "error", err)
+			continue
+		}
+		if !ok {
+			log.Warn("jobs: lease lost before the run outcome was written", "reason", "lease_lost")
+			return false, nil
+		}
+		if c.SetNext {
+			e.noteWake(c.NextRunAt)
+		}
+		e.noteWake(c.RetryAt)
+		return true, nil
 	}
-	if !ok {
-		log.Warn("jobs: lease lost before the run outcome was written")
-		return false
-	}
-	if c.SetNext {
-		e.noteWake(c.NextRunAt)
-	}
-	e.noteWake(c.RetryAt)
-	return true
+	log.Error("jobs: run outcome not written; the lease is left to expire", "reason", "outcome_write_failed", "error", err)
+	return false, err
 }
 
 func (e *Engine) execute(ctx context.Context, h *runHandle, stopTimeout context.CancelFunc) {
 	defer e.wg.Done()
 	defer stopTimeout()
 	go e.renew(h)
+	defer h.endRenew() // the lease is renewed until the bookkeeping is done
 	panicked, err := e.invoke(ctx, h)
-	h.endRenew()
 	if !h.finalized.CompareAndSwap(false, true) {
 		return // Stop already booked this run as interrupted
 	}
@@ -655,8 +702,9 @@ func (e *Engine) book(h *runHandle, status, errText string, permanent bool) {
 	}
 	cancel()
 	c := e.completion(h.entry, h.eff, h.plan, status != models.StatusSucceeded, permanent, now)
-	c.LastRun = models.LastRun{RunID: h.runID, Status: status, Error: errText, StartedAt: h.startedAt, FinishedAt: now, DurationMs: dur.Milliseconds()}
-	if !e.complete(h.log, h.entry.Key, h.runID, c) && h.leaseLost.CompareAndSwap(false, true) {
+	c.LastRun = &models.LastRun{RunID: h.runID, Status: status, Error: errText, StartedAt: h.startedAt, FinishedAt: now, DurationMs: dur.Milliseconds()}
+	ok, err := e.complete(h.log, h.entry.Key, h.runID, c)
+	if !ok && err == nil && h.leaseLost.CompareAndSwap(false, true) {
 		e.opt.Metrics.LeaseLost(h.entry.Key)
 	}
 	e.opt.Metrics.RunFinished(h.entry.Key, status, dur)
@@ -680,33 +728,43 @@ func (e *Engine) release(h *runHandle) {
 	}
 }
 
-// renew extends the lease every RenewInterval while the body runs; when the
-// lease is no longer ours (or cannot be renewed) the run is cancelled.
+// renew extends the lease every RenewInterval until the run is booked
+// (spec J8 as amended). A renew error is transient: the run goes on while
+// the lease it holds has time left. The run is cancelled when Renew reports
+// the lease is no longer ours, or when errors persisted until the lease
+// expired without a successful renew.
 func (e *Engine) renew(h *runHandle) {
 	t := time.NewTicker(e.opt.RenewInterval)
 	defer t.Stop()
+	until := h.startedAt.Add(e.opt.LeaseTTL) // the lease taken by the claim
 	for {
 		select {
 		case <-h.stopRenew:
 			return
 		case <-t.C:
 		}
+		next := e.now().Add(e.opt.LeaseTTL)
 		wctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-		ok, err := e.states.Renew(wctx, h.entry.Key, h.runID, e.now().Add(e.opt.LeaseTTL))
+		ok, err := e.states.Renew(wctx, h.entry.Key, h.runID, next)
 		cancel()
-		if err == nil && ok {
+		switch {
+		case err == nil && ok:
+			until = next
+			continue
+		case err != nil && e.now().Before(until):
+			h.log.Warn("jobs: lease renewal failed; retrying while the lease holds", "lease_until", until, "error", err)
 			continue
 		}
 		select {
 		case <-h.stopRenew:
-			return // the body already returned
+			return // already booked
 		default:
 		}
 		if h.leaseLost.CompareAndSwap(false, true) {
 			e.opt.Metrics.LeaseLost(h.entry.Key)
 		}
 		if err != nil {
-			h.log.Warn("jobs: lease renewal failed; cancelling the run", "error", err)
+			h.log.Warn("jobs: lease expired without a successful renewal; cancelling the run", "error", err)
 		} else {
 			h.log.Warn("jobs: lease taken over; cancelling the run")
 		}
@@ -845,9 +903,9 @@ func (e *Engine) Stop(ctx context.Context) error {
 	}
 	for _, h := range handles {
 		if h.finalized.CompareAndSwap(false, true) {
-			h.endRenew()
 			h.log.Warn("job did not stop within the grace period; booking it as interrupted")
 			e.book(h, models.StatusInterrupted, errStopping.Error()+": the run did not return within the grace period", false)
+			h.endRenew()
 		}
 	}
 	for _, h := range handles {

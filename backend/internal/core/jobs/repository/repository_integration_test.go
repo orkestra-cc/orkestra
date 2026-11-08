@@ -124,7 +124,7 @@ func TestCompleteKeepsOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	ok, err := r.Complete(ctx, "k", "r1", Completion{
-		LastRun:   models.LastRun{RunID: "r1", Status: models.StatusSucceeded, StartedAt: t0, FinishedAt: t0},
+		LastRun:   &models.LastRun{RunID: "r1", Status: models.StatusSucceeded, StartedAt: t0, FinishedAt: t0},
 		SetNext:   true,
 		NextRunAt: tp(t0.Add(time.Hour)),
 	})
@@ -226,8 +226,18 @@ func TestDueSelection(t *testing.T) {
 	_ = r.EnsureState(ctx, "expired", "m", "fp", tp(t0.Add(-time.Minute)), t0)
 	s, _ = r.Get(ctx, "expired")
 	_, _ = r.Claim(ctx, "expired", s.Revision, models.Lease{RunID: "y", Until: t0.Add(-time.Second)}, t0)
+	// a dead replica's run on a job disabled meanwhile: nothing due, but the
+	// expired lease still has to be booked
+	_ = r.EnsureState(ctx, "orphaned", "m", "fp", tp(t0.Add(-time.Minute)), t0)
+	s, _ = r.Get(ctx, "orphaned")
+	_, _ = r.Claim(ctx, "orphaned", s.Revision, models.Lease{RunID: "z", Until: t0.Add(-time.Second)}, t0)
+	s, _ = r.Get(ctx, "orphaned")
+	if _, err := r.SetOverride(ctx, "orphaned", s.Revision, nil, "fp-off", nil, "op", t0); err != nil {
+		t.Fatal(err)
+	}
+	all := []string{"disabled", "future", "due", "requested", "leased", "expired", "orphaned"}
 
-	got, err := r.Due(ctx, t0, 10)
+	got, err := r.Due(ctx, t0, all, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,12 +245,33 @@ func TestDueSelection(t *testing.T) {
 	for _, s := range got {
 		keys = append(keys, s.Key)
 	}
-	want := []string{"due", "expired", "requested"}
+	want := []string{"due", "expired", "orphaned", "requested"}
 	if fmt.Sprint(keys) != fmt.Sprint(want) {
 		t.Fatalf("due = %v, want %v", keys, want)
 	}
-	if lim, _ := r.Due(ctx, t0, 2); len(lim) != 2 {
+	if lim, _ := r.Due(ctx, t0, all, 2); len(lim) != 2 {
 		t.Fatalf("limit not applied: %d", len(lim))
+	}
+	if none, _ := r.Due(ctx, t0, nil, 10); len(none) != 0 {
+		t.Fatalf("no claimable keys must return nothing: %d", len(none))
+	}
+}
+
+// Due states the engine cannot claim (removed jobs, stopped modules) must not
+// crowd out a claimable one past the limit.
+func TestDueOnlyClaimableKeys(t *testing.T) {
+	r := newStates(t)
+	ctx := context.Background()
+	for i := 0; i < 15; i++ {
+		_ = r.EnsureState(ctx, fmt.Sprintf("a.orphan%02d", i), "a", "fp", tp(t0.Add(-time.Hour)), t0)
+	}
+	_ = r.EnsureState(ctx, "z.live", "z", "fp", tp(t0.Add(-time.Minute)), t0)
+	got, err := r.Due(ctx, t0, []string{"z.live"}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Key != "z.live" {
+		t.Fatalf("claimable job starved: %+v", got)
 	}
 }
 
@@ -356,7 +387,7 @@ func TestCompleteRespectsConcurrentOverride(t *testing.T) {
 	}
 	failed := func(key string) Completion {
 		return Completion{
-			LastRun:           models.LastRun{RunID: "r-" + key, Status: models.StatusFailed, StartedAt: t0, FinishedAt: t0},
+			LastRun:           &models.LastRun{RunID: "r-" + key, Status: models.StatusFailed, StartedAt: t0, FinishedAt: t0},
 			ExpectFingerprint: "fp",
 			SetNext:           true,
 			NextRunAt:         tp(t0.Add(time.Hour)),
@@ -435,5 +466,24 @@ func TestFinishKeepsTerminalStatus(t *testing.T) {
 	items, _, _ := r.List(ctx, "k", "", nil, 10)
 	if len(items) != 1 || items[0].Status != models.StatusAbandoned {
 		t.Fatalf("terminal status overwritten: %+v", items)
+	}
+}
+
+// A nil LastRun (a claim that only released a stale lease) keeps lastRun.
+func TestCompleteNilLastRunKeepsIt(t *testing.T) {
+	r := newStates(t)
+	ctx := context.Background()
+	_ = r.EnsureState(ctx, "k", "m", "fp", tp(t0), t0)
+	s, _ := r.Get(ctx, "k")
+	_, _ = r.Claim(ctx, "k", s.Revision, models.Lease{RunID: "r1", Until: t0.Add(time.Minute)}, t0)
+	_, _ = r.Complete(ctx, "k", "r1", Completion{ExpectFingerprint: "fp", LastRun: &models.LastRun{RunID: "r1", Status: models.StatusSucceeded, StartedAt: t0, FinishedAt: t0}})
+	s, _ = r.Get(ctx, "k")
+	_, _ = r.Claim(ctx, "k", s.Revision, models.Lease{RunID: "r2", Until: t0.Add(time.Minute)}, t0)
+	if ok, err := r.Complete(ctx, "k", "r2", Completion{ExpectFingerprint: "fp"}); err != nil || !ok {
+		t.Fatalf("complete: %v %v", ok, err)
+	}
+	got, _ := r.Get(ctx, "k")
+	if got.LastRun == nil || got.LastRun.RunID != "r1" || got.Lease != nil {
+		t.Fatalf("lastRun not kept: %+v", got.LastRun)
 	}
 }
