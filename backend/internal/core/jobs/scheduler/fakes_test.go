@@ -25,6 +25,12 @@ func (c *fakeClock) Now() time.Time {
 	return c.t
 }
 
+func (c *fakeClock) Set(t time.Time) {
+	c.mu.Lock()
+	c.t = t
+	c.mu.Unlock()
+}
+
 func (c *fakeClock) Add(d time.Duration) {
 	c.mu.Lock()
 	c.t = c.t.Add(d)

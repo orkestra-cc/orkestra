@@ -49,7 +49,7 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 	minD, maxD := minRetentionDays, maxRetentionDays
 	return []module.ConfigField{
 		{Key: keyTimezone, Label: "Timezone", Group: "scheduling", Type: module.FieldString, Default: defaultTimezone, EnvVar: "JOBS_TIMEZONE",
-			Description: "IANA zone name (e.g. Europe/Rome) cron schedules are evaluated in, unless a job has its own timezone override. A change applies within 30 seconds and reschedules the cron jobs from that moment. Daylight saving: a time that does not exist is skipped, a repeated one runs once."},
+			Description: "IANA zone name (e.g. Europe/Rome) cron schedules are evaluated in, unless a job has its own timezone override. A change is picked up within 30 seconds and reschedules the cron jobs from that moment, to their next time in the new zone; interval jobs keep their due time. Daylight saving: a time that does not exist is skipped, a repeated one runs once."},
 		{Key: keyMaxConcurrentRuns, Label: "Concurrent runs per replica", Group: "scheduling", Type: module.FieldInt, Default: strconv.Itoa(defaultMaxConcurrent), EnvVar: "JOBS_MAX_CONCURRENT_RUNS", Min: &minC, Max: &maxC,
 			Description: "Most jobs one backend replica runs at the same time (1–32). Takes effect at the next backend restart."},
 		{Key: keyRunRetentionDays, Label: "Run retention (days)", Group: "history", Type: module.FieldInt, Default: strconv.Itoa(defaultRetentionDays), EnvVar: "JOBS_RUN_RETENTION_DAYS", Min: &minD, Max: &maxD,

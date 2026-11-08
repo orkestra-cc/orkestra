@@ -34,11 +34,13 @@ func TestEffectiveOf(t *testing.T) {
 		{"default no state", cron, nil, nil, "on|cron 0 2 * * *|UTC"},
 		{"module timezone", cron, &models.State{}, rome, "on|cron 0 2 * * *|Europe/Rome"},
 		{"disabled override", cron, &models.State{Override: &models.Override{Enabled: &off}}, nil, "off|cron 0 2 * * *|UTC"},
-		{"schedule override every", cron, &models.State{Override: &models.Override{Schedule: &models.ScheduleSpec{Kind: "every", EverySeconds: 7200}}}, nil, "on|every 2h0m0s|UTC"},
+		{"schedule override every", cron, &models.State{Override: &models.Override{Schedule: &models.ScheduleSpec{Kind: "every", EverySeconds: 7200}}}, nil, "on|every 2h0m0s"},
 		{"schedule override cron + tz", cron, &models.State{Override: &models.Override{Schedule: &models.ScheduleSpec{Kind: "cron", Cron: "30 3 * * mon"}, Timezone: "Europe/Rome"}}, nil, "on|cron 30 3 * * mon|Europe/Rome"},
-		{"manual ignores schedule override", manual, &models.State{Override: &models.Override{Schedule: &models.ScheduleSpec{Kind: "every", EverySeconds: 3600}}}, nil, "on|manual|UTC"},
-		{"disabled by default", dark, nil, nil, "off|every 1h0m0s|UTC"},
-		{"enabled override of disabled default", dark, &models.State{Override: &models.Override{Enabled: &on}}, nil, "on|every 1h0m0s|UTC"},
+		{"manual ignores schedule override", manual, &models.State{Override: &models.Override{Schedule: &models.ScheduleSpec{Kind: "every", EverySeconds: 3600}}}, nil, "on|manual"},
+		{"disabled by default", dark, nil, nil, "off|every 1h0m0s"},
+		{"interval ignores the module timezone", dark, nil, rome, "off|every 1h0m0s"},
+		{"manual ignores the module timezone", manual, nil, rome, "on|manual"},
+		{"enabled override of disabled default", dark, &models.State{Override: &models.Override{Enabled: &on}}, nil, "on|every 1h0m0s"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

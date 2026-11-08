@@ -464,6 +464,193 @@ func TestRenewErrorsUntilExpiryCancel(t *testing.T) {
 	}
 }
 
+// I1: renew errors that persist cancel the run at the fence, Until −
+// (RenewInterval + writeTimeout), while the lease still holds: no other
+// replica can have claimed the job when the run stops.
+func TestRenewErrorsFenceBeforeExpiry(t *testing.T) {
+	const renewEvery = 5 * time.Millisecond
+	var h *harness
+	cancelled := make(chan struct{})
+	var leaseHeldAtCancel atomic.Bool
+	h = newHarness(t, Options{RenewInterval: renewEvery}, def("a", func(ctx context.Context, _ *jobs.Run) error {
+		select {
+		case <-ctx.Done():
+			leaseHeldAtCancel.Store(!leaseFree(h.states.get("m.a"), h.clock.Now()))
+			close(cancelled)
+			return ctx.Err()
+		case <-time.After(10 * time.Second):
+			return nil
+		}
+	}))
+	var renews atomic.Int32
+	h.states.renew = func() (bool, error) { renews.Add(1); return false, errors.New("mongo partitioned") }
+	h.clock.Add(time.Hour)
+	if n := h.e.Tick(context.Background()); n != 1 {
+		t.Fatalf("launched %d", n)
+	}
+	until := h.clock.Now().Add(DefaultLeaseTTL)
+	fenceAt := until.Add(-(renewEvery + writeTimeout))
+
+	h.clock.Set(fenceAt.Add(-time.Second))
+	waitFor(t, func() bool { return renews.Load() >= 3 })
+	select {
+	case <-cancelled:
+		t.Fatal("cancelled before the fence")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	h.clock.Set(fenceAt.Add(time.Second)) // still 9 s before the lease expires
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("run not cancelled at the fence")
+	}
+	if !leaseHeldAtCancel.Load() {
+		t.Fatal("the lease had already expired when the run was cancelled")
+	}
+	h.e.drain()
+	if r := h.runs.all("m.a")[0]; r.Status != models.StatusFailed || !strings.HasPrefix(r.Error, "lease lost: ") {
+		t.Fatalf("record: %+v", r)
+	}
+	if h.metrics.lostCount("m.a") != 1 {
+		t.Fatalf("LeaseLost = %d, want 1", h.metrics.lostCount("m.a"))
+	}
+}
+
+// I1 with the J8 amendment: renew errors up to just before the fence, then a
+// successful renew, move the fence with the new lease; the run goes on past
+// the old lease's expiry.
+func TestRenewRecoveryMovesFence(t *testing.T) {
+	const renewEvery = 5 * time.Millisecond
+	release, closeRelease := releaser(t)
+	var cancelled atomic.Bool
+	h := newHarness(t, Options{RenewInterval: renewEvery}, def("a", func(ctx context.Context, _ *jobs.Run) error {
+		select {
+		case <-ctx.Done():
+			cancelled.Store(true)
+			return ctx.Err()
+		case <-release:
+			return nil
+		}
+	}))
+	var failing atomic.Bool
+	failing.Store(true)
+	var renews atomic.Int32
+	h.states.renew = func() (bool, error) {
+		renews.Add(1)
+		if failing.Load() {
+			return false, errors.New("mongo blip")
+		}
+		return true, nil
+	}
+	h.clock.Add(time.Hour)
+	h.e.Tick(context.Background())
+	until := h.clock.Now().Add(DefaultLeaseTTL)
+	fenceAt := until.Add(-(renewEvery + writeTimeout))
+
+	h.clock.Set(fenceAt.Add(-time.Second))
+	waitFor(t, func() bool { return renews.Load() >= 2 })
+	failing.Store(false)
+	n := renews.Load()
+	waitFor(t, func() bool { return renews.Load() >= n+2 }) // at least one success
+	h.clock.Set(until.Add(10 * time.Second))                // the first lease is long gone
+	time.Sleep(150 * time.Millisecond)
+	if cancelled.Load() {
+		t.Fatal("a renewed run was cancelled at the old fence")
+	}
+	closeRelease()
+	h.e.drain()
+	if cancelled.Load() || h.metrics.lostCount("m.a") != 0 || h.runs.all("m.a")[0].Status != models.StatusSucceeded {
+		t.Fatalf("cancelled=%v lost=%d rec=%+v", cancelled.Load(), h.metrics.lostCount("m.a"), h.runs.all("m.a")[0])
+	}
+}
+
+// I2: a run whose module stops is cancelled on the next Tick and booked
+// interrupted without consuming an attempt: the pending retry stays as it
+// was and runs again, with the same attempt number, once the module starts.
+func TestModuleStopInterruptsRunOnTick(t *testing.T) {
+	var calls atomic.Int32
+	d := def("a", func(ctx context.Context, _ *jobs.Run) error {
+		if calls.Add(1) == 1 {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	})
+	d.Retry = jobs.RetryPolicy{MaxAttempts: 3, Backoff: time.Minute, MaxBackoff: time.Hour}
+	h := newHarness(t, Options{}, d)
+	st := h.states.get("m.a")
+	st.Attempt, st.RetryAt, st.RetrySlotAt = 1, tp(t0.Add(time.Minute)), tp(t0)
+	h.states.put(st)
+	h.clock.Add(time.Minute)
+	if n := h.e.Tick(context.Background()); n != 1 {
+		t.Fatalf("launched %d", n)
+	}
+	waitFor(t, func() bool { return calls.Load() == 1 })
+
+	h.started.Store(false)
+	if n := h.e.Tick(context.Background()); n != 0 {
+		t.Fatalf("launched %d for a stopped module", n)
+	}
+	h.e.drain()
+	r := h.runs.all("m.a")[0]
+	if r.Status != models.StatusInterrupted || !strings.HasPrefix(r.Error, "module stopped: ") || r.Attempt != 2 {
+		t.Fatalf("record: %+v", r)
+	}
+	st = h.states.get("m.a")
+	if st.Lease != nil || st.LastRun == nil || st.LastRun.Status != models.StatusInterrupted {
+		t.Fatalf("state: %+v", st)
+	}
+	if st.Attempt != 1 || st.RetryAt == nil || !st.RetryAt.Equal(t0.Add(time.Minute)) || !st.NextRunAt.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("attempt consumed or due time moved: attempt=%d retryAt=%v next=%v", st.Attempt, st.RetryAt, st.NextRunAt)
+	}
+	if h.metrics.lostCount("m.a") != 0 {
+		t.Fatal("module stop counted as a lost lease")
+	}
+	if n := h.tick(t); n != 0 {
+		t.Fatalf("claimed while the module is stopped: %d", n)
+	}
+
+	h.started.Store(true)
+	if n := h.tick(t); n != 1 {
+		t.Fatalf("not re-run after the module started: %d", n)
+	}
+	recs := h.runs.all("m.a")
+	if len(recs) != 2 || recs[1].Status != models.StatusSucceeded || recs[1].Trigger != string(jobs.TriggerRetry) || recs[1].Attempt != 2 {
+		t.Fatalf("re-run: %+v", recs)
+	}
+}
+
+// I2: without a Tick, the renew loop notices the stopped module within a
+// RenewInterval; a scheduled slot stays due, attempt 0.
+func TestModuleStopInterruptsRunOnRenew(t *testing.T) {
+	cancelled := make(chan struct{})
+	h := newHarness(t, Options{RenewInterval: 5 * time.Millisecond}, def("a", func(ctx context.Context, _ *jobs.Run) error {
+		<-ctx.Done()
+		close(cancelled)
+		return ctx.Err()
+	}))
+	h.clock.Add(time.Hour)
+	slot := h.clock.Now()
+	if n := h.e.Tick(context.Background()); n != 1 {
+		t.Fatalf("launched %d", n)
+	}
+	h.started.Store(false)
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("run of a stopped module not cancelled")
+	}
+	h.e.drain()
+	if r := h.runs.all("m.a")[0]; r.Status != models.StatusInterrupted {
+		t.Fatalf("record: %+v", r)
+	}
+	st := h.states.get("m.a")
+	if st.Lease != nil || st.Attempt != 0 || st.RetryAt != nil || st.NextRunAt == nil || !st.NextRunAt.Equal(slot) {
+		t.Fatalf("state: attempt=%d retryAt=%v next=%v lease=%+v", st.Attempt, st.RetryAt, st.NextRunAt, st.Lease)
+	}
+}
+
 func TestRenewKeepsLease(t *testing.T) {
 	release, closeRelease := releaser(t)
 	h := newHarness(t, Options{RenewInterval: 5 * time.Millisecond}, def("a", func(context.Context, *jobs.Run) error {
@@ -492,13 +679,13 @@ func TestReconcileDefaultChange(t *testing.T) {
 	h := newHarness(t, Options{}, def("a", ok), def("b", ok))
 	// "a" was stored by an older build whose default was every 30m.
 	a := h.states.get("m.a")
-	a.Fingerprint = "on|every 30m0s|UTC"
+	a.Fingerprint = "on|every 30m0s"
 	a.NextRunAt = tp(t0.Add(30 * time.Minute))
 	h.states.put(a)
 	// "b" carries an operator override, consistent with its stored fingerprint.
 	b := h.states.get("m.b")
 	b.Override = &models.Override{Schedule: &models.ScheduleSpec{Kind: "every", EverySeconds: 600}}
-	b.Fingerprint = "on|every 10m0s|UTC"
+	b.Fingerprint = "on|every 10m0s"
 	b.NextRunAt = tp(t0.Add(10 * time.Minute))
 	h.states.put(b)
 
@@ -507,7 +694,7 @@ func TestReconcileDefaultChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	a2 := h.states.get("m.a")
-	if a2.Fingerprint != "on|every 1h0m0s|UTC" || !a2.NextRunAt.Equal(h.clock.Now().Add(time.Hour)) || a2.Revision != a.Revision+1 {
+	if a2.Fingerprint != "on|every 1h0m0s" || !a2.NextRunAt.Equal(h.clock.Now().Add(time.Hour)) || a2.Revision != a.Revision+1 {
 		t.Fatalf("drift not reconciled: %+v", a2)
 	}
 	b2 := h.states.get("m.b")
@@ -516,30 +703,88 @@ func TestReconcileDefaultChange(t *testing.T) {
 	}
 }
 
-// A default timezone change (live module config) is drift too: Tick
-// reschedules instead of running the old slot.
+// A due state whose stored fingerprint came from another schedule (another
+// build's code default) is drift: Tick reschedules it from now instead of
+// running the old slot.
 func TestTickReschedulesOnDrift(t *testing.T) {
+	var calls atomic.Int32
+	d := def("a", func(context.Context, *jobs.Run) error { calls.Add(1); return nil })
+	d.Schedule = jobs.Cron("0 2 * * *")
+	h := newHarness(t, Options{}, d)
+	st := h.states.get("m.a")
+	st.Fingerprint = "on|cron 0 3 * * *|UTC" // written by an older build
+	h.states.put(st)
+	h.clock.Add(14 * time.Hour) // 2026-11-09 02:00 UTC: due
+	if n := h.tick(t); n != 0 || calls.Load() != 0 {
+		t.Fatalf("launched %d on drift", n)
+	}
+	st = h.states.get("m.a")
+	if st.Fingerprint != "on|cron 0 2 * * *|UTC" {
+		t.Fatalf("fingerprint = %q", st.Fingerprint)
+	}
+	if want := time.Date(2026, 11, 10, 2, 0, 0, 0, time.UTC); !st.NextRunAt.Equal(want) {
+		t.Fatalf("next = %v, want %v", st.NextRunAt, want)
+	}
+}
+
+// A module timezone change is applied on the first Tick that sees it: the
+// cron job moves at once to the next slot in the new zone, so no day is lost.
+func TestTimezoneChangeReschedulesCronAtOnce(t *testing.T) {
 	var loc atomic.Pointer[time.Location]
 	loc.Store(time.UTC)
 	rome, err := time.LoadLocation("Europe/Rome")
 	if err != nil {
 		t.Skip("no tzdata")
 	}
-	d := def("a", ok)
+	var calls atomic.Int32
+	d := def("a", func(context.Context, *jobs.Run) error { calls.Add(1); return nil })
 	d.Schedule = jobs.Cron("0 2 * * *")
 	h := newHarness(t, Options{DefaultLocation: func() *time.Location { return loc.Load() }}, d)
+	if st := h.states.get("m.a"); !st.NextRunAt.Equal(time.Date(2026, 11, 9, 2, 0, 0, 0, time.UTC)) {
+		t.Fatalf("next in UTC = %v", st.NextRunAt)
+	}
 	loc.Store(rome)
-	h.clock.Add(14 * time.Hour) // past 02:00 UTC
+	h.clock.Add(time.Minute) // the change is seen right away, not at the old due time
 	if n := h.tick(t); n != 0 {
-		t.Fatalf("launched %d on drift", n)
+		t.Fatalf("launched %d", n)
 	}
 	st := h.states.get("m.a")
-	if st.Fingerprint != "on|cron 0 2 * * *|Europe/Rome" {
-		t.Fatalf("fingerprint = %q", st.Fingerprint)
+	want := time.Date(2026, 11, 9, 2, 0, 0, 0, rome) // 01:00 UTC, the same night
+	if st.Fingerprint != "on|cron 0 2 * * *|Europe/Rome" || !st.NextRunAt.Equal(want) {
+		t.Fatalf("after the zone change: fingerprint %q next %v, want next %v", st.Fingerprint, st.NextRunAt, want)
 	}
-	want := time.Date(2026, 11, 10, 2, 0, 0, 0, rome)
-	if !st.NextRunAt.Equal(want) {
-		t.Fatalf("next = %v, want %v", st.NextRunAt, want)
+	h.clock.Set(want)
+	if n := h.tick(t); n != 1 || calls.Load() != 1 {
+		t.Fatalf("the first slot in the new zone did not run: launched %d", n)
+	}
+	if r := h.runs.all("m.a")[0]; r.Trigger != string(jobs.TriggerSchedule) || !r.ScheduledFor.Equal(want) {
+		t.Fatalf("run: %+v", r)
+	}
+}
+
+// An interval job does not depend on the zone: a module timezone change
+// leaves its due time and fingerprint alone.
+func TestTimezoneChangeKeepsIntervalNextRun(t *testing.T) {
+	var loc atomic.Pointer[time.Location]
+	loc.Store(time.UTC)
+	rome, err := time.LoadLocation("Europe/Rome")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	h := newHarness(t, Options{DefaultLocation: func() *time.Location { return loc.Load() }}, def("a", ok))
+	before := h.states.get("m.a")
+	loc.Store(rome)
+	h.clock.Add(time.Minute)
+	if n := h.tick(t); n != 0 {
+		t.Fatalf("launched %d", n)
+	}
+	after := h.states.get("m.a")
+	if after.Fingerprint != before.Fingerprint || after.Revision != before.Revision || !after.NextRunAt.Equal(*before.NextRunAt) {
+		t.Fatalf("interval job touched by a zone change: before %+v after %+v", before, after)
+	}
+	h.clock.Set(*before.NextRunAt)
+	if n := h.tick(t); n != 1 {
+		t.Fatalf("interval slot did not run: launched %d", n)
 	}
 }
 

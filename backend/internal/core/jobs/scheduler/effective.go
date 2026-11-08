@@ -14,10 +14,12 @@ type Effective struct {
 	Enabled  bool
 	Schedule jobs.Schedule
 	Location *time.Location
-	// Fingerprint identifies Enabled, Schedule and Location, e.g.
-	// "on|cron 0 2 * * *|Europe/Rome". The state document stores the
-	// fingerprint its nextRunAt was computed from; a difference means the
-	// due time is stale.
+	// Fingerprint identifies Enabled, Schedule and, for a cron schedule
+	// only, Location, e.g. "on|cron 0 2 * * *|Europe/Rome" or
+	// "on|every 1h0m0s": an interval or manual schedule does not depend on
+	// the zone, so a zone change leaves its due time alone. The state
+	// document stores the fingerprint its nextRunAt was computed from; a
+	// difference means the due time is stale.
 	Fingerprint string
 }
 
@@ -56,7 +58,10 @@ func EffectiveOf(entry jobs.Entry, st *models.State, defLoc *time.Location) (Eff
 	if !eff.Enabled {
 		state = "off"
 	}
-	eff.Fingerprint = state + "|" + eff.Schedule.String() + "|" + eff.Location.String()
+	eff.Fingerprint = state + "|" + eff.Schedule.String()
+	if eff.Schedule.Kind() == jobs.ScheduleCron {
+		eff.Fingerprint += "|" + eff.Location.String()
+	}
 	return eff, nil
 }
 

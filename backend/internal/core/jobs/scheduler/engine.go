@@ -5,6 +5,17 @@
 // time. Retries are durable (retryAt in the state document), missed slots
 // coalesce into one catch-up run, and a run whose replica died is found
 // through its expired lease and booked as abandoned.
+//
+// A run fences itself: it is cancelled once no renewal can land before the
+// lease it last renewed expires (Until − (RenewInterval + the 10 s write
+// timeout)), so it stops before another replica may claim the job. Lease
+// expiry is judged on each replica's own wall clock: replicas must be
+// NTP-synced, with a skew well below that margin (40 s with the defaults),
+// or the at-most-one guarantee does not hold.
+//
+// A run whose module stops (StopModule at runtime, or StopAll at shutdown)
+// is cancelled and booked interrupted without consuming an attempt: its due
+// time is left as it was, so it runs again once the module starts.
 package scheduler
 
 import (
@@ -72,25 +83,33 @@ const (
 )
 
 var (
-	errStopping  = errors.New("scheduler stopping")
-	errLeaseLost = errors.New("lease lost")
+	errStopping      = errors.New("scheduler stopping")
+	errLeaseLost     = errors.New("lease lost")
+	errModuleStopped = errors.New("module stopped")
 )
 
 // Options configure an Engine. Zero values take the defaults above.
 type Options struct {
-	Replica       string
-	Clock         Clock
-	Logger        *slog.Logger
-	PollInterval  time.Duration
+	Replica      string
+	Clock        Clock
+	Logger       *slog.Logger
+	PollInterval time.Duration
+	// LeaseTTL must exceed RenewInterval + 10 s (the write timeout): a run
+	// is cancelled that long before the lease it last renewed expires.
 	LeaseTTL      time.Duration
 	RenewInterval time.Duration
 	StopGrace     time.Duration
 	MaxConcurrent int
 	// DefaultLocation returns the module's timezone; it is read on every
-	// poll so a config change applies live. nil (or a nil result) is UTC.
+	// poll so a config change applies live: when its name differs from the
+	// one the last clean Reconcile used, Tick reconciles at once, so cron
+	// jobs are rescheduled from the moment the change is seen. nil (or a nil
+	// result) is UTC.
 	DefaultLocation func() *time.Location
 	// ModuleStarted gates claims: a job of a stopped module is never
-	// claimed, not even on request. nil means every module is started.
+	// claimed, not even on request. A run in progress whose module stops is
+	// cancelled (checked on every Tick and every RenewInterval). nil means
+	// every module is started.
 	ModuleStarted func(module string) bool
 	Metrics       Metrics
 	// Jitter returns a value in [0,1) for the retry backoff.
@@ -156,6 +175,9 @@ type Engine struct {
 	failingSince time.Time
 	wake         time.Time // earliest due time known locally
 	reconciled   int       // catalog size at the last clean Reconcile; -1 = never
+	// reconciledLoc is the default location name the last clean Reconcile
+	// used; "" = never.
+	reconciledLoc string
 }
 
 // New builds an engine; nothing runs until Start (or Tick in tests).
@@ -193,11 +215,12 @@ type runHandle struct {
 	log       *slog.Logger
 	cancel    context.CancelCauseFunc
 
-	finalized atomic.Bool // whoever sets it writes the bookkeeping
-	leaseLost atomic.Bool // LeaseLost already counted
-	stopOnce  sync.Once
-	stopRenew chan struct{}
-	done      chan struct{} // closed once the bookkeeping is written
+	finalized     atomic.Bool // whoever sets it writes the bookkeeping
+	leaseLost     atomic.Bool // LeaseLost already counted
+	moduleStopped atomic.Bool // cancelled because its module stopped
+	stopOnce      sync.Once
+	stopRenew     chan struct{}
+	done          chan struct{} // closed once the bookkeeping is written
 }
 
 func (h *runHandle) endRenew() { h.stopOnce.Do(func() { close(h.stopRenew) }) }
@@ -222,7 +245,8 @@ func (e *Engine) defaultLocation() *time.Location {
 // A fingerprint change reschedules from now: the next due time is computed
 // strictly after now, so a slot that was already due under the old schedule
 // is skipped, not run. Tick applies the same rule to a due state that
-// drifted.
+// drifted, and calls Reconcile as soon as it sees the module timezone change,
+// so a cron job moves to the next slot of the new zone from that moment.
 func (e *Engine) Reconcile(ctx context.Context) error {
 	now := e.now()
 	loc := e.defaultLocation()
@@ -267,6 +291,7 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	if len(errs) == 0 {
 		e.mu.Lock()
 		e.reconciled = len(entries)
+		e.reconciledLoc = loc.String()
 		e.mu.Unlock()
 	}
 	return errors.Join(errs...)
@@ -285,17 +310,25 @@ func (e *Engine) reschedule(ctx context.Context, st models.State, eff Effective,
 	return nil
 }
 
-// Tick polls once: it lists due jobs, claims what it can up to the free run
-// slots and launches the runs. It returns how many runs it launched (claims
-// that only book state, such as a skipped catch-up, do not count).
+// Tick polls once: it cancels the runs whose module stopped, reconciles if
+// the module timezone changed, lists due jobs, claims what it can up to the
+// free run slots and launches the runs. It returns how many runs it launched
+// (claims that only book state, such as a skipped catch-up, do not count).
 func (e *Engine) Tick(ctx context.Context) int {
 	e.tickMu.Lock()
 	defer e.tickMu.Unlock()
 	e.mu.Lock()
-	free := e.opt.MaxConcurrent - len(e.running)
 	stopping := e.stopping
 	e.mu.Unlock()
-	if stopping || free <= 0 {
+	if stopping {
+		return 0
+	}
+	e.interruptStoppedModules()
+	e.reconcileOnZoneChange(ctx)
+	e.mu.Lock()
+	free := e.opt.MaxConcurrent - len(e.running)
+	e.mu.Unlock()
+	if free <= 0 {
 		return 0
 	}
 	keys := e.claimableKeys()
@@ -354,6 +387,47 @@ func (e *Engine) Tick(ctx context.Context) int {
 		}
 	}
 	return launched
+}
+
+// reconcileOnZoneChange runs Reconcile when the default location differs from
+// the one the last clean Reconcile used. A failed Reconcile leaves the old
+// name, so the next Tick tries again.
+func (e *Engine) reconcileOnZoneChange(ctx context.Context) {
+	name := e.defaultLocation().String()
+	e.mu.Lock()
+	last := e.reconciledLoc
+	e.mu.Unlock()
+	if last == "" || last == name {
+		return
+	}
+	e.log.Info("jobs: module timezone changed; rescheduling", "from", last, "to", name)
+	if err := e.Reconcile(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		e.log.Error("jobs: reconcile after a timezone change failed", "error", err)
+	}
+}
+
+// interruptStoppedModules cancels every local run whose module is no longer
+// started.
+func (e *Engine) interruptStoppedModules() {
+	e.mu.Lock()
+	hs := make([]*runHandle, 0, len(e.running))
+	for _, h := range e.running {
+		hs = append(hs, h)
+	}
+	e.mu.Unlock()
+	for _, h := range hs {
+		e.interruptIfModuleStopped(h)
+	}
+}
+
+// interruptIfModuleStopped cancels h once its module is no longer started.
+// The run is booked interrupted without consuming an attempt (see requeue).
+func (e *Engine) interruptIfModuleStopped(h *runHandle) {
+	if e.opt.ModuleStarted(h.entry.Module) || !h.moduleStopped.CompareAndSwap(false, true) {
+		return
+	}
+	h.log.Warn("jobs: the job's module stopped; cancelling the run", "module", h.entry.Module)
+	h.cancel(errModuleStopped)
 }
 
 // claimableKeys lists the catalog keys this replica may claim: the job's
@@ -469,6 +543,22 @@ func (e *Engine) outcome(def jobs.Definition, eff Effective, base models.State, 
 		o.retryAt, o.retrySlotAt, o.attempt = base.RetryAt, base.RetrySlotAt, base.Attempt
 	}
 	return o
+}
+
+// requeue builds the state update after a run cut short because its module
+// stopped: the claimed state is put back as it was (after any abandoned-run
+// accounting), so the slot, retry or request is due again and the attempt
+// is not consumed.
+func requeue(eff Effective, p plan) repository.Completion {
+	return repository.Completion{
+		SetNext:           true,
+		NextRunAt:         p.base.NextRunAt,
+		RetryAt:           p.base.RetryAt,
+		RetrySlotAt:       p.base.RetrySlotAt,
+		Attempt:           p.base.Attempt,
+		ClearRequest:      p.clearRequest,
+		ExpectFingerprint: eff.Fingerprint,
+	}
 }
 
 // completion builds the state update after an execution of p.
@@ -644,7 +734,8 @@ func (e *Engine) execute(ctx context.Context, h *runHandle, stopTimeout context.
 		return // Stop already booked this run as interrupted
 	}
 	status, errText, permanent := classify(ctx, err, panicked)
-	e.book(h, status, errText, permanent)
+	requeued := status == models.StatusInterrupted && errors.Is(context.Cause(ctx), errModuleStopped)
+	e.book(h, status, errText, permanent, requeued)
 }
 
 func (e *Engine) invoke(ctx context.Context, h *runHandle) (panicked bool, err error) {
@@ -670,6 +761,8 @@ func classify(ctx context.Context, err error, panicked bool) (status, errText st
 	switch {
 	case errors.Is(cause, errStopping):
 		return models.StatusInterrupted, truncate(errStopping.Error() + ": " + text), false
+	case errors.Is(cause, errModuleStopped):
+		return models.StatusInterrupted, truncate(errModuleStopped.Error() + ": " + text), false
 	case errors.Is(cause, errLeaseLost):
 		return models.StatusFailed, truncate(errLeaseLost.Error() + ": " + text), false
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -691,7 +784,9 @@ func truncate(s string) string {
 }
 
 // book writes the outcome of h (run record, then state) and releases it.
-func (e *Engine) book(h *runHandle, status, errText string, permanent bool) {
+// requeued puts the claimed state back instead of applying the outcome (a
+// run cut short by its module stopping).
+func (e *Engine) book(h *runHandle, status, errText string, permanent, requeued bool) {
 	defer e.release(h)
 	now := e.now()
 	dur := max(now.Sub(h.startedAt), 0)
@@ -702,6 +797,9 @@ func (e *Engine) book(h *runHandle, status, errText string, permanent bool) {
 	}
 	cancel()
 	c := e.completion(h.entry, h.eff, h.plan, status != models.StatusSucceeded, permanent, now)
+	if requeued {
+		c = requeue(h.eff, h.plan)
+	}
 	c.LastRun = &models.LastRun{RunID: h.runID, Status: status, Error: errText, StartedAt: h.startedAt, FinishedAt: now, DurationMs: dur.Milliseconds()}
 	ok, err := e.complete(h.log, h.entry.Key, h.runID, c)
 	if !ok && err == nil && h.leaseLost.CompareAndSwap(false, true) {
@@ -736,31 +834,49 @@ func (e *Engine) Wake() {
 }
 
 // renew extends the lease every RenewInterval until the run is booked
-// (spec J8 as amended). A renew error is transient: the run goes on while
-// the lease it holds has time left. The run is cancelled when Renew reports
-// the lease is no longer ours, or when errors persisted until the lease
-// expired without a successful renew.
+// (spec J8 as amended), and fences the run. A renew error is transient: the
+// run goes on while a later renew can still land before the lease expires.
+// The run is cancelled when Renew reports the lease is no longer ours, or at
+// the fence, Until − (RenewInterval + writeTimeout) of the last successful
+// renew, so it stops before another replica may claim (the margin covers the
+// wait for the next renew tick plus one hung Renew call). The fence has its
+// own timer, re-armed at least every RenewInterval so a clock jump is seen.
+// Every renew tick also cancels the run if its module stopped.
 func (e *Engine) renew(h *runHandle) {
 	t := time.NewTicker(e.opt.RenewInterval)
 	defer t.Stop()
+	margin := e.opt.RenewInterval + writeTimeout
 	until := h.startedAt.Add(e.opt.LeaseTTL) // the lease taken by the claim
+	fenceAt := until.Add(-margin)
+	fence := time.NewTimer(e.fenceWait(fenceAt))
+	defer fence.Stop()
 	for {
+		var err error
 		select {
 		case <-h.stopRenew:
 			return
+		case <-fence.C:
+			if e.now().Before(fenceAt) {
+				fence.Reset(e.fenceWait(fenceAt))
+				continue
+			}
+			err = errors.New("no renewal succeeded in time")
 		case <-t.C:
-		}
-		next := e.now().Add(e.opt.LeaseTTL)
-		wctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-		ok, err := e.states.Renew(wctx, h.entry.Key, h.runID, next)
-		cancel()
-		switch {
-		case err == nil && ok:
-			until = next
-			continue
-		case err != nil && e.now().Before(until):
-			h.log.Warn("jobs: lease renewal failed; retrying while the lease holds", "lease_until", until, "error", err)
-			continue
+			e.interruptIfModuleStopped(h)
+			next := e.now().Add(e.opt.LeaseTTL)
+			wctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+			var ok bool
+			ok, err = e.states.Renew(wctx, h.entry.Key, h.runID, next)
+			cancel()
+			switch {
+			case err == nil && ok:
+				until, fenceAt = next, next.Add(-margin)
+				fence.Reset(e.fenceWait(fenceAt))
+				continue
+			case err != nil && e.now().Before(fenceAt):
+				h.log.Warn("jobs: lease renewal failed; retrying while the lease holds", "lease_until", until, "error", err)
+				continue
+			}
 		}
 		select {
 		case <-h.stopRenew:
@@ -771,13 +887,19 @@ func (e *Engine) renew(h *runHandle) {
 			e.opt.Metrics.LeaseLost(h.entry.Key)
 		}
 		if err != nil {
-			h.log.Warn("jobs: lease expired without a successful renewal; cancelling the run", "error", err)
+			h.log.Warn("jobs: the lease is about to expire without a successful renewal; cancelling the run", "lease_until", until, "error", err)
 		} else {
 			h.log.Warn("jobs: lease taken over; cancelling the run")
 		}
 		h.cancel(errLeaseLost)
 		return
 	}
+}
+
+// fenceWait is how long the fence timer waits for fenceAt: never more than
+// RenewInterval, so a jump of the clock is noticed, and zero once it passed.
+func (e *Engine) fenceWait(fenceAt time.Time) time.Duration {
+	return min(max(fenceAt.Sub(e.now()), 0), e.opt.RenewInterval)
 }
 
 func (e *Engine) noteWake(ts ...*time.Time) {
@@ -911,7 +1033,7 @@ func (e *Engine) Stop(ctx context.Context) error {
 	for _, h := range handles {
 		if h.finalized.CompareAndSwap(false, true) {
 			h.log.Warn("job did not stop within the grace period; booking it as interrupted")
-			e.book(h, models.StatusInterrupted, errStopping.Error()+": the run did not return within the grace period", false)
+			e.book(h, models.StatusInterrupted, errStopping.Error()+": the run did not return within the grace period", false, false)
 			h.endRenew()
 		}
 	}
