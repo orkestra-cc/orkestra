@@ -1,8 +1,10 @@
 package jobs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -71,5 +73,34 @@ func TestPermanent(t *testing.T) {
 	}
 	if Permanent(nil) != nil {
 		t.Fatal("Permanent(nil) must be nil")
+	}
+}
+
+// A detail must survive JSON encoding (the runs API returns details as is):
+// NaN and ±Inf floats, and unsigned values above MaxInt64 (which would wrap
+// to a negative int64), are dropped and counted instead.
+func TestRunDetailRejectsUnencodableNumbers(t *testing.T) {
+	r := NewRun("m.j", "id", TriggerSchedule, 1, time.Now())
+	r.Detail("nan", math.NaN())
+	r.Detail("inf", math.Inf(1))
+	r.Detail("ninf", float32(math.Inf(-1)))
+	r.Detail("big", uint64(math.MaxInt64)+1)
+	r.Detail("bigu", uint(math.MaxUint64))
+	r.Detail("max", uint64(math.MaxInt64))
+	r.Detail("f", 1.5)
+	d, dropped := r.Details()
+	for _, k := range []string{"nan", "inf", "ninf", "big", "bigu"} {
+		if _, ok := d[k]; ok {
+			t.Errorf("%s kept as %#v", k, d[k])
+		}
+	}
+	if dropped != 5 {
+		t.Errorf("dropped = %d, want 5", dropped)
+	}
+	if d["max"] != int64(math.MaxInt64) || d["f"] != 1.5 {
+		t.Errorf("max = %#v, f = %#v", d["max"], d["f"])
+	}
+	if _, err := json.Marshal(d); err != nil {
+		t.Errorf("details do not encode: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"errors"
+	"math"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -50,8 +51,9 @@ func (r *Run) ScheduledFor() time.Time { return r.scheduledFor }
 
 // Detail records a value under key. It is safe for concurrent use. At most 32
 // keys are kept; strings are cut to 256 runes; only strings, bools, numbers,
-// time.Time and time.Duration (stored as its String()) are accepted. Anything
-// else is dropped and counted.
+// time.Time and time.Duration (stored as its String()) are accepted. NaN and
+// ±Inf floats and unsigned values above MaxInt64 are rejected too, so the
+// details always encode as JSON. Anything rejected is dropped and counted.
 func (r *Run) Detail(key string, value any) {
 	v, ok := normalizeDetail(value)
 	r.mu.Lock()
@@ -98,7 +100,7 @@ func normalizeDetail(value any) (any, bool) {
 	case int64:
 		return v, true
 	case uint:
-		return int64(v), true
+		return unsignedDetail(uint64(v))
 	case uint8:
 		return int64(v), true
 	case uint16:
@@ -106,17 +108,34 @@ func normalizeDetail(value any) (any, bool) {
 	case uint32:
 		return int64(v), true
 	case uint64:
-		return int64(v), true
+		return unsignedDetail(v)
 	case float32:
-		return float64(v), true
+		return floatDetail(float64(v))
 	case float64:
-		return v, true
+		return floatDetail(v)
 	case time.Time:
 		return v, true
 	case time.Duration:
 		return v.String(), true
 	}
 	return nil, false
+}
+
+// unsignedDetail keeps an unsigned value that fits int64; a larger one would
+// wrap to a negative number, so it is dropped.
+func unsignedDetail(v uint64) (any, bool) {
+	if v > math.MaxInt64 {
+		return nil, false
+	}
+	return int64(v), true
+}
+
+// floatDetail drops NaN and ±Inf, which JSON cannot encode.
+func floatDetail(v float64) (any, bool) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return nil, false
+	}
+	return v, true
 }
 
 type permanentError struct{ err error }
