@@ -84,7 +84,12 @@ func (c *PushCleanup) Run(ctx context.Context) (PushCleanupResult, error) {
 			}
 			byTier[d.Tier] = append(byTier[d.Tier], d)
 		}
-		for tier, rows := range byTier {
+		// Fixed tier order (operator, then client): a pass is deterministic.
+		for _, tier := range []string{iface.PushTierOperator, iface.PushTierClient} {
+			rows := byTier[tier]
+			if len(rows) == 0 {
+				continue
+			}
 			ids := make([]string, 0, len(rows))
 			for _, d := range rows {
 				ids = append(ids, d.SessionID)

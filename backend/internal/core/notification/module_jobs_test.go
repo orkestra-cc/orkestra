@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -105,8 +106,10 @@ func TestPushCleanup_DisablesEndedSessionsAndPrunes(t *testing.T) {
 	if err := m.Jobs()[0].Run(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
-	if len(devs.disabled) != 2 || devs.disabled[0] != "dead" || devs.disabled[1] != "cdead" {
-		t.Errorf("disabled = %v, want [dead cdead]", devs.disabled)
+	got := append([]string(nil), devs.disabled...)
+	sort.Strings(got)
+	if len(got) != 2 || got[0] != "cdead" || got[1] != "dead" {
+		t.Errorf("disabled = %v, want {dead, cdead} in any order", devs.disabled)
 	}
 	if !devs.staleBefore.Equal(t0.Add(-60*24*time.Hour)) || !devs.deleteBefore.Equal(t0.Add(-90*24*time.Hour)) {
 		t.Errorf("cutoffs stale=%v delete=%v", devs.staleBefore, devs.deleteBefore)
