@@ -1,0 +1,226 @@
+---
+title: Offline Sync
+sidebar_position: 8
+description: Idempotency keys, delta cursors with tombstones and the conflict contract for clients that queue operations offline.
+---
+
+# Offline Sync
+
+Three SDK primitives for clients that work offline, queue their operations and retry them: mobile apps, connectors and outgoing webhooks. They are domain-neutral and live in `pkg/sdk`:
+
+- `pkg/sdk/idempotency` — an `Idempotency-Key` HTTP middleware, so a retried operation never applies twice.
+- `pkg/sdk/syncdelta` — an opaque delta cursor with a stable read horizon and tombstones, the 409 conflict body, and client-time validation.
+
+The SDK ships helpers only. The routes are the module's: a module mounts the middleware on the routes it wants protected and serves its own `…/sync` endpoint.
+
+## Client contract
+
+### Idempotency-Key
+
+Send a unique `Idempotency-Key` header on every queued mutating request (`POST`, `PUT`, `PATCH`, `DELETE`) and **reuse the same key on every retry** of that operation; the id of the queued operation is a good key. `GET`, `HEAD` and `OPTIONS` are never touched.
+
+- 8 to 128 characters from `[A-Za-z0-9._:-]`.
+- Scoped to the authenticated tenant and user (and the tier the module configured), so two users may generate the same key.
+- A request carries a fingerprint: SHA-256 of method, path with query, and body. A retry must be byte-identical.
+- Bodies larger than 1 MiB are refused on idempotent requests. Uploads go through the presign, PUT, commit flow of [object storage](/sdk/object-storage); the commit is a small JSON.
+
+A module may require the header (`Options.Required`); otherwise a request without it passes through unprotected.
+
+| Situation | Response |
+| --- | --- |
+| First request with the key | Handler runs; the response is stored. |
+| Same key and fingerprint, first request finished | The stored response is replayed with `Idempotent-Replayed: true`. This includes stored 4xx responses: they are deterministic and repeat unchanged. |
+| Same key, first request still running | `409` `idempotency.in_progress` with `Retry-After: 1`. Retry after the delay. |
+| Same key, different method, URI or body | `422` `idempotency.key_reused`. This is a client bug; use a new key. |
+| Stored response was larger than 256 KiB | `409` `idempotency.replay_unavailable`. The operation did apply; fetch the current state instead. |
+| Header present but malformed | `400` `idempotency.invalid_key` |
+| Header missing on a module that requires it | `400` `idempotency.key_required` |
+| Key sent without an authenticated caller | `400` `idempotency.unauthenticated` |
+| Body over the limit | `413` `idempotency.body_too_large` |
+| Key store unavailable | `503` `idempotency.unavailable`; the handler did not run. Retry. |
+
+Responses with status 500 or above, panics and empty responses are **not** stored: the key is released and the retry executes again. An orphaned in-progress record (a replica died mid-request) expires after the lock TTL (2 minutes by default) and the next retry takes it over. Records expire after 24 hours by default.
+
+Error bodies use the envelope `{"status","title","detail","code"}` (`application/problem+json` for the idempotency codes).
+
+### Delta pull and cursor
+
+The sync endpoint returns pages shaped as:
+
+```json
+{
+  "items": [ /* created or updated rows */ ],
+  "deleted": [ "id-1", "id-2" ],
+  "cursor": "eyJ0Ijoi…",
+  "hasMore": false
+}
+```
+
+1. First pull: call without a cursor. Store the returned `cursor`.
+2. Pull again with `?cursor=<stored>` (and an optional `limit`, 1 to 500, default 200). Apply `items` (upsert) and `deleted` (remove locally), then store the new `cursor`.
+3. While `hasMore` is `true`, pull again immediately.
+
+The cursor is opaque: never parse or build one. Treat the returned cursor as replacing the old one, **even when the page is empty**: an empty page still renews the cursor, which keeps a quiet collection from expiring.
+
+**Stable horizon.** A page only contains rows with `updatedAt` at most 2 seconds before server time, and the cursor never passes that point. A write still committing when you pulled therefore cannot appear behind a cursor you already hold. A row you just wrote may take about 2 seconds to show in the next pull.
+
+**Tombstones.** Deleted rows are soft-deleted and listed by id in `deleted`. The server keeps tombstones for at least 30 days.
+
+| Situation | Response |
+| --- | --- |
+| Cursor malformed | `400` `sync.invalid_cursor`: discard it and do a full pull. |
+| Cursor issued more than the tombstone retention ago | `410` `sync.cursor_expired`: tombstones may be gone. Drop local data for this collection and do a full pull without a cursor. |
+
+### Conflicts
+
+Mutations of a synced entity carry the version the client based its change on, as `If-Match: "<version>"` (or a `baseVersion` field, per module). If the server version differs, the response is `409`:
+
+```json
+{
+  "status": 409,
+  "title": "Conflict",
+  "detail": "version conflict: current version is 7",
+  "code": "sync.conflict",
+  "currentVersion": 7,
+  "current": { /* the entity as the server has it */ }
+}
+```
+
+The client receives the current state and decides whether to merge and resubmit with the new version or to drop its change. Domain preconditions (for example a prerequisite step not yet done) are also `409`, with the module's own `code`; distinguish them by `code`, not by status. A conflict body is a stored 4xx like any other: replaying the same key returns the same conflict.
+
+### Client timestamps
+
+A queued operation may be sent days after it happened, so clients send the time they performed it (for example `clientCompletedAt`). The server treats it as data, never as ordering key, and stores its own time as well. A client time more than 5 minutes in the future or 30 days in the past is refused with `422` `sync.client_time_out_of_range`.
+
+### Retry guidance
+
+| Response | Queue action |
+| --- | --- |
+| 2xx (replayed or not) | Done. |
+| 409 `idempotency.in_progress` | Retry after `Retry-After`, same key. |
+| 409 `sync.conflict` | Reconcile with `current`, then resubmit with a new key. |
+| 400, 413, 422, other 4xx | Rejected: do not retry the same request. |
+| 410 `sync.cursor_expired` | Full resync. |
+| 5xx, 503, network error | Retry with backoff, same key. |
+
+## For module authors
+
+### Protect mutating routes
+
+Mount the middleware inside the route group of your module, after authentication (it reads the caller from the request context), and declare its collection with your module prefix:
+
+```go
+import (
+	"time"
+
+	"github.com/orkestra/backend/pkg/sdk/idempotency"
+	"github.com/orkestra/backend/pkg/sdk/module"
+)
+
+func (m *Module) Collections() []module.CollectionSpec {
+	return []module.CollectionSpec{
+		// …the module's other collections…
+		idempotency.CollectionSpec("tasks_idempotency_keys", 24*time.Hour),
+	}
+}
+
+// in RegisterRoutes / setup, once the database is available:
+store := idempotency.NewMongoStore(db.Collection("tasks_idempotency_keys"))
+
+ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+	r.Use(idempotency.Middleware(store, idempotency.Options{Scope: "operator"}))
+	// register the mutating huma routes here
+})
+```
+
+Rules:
+
+- Each module owns its own collection, named `<module>_idempotency_keys`. There is no shared platform collection. `CollectionSpec` creates the unique index on scope and key and the TTL index on `expiresAt`.
+- `Options.Scope` is the tier prefix of the stored scope (`"operator"` or `"client"`); tenant and user come from the request context.
+- Optional fields: `Required`, `MaxBody` (1 MiB), `LockTTL` (2 min), `Retention` (24 h; keep it equal to the `CollectionSpec` retention), `Now`, `Logger`.
+- The store is fail-closed: if it errors, the request gets 503 and the handler does not run.
+- Only wrap routes whose client retries; a naturally idempotent endpoint does not need it.
+
+### Serve a delta endpoint
+
+Documents must store `updatedAt` as a BSON date, `deletedAt` for tombstones, and bump `updatedAt` on every change including deletion. Ties between equal `updatedAt` are broken by a **string** field you name: `"_id"` for string-keyed collections, or the string `uuid` field for ObjectID-keyed ones (Orkestra convention). Implement `syncdelta.Entry` on the row type:
+
+```go
+type Entry interface {
+	SyncCursor() Cursor // {UpdatedAt, ID} of this row
+	IsDeleted() bool
+	SyncID() string     // id reported in Page.Deleted
+}
+```
+
+The handler:
+
+```go
+func (h *Handler) Sync(ctx context.Context, in *SyncInput) (*SyncOutput, error) {
+	now := time.Now()
+	limit := syncdelta.ClampLimit(in.Limit)
+
+	cur, err := syncdelta.DecodeCursor(in.Cursor)
+	if err != nil {
+		return nil, syncdelta.InvalidCursorError() // 400
+	}
+	if err := syncdelta.CheckExpired(cur, now, 0); err != nil {
+		return nil, syncdelta.CursorExpiredError() // 410
+	}
+
+	// Combine the delta filter with the module's own tenant (and owner) scope.
+	filter := bson.M{"$and": bson.A{
+		tenantScope(ctx),
+		syncdelta.Filter(cur, now, "uuid"),
+	}}
+	opts := options.Find().
+		SetSort(syncdelta.Sort("uuid")).
+		SetLimit(int64(limit + 1)) // one extra row tells BuildPage there is more
+	rows, err := h.repo.FindTasks(ctx, filter, opts) // []TaskRow implementing syncdelta.Entry
+	if err != nil {
+		return nil, err
+	}
+	return &SyncOutput{Body: syncdelta.BuildPage(rows, limit, cur, now)}, nil
+}
+```
+
+Notes:
+
+- `CheckExpired(cur, now, retention)` measures from the cursor's `IssuedAt` (the horizon of the response that issued it); `retention <= 0` means `DefaultTombstoneRetention` (30 days). Your tombstone purge job must keep deleted rows at least that long.
+- `BuildPage` consumes at most `limit` rows, sends tombstones to `Deleted`, and stamps the cursor with the horizon, also when the page is empty (it then repeats `prev`'s position). Return it as is.
+- Index `{tenant scope fields…, updatedAt: 1, <idField>: 1}` so the sorted query is covered.
+- Keep the tenant scope in the filter: the cursor carries no scope and must never be a way across tenants.
+
+### Conflict and client-time handling
+
+```go
+// optimistic concurrency on a mutation
+base, ok := syncdelta.ParseIfMatch(in.IfMatch) // accepts "12", 12, W/"12"
+if !ok { /* treat as a missing precondition per module policy */ }
+res, err := h.repo.UpdateIfVersion(ctx, id, base, patch)
+if errors.Is(err, repo.ErrVersionMismatch) {
+	return nil, &syncdelta.ConflictError{CurrentVersion: cur.Version, Current: cur}
+}
+
+// client-supplied time
+if err := syncdelta.ValidateClientTime(in.ClientCompletedAt, time.Now()); err != nil {
+	return nil, syncdelta.ClientTimeOutOfRangeError() // 422
+}
+```
+
+`ConflictError`, `CursorExpiredError`, `InvalidCursorError` and `ClientTimeOutOfRangeError` implement `huma.StatusError`, so a handler returns them directly. The `Code*` constants are `sync.conflict`, `sync.cursor_expired`, `sync.invalid_cursor` and `sync.client_time_out_of_range`; the idempotency codes are exported from `idempotency` the same way.
+
+## Mapping a mobile offline queue
+
+A typical field app keeps a local queue of operations (a few retries with backoff, a 4xx marks the operation `rejected`, "server wins"). The primitives above cover it as follows, taking a hypothetical `tasks` module as the example; the table says which primitive each queued operation uses.
+
+| Queued operation | Request | Primitive |
+| --- | --- | --- |
+| Update a task's status | `PATCH` task with `If-Match` base version | `Idempotency-Key` = queued operation id; `409 sync.conflict` returns the current task. |
+| Complete a task | `POST` complete with `clientCompletedAt` and `deviceId` | `Idempotency-Key`; `ValidateClientTime` on `clientCompletedAt`; version check. |
+| Revert a task | `POST` revert | `Idempotency-Key`; version check. |
+| Confirm a required check | `POST` confirmation, required before complete | `Idempotency-Key`; a missing confirmation at complete time is a domain `409` with the module code. |
+| Photo upload | presign, PUT to storage, commit | The commit is a small JSON protected by `Idempotency-Key`; the bytes go direct to storage ([object storage](/sdk/object-storage)). |
+| Pull (every 5 s, background every 15 min) | `GET …/sync?cursor=` | `syncdelta` cursor, horizon and tombstones replace any "not in the window means inactive" deduction; `410` triggers a full pull. |
+
+Client adaptation: send the queued operation id as `Idempotency-Key`, treat a replayed response as success, retry 409 `idempotency.in_progress` and 5xx with backoff on the same key, and treat the other 4xx as `rejected`.

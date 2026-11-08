@@ -52,6 +52,8 @@ explicitly yet — the grep is the gate.
 | `ctxauth/` | Request-context getters: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`. Plus the exported `Key*` string constants the backend AuthMiddleware writes against. | Frozen |
 | `modulegate/` | `ModuleGate(checker, name)` HTTP middleware (503 when disabled) + `ModuleEnabledChecker` interface. | Frozen |
 | `tenantrepo/` | Fail-closed Mongo query helpers (`Scope`, `MustScope`, `StampInsert`, `StampInsertM`, `ScopeAggregate`, `RequireInternalTenant`, `RequireExternalTenant`) + `ErrTenantScopeMissing` / `ErrTenantKindMismatch` sentinels. | Frozen |
+| `idempotency/` | `Idempotency-Key` chi middleware `Middleware(store, Options{Scope, Required, MaxBody, LockTTL, Retention})` for a module's mutating route group (mount after auth), `Store` + Mongo `NewMongoStore`, per-module collection via `CollectionSpec("<module>_idempotency_keys", retention)`, `idempotency.*` error codes. Fail-closed store (503); replays carry `Idempotent-Replayed: true`. See [offline-sync](../../../docs/site/sdk/offline-sync.mdx). | Additive-only |
+| `syncdelta/` | Pure offline delta-sync helpers: opaque `Cursor` (`Encode`/`DecodeCursor`, `IssuedAt`), `Filter(cur, now, idField)` / `Sort(idField)`, 2 s `StableHorizon`, `CheckExpired`, tombstone-aware `BuildPage(rows, limit, prev, now)` → `Page[T]`, `ConflictError` (409 `sync.conflict`), `ParseIfMatch`, `ValidateClientTime`, huma-compatible error constructors. See [offline-sync](../../../docs/site/sdk/offline-sync.mdx). | Additive-only |
 | `capability/` | `Capability` struct + `Registry`. The unit a tenant subscribes to. | Frozen |
 | `metrics/` | Default Prometheus registry + a `Default` snapshot. | Frozen |
 
@@ -128,7 +130,7 @@ The SDK is on the path to v1.0 publication. Until then:
 | Database client wrapper, OAuth flow, cookie helpers, geoip | ❌ | ✅ |
 | Anything that imports `shared/config` or auth-internal types | ❌ | ✅ |
 | HTTP middleware tied to AuthMiddleware lifecycle | ❌ | ✅ (`internal/shared/middleware`) |
-| HTTP middleware addons need to wrap their own routes with | ✅ | ❌ |
+| HTTP middleware addons need to wrap their own routes with (e.g. `idempotency.Middleware`, `modulegate.ModuleGate`) | ✅ | ❌ |
 
 When in doubt, ask: **"Could an addon extracted to its own GitHub repo
 import this?"** If yes, it belongs here. If it references config.Config,
