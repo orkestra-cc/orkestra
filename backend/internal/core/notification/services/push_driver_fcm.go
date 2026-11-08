@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ type fcmDriver struct {
 	ts        oauth2.TokenSource
 	conc      int
 	timeout   time.Duration
+	logger    *slog.Logger
 }
 
 // NewFCMPushDriver builds an FCM HTTP v1 driver from a service-account JSON.
@@ -80,7 +82,7 @@ func NewFCMPushDriver(serviceAccountJSON []byte, projectID string, opt FCMOption
 	tctx := context.WithValue(context.Background(), oauth2.HTTPClient, client)
 	return &fcmDriver{
 		baseURL: strings.TrimRight(opt.BaseURL, "/"), projectID: projectID, client: client,
-		ts: oauth2.ReuseTokenSource(nil, jc.TokenSource(tctx)), conc: opt.Concurrency, timeout: opt.Timeout,
+		ts: oauth2.ReuseTokenSource(nil, jc.TokenSource(tctx)), conc: opt.Concurrency, timeout: opt.Timeout, logger: slog.Default(),
 	}, nil
 }
 
@@ -99,6 +101,7 @@ func (d *fcmDriver) Send(ctx context.Context, msgs []PushMessage) []PushOutcome 
 		}
 		return out
 	}
+	var warnOnce sync.Once // one config warning per send
 	sem := make(chan struct{}, d.conc)
 	var wg sync.WaitGroup
 	for i := range msgs {
@@ -107,7 +110,7 @@ func (d *fcmDriver) Send(ctx context.Context, msgs []PushMessage) []PushOutcome 
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			out[i] = d.sendOne(ctx, tok.AccessToken, msgs[i])
+			out[i] = d.sendOne(ctx, tok.AccessToken, msgs[i], &warnOnce)
 		}(i)
 	}
 	wg.Wait()
@@ -124,7 +127,7 @@ func fcmBody(m PushMessage) map[string]any {
 		apnsHeaders["apns-collapse-id"] = m.CollapseKey
 	}
 	if m.TTL > 0 {
-		android["ttl"] = strconv.FormatInt(int64(m.TTL/time.Second), 10) + "s"
+		android["ttl"] = strconv.FormatInt(max(int64((m.TTL+time.Second-1)/time.Second), 1), 10) + "s"
 		apnsHeaders["apns-expiration"] = strconv.FormatInt(time.Now().Add(m.TTL).Unix(), 10)
 	}
 	msg := map[string]any{
@@ -139,7 +142,7 @@ func fcmBody(m PushMessage) map[string]any {
 	return map[string]any{"message": msg}
 }
 
-func (d *fcmDriver) sendOne(ctx context.Context, accessToken string, m PushMessage) PushOutcome {
+func (d *fcmDriver) sendOne(ctx context.Context, accessToken string, m PushMessage, warnOnce *sync.Once) PushOutcome {
 	body, _ := json.Marshal(fcmBody(m))
 	cctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
@@ -170,26 +173,40 @@ func (d *fcmDriver) sendOne(ctx context.Context, accessToken string, m PushMessa
 	}
 	_ = json.Unmarshal(raw, &eb)
 	code := eb.Error.Status
+	unregistered := false
 	for _, dt := range eb.Error.Details {
 		if dt.ErrorCode != "" {
 			code = dt.ErrorCode
 		}
 		if dt.ErrorCode == "UNREGISTERED" {
-			code = "UNREGISTERED"
-			break
+			unregistered = true
 		}
 	}
-	diag := scrub(bound(fmt.Sprintf("fcm: http %d %s %s", resp.StatusCode, code, eb.Error.Message), pushErrBound), m.Token)
+	diag := bound(scrub(fmt.Sprintf("fcm: http %d %s %s", resp.StatusCode, code, eb.Error.Message), m.Token), pushErrBound)
 	o := PushOutcome{Err: errors.New(diag)}
 	switch {
-	case resp.StatusCode == http.StatusNotFound || code == "UNREGISTERED":
+	// A token is dead ONLY when FCM says so (details[].errorCode UNREGISTERED,
+	// on any status, FCM sometimes answers 400). A bare 404 means a wrong
+	// project id or endpoint: a configuration problem, never a token verdict.
+	case unregistered:
 		o.Permanent, o.Reason = true, "fcm_unregistered"
+	case resp.StatusCode == http.StatusNotFound:
+		o.Reason = "fcm_not_found"
+		warnOnce.Do(func() {
+			d.logger.Warn("notification: fcm answered 404 without UNREGISTERED; check push.fcm.project_id",
+				"project_id", d.projectID)
+		})
 	case resp.StatusCode == http.StatusBadRequest:
-		if strings.Contains(strings.ToLower(eb.Error.Message), "token") {
-			o.Permanent, o.Reason = true, "fcm_invalid"
-		} else {
-			o.Reason = "fcm_bad_request"
+		// Permanent only when the INVALID_ARGUMENT text concerns the
+		// registration token (heuristic on FCM's English message; fails safe
+		// to non-permanent). A bare 400 or a payload error is never permanent.
+		if code == "INVALID_ARGUMENT" || eb.Error.Status == "INVALID_ARGUMENT" {
+			if strings.Contains(strings.ToLower(eb.Error.Message), "token") {
+				o.Permanent, o.Reason = true, "fcm_invalid"
+				break
+			}
 		}
+		o.Reason = "fcm_bad_request"
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
 		o.Reason = "transient"
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:

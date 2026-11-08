@@ -120,6 +120,10 @@ func TestFCM_ErrorMapping(t *testing.T) {
 		{"unregistered", 404, `{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}`, true, "fcm_unregistered"},
 		{"invalid token", 400, `{"error":{"status":"INVALID_ARGUMENT","message":"The registration token is not a valid FCM registration token","details":[{"errorCode":"INVALID_ARGUMENT"}]}}`, true, "fcm_invalid"},
 		{"bad payload", 400, `{"error":{"status":"INVALID_ARGUMENT","message":"Invalid value at 'message.data'"}}`, false, "fcm_bad_request"},
+		{"bare 404", 404, `{"error":{"code":404,"status":"NOT_FOUND","message":"Requested entity was not found."}}`, false, "fcm_not_found"},
+		{"404 unregistered", 404, `{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}`, true, "fcm_unregistered"},
+		{"400 unregistered", 400, `{"error":{"status":"INVALID_ARGUMENT","message":"bad","details":[{"errorCode":"UNREGISTERED"}]}}`, true, "fcm_unregistered"},
+		{"bare 400", 400, `bad`, false, "fcm_bad_request"},
 		{"429", 429, `{"error":{"status":"RESOURCE_EXHAUSTED"}}`, false, "transient"},
 		{"503", 503, `unavailable`, false, "transient"},
 	}
