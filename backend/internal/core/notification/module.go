@@ -17,10 +17,11 @@ import (
 
 type NotificationModule struct {
 	module.BaseModule
-	svc        *services.NotificationService
-	drivers    *services.DriverRegistry
-	handler    *handlers.NotificationHandler
-	reconciler *services.OptoutReconciler
+	svc         *services.NotificationService
+	drivers     *services.DriverRegistry
+	pushDrivers *services.PushDriverFactory // per-send push driver (Task 4 push service consumes it)
+	handler     *handlers.NotificationHandler
+	reconciler  *services.OptoutReconciler
 
 	// configService is kept for livePolicy (config_validation.go), which
 	// re-reads the one-click requirement on every marketing send rather
@@ -183,6 +184,8 @@ func (m *NotificationModule) ConfigGroups() []module.ConfigGroup {
 			Description: "The addresses recipients see when the default transport is used."},
 		{Key: "branding", Label: "Branding & templates", Order: 4,
 			Description: "Values injected into every templated email."},
+		{Key: "push", Label: "Push", Order: 5,
+			Description: "Mobile and web push delivery. With the noop provider pushes are logged (token prefix only) instead of sent; choose fcm to deliver through Firebase Cloud Messaging (HTTP v1)."},
 	}
 }
 
@@ -190,6 +193,7 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 	// The five SMTP connection settings are only meaningful when the provider
 	// dials a real server. Shared read-only condition — never mutated.
 	smtpOnly := []module.FieldCondition{{Key: "email.provider", In: []string{"smtp"}}}
+	fcmOnly := []module.FieldCondition{{Key: services.PushProviderField, In: []string{"fcm"}}}
 	return []module.ConfigField{
 		{Key: "email.provider", Label: "Email provider", Group: "delivery", Type: module.FieldEnum, Options: []string{"noop", "smtp"}, Required: true, Default: "noop", EnvVar: "NOTIFICATION_EMAIL_PROVIDER"},
 		// Required composes with DependsOn as required-when-visible: the admin
@@ -212,6 +216,11 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
 		{Key: services.SendersField, Label: "Sender profiles", Group: "senders", Type: module.FieldRecordList, Items: services.SenderItems(),
 			Description: "Each profile is a transport and an identity. Patterns decide which categories it carries; the most specific pattern wins and * is the default. A profile without patterns is a draft and receives no mail. Once any profile declares a pattern, exactly one must declare *."},
+		{Key: services.PushProviderField, Label: "Push provider", Group: "push", Type: module.FieldEnum, Options: []string{"noop", "fcm"}, Default: "noop", EnvVar: "NOTIFICATION_PUSH_PROVIDER"},
+		{Key: services.PushFCMSAField, Label: "FCM service account JSON", Group: "push", Type: module.FieldSecret, DependsOn: fcmOnly, EnvVar: "FCM_SERVICE_ACCOUNT_JSON",
+			Description: "The Firebase service-account key (JSON) with the Firebase Cloud Messaging API enabled."},
+		{Key: services.PushFCMProjectField, Label: "FCM project ID", Group: "push", Type: module.FieldString, DependsOn: fcmOnly,
+			Description: "Optional; defaults to the project_id inside the service-account JSON."},
 		{Key: "app.name", Label: "App name (in templates)", Group: "branding", Type: module.FieldString, Default: "Orkestra", EnvVar: "APP_NAME"},
 		{Key: "app.support_email", Label: "Support email (in templates)", Group: "branding", Type: module.FieldString, EnvVar: "SUPPORT_EMAIL"},
 		{Key: "app.default_locale", Label: "Default template locale", Group: "branding", Type: module.FieldEnum, Options: models.SupportedLocales, Default: "en", EnvVar: "NOTIFICATION_DEFAULT_LOCALE",
@@ -280,6 +289,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		return deps.ConfigService.GetConfig(ctx, "notification")
 	}
 	loader := services.NewSnapshotLoader(snapshot)
+	m.pushDrivers = services.NewPushDriverFactory(snapshot, deps.Logger, services.FCMOptions{})
 
 	m.drivers = services.NewDriverRegistry(services.CoreDrivers(deps.Logger)...)
 	resolver := services.NewSenderResolver(loader)

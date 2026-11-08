@@ -196,3 +196,36 @@ func TestSendersField_Declared(t *testing.T) {
 	}
 	t.Fatal("email.senders not declared")
 }
+
+func TestPushFields_Declared(t *testing.T) {
+	want := map[string]struct {
+		typ     module.ConfigFieldType
+		env     string
+		gated   bool
+		options []string
+	}{
+		"push.provider":                 {module.FieldEnum, "NOTIFICATION_PUSH_PROVIDER", false, []string{"noop", "fcm"}},
+		"push.fcm.service_account_json": {module.FieldSecret, "FCM_SERVICE_ACCOUNT_JSON", true, nil},
+		"push.fcm.project_id":           {module.FieldString, "", true, nil},
+	}
+	seen := 0
+	for _, f := range (&NotificationModule{}).ConfigSchema() {
+		w, ok := want[f.Key]
+		if !ok {
+			continue
+		}
+		seen++
+		if f.Group != "push" || f.Type != w.typ || f.EnvVar != w.env {
+			t.Errorf("%s: group=%q type=%v env=%q", f.Key, f.Group, f.Type, f.EnvVar)
+		}
+		if w.gated != (len(f.DependsOn) == 1 && f.DependsOn[0].Key == "push.provider" && len(f.DependsOn[0].In) == 1 && f.DependsOn[0].In[0] == "fcm") {
+			t.Errorf("%s: DependsOn = %+v", f.Key, f.DependsOn)
+		}
+		if f.Key == "push.provider" && (f.Default != "noop" || len(f.Options) != 2) {
+			t.Errorf("push.provider default/options = %q %v", f.Default, f.Options)
+		}
+	}
+	if seen != 3 {
+		t.Errorf("found %d push fields, want 3", seen)
+	}
+}
