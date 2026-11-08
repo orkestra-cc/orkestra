@@ -2,10 +2,11 @@ package handlers
 
 // Security regression tests for the logout identity fallback.
 //
-// POST /v1/auth/{tier}/logout is mounted on the PUBLIC router
-// (module.go → ri.Router), so no auth middleware ever populates
-// ctx["userUUID"]. The handler therefore falls back to the refresh
-// cookie to learn whose sessions to terminate. That fallback MUST
+// POST /v1/auth/{tier}/logout is mounted on the raw tier mux
+// (module.go → ri.Router / ri.ClientRouter), so no auth middleware ever
+// populates ctx["userUUID"]. The handler therefore falls back to the
+// refresh cookie (then the bearer, see logout_bearer_http_test.go) to
+// learn whose sessions to terminate. That fallback MUST
 // verify the token's signature: without it, anyone who knows a user's
 // UUID can forge a syntactically-valid JWT, present it as the cookie,
 // and terminate every session of that user (allDevices=true), with no
@@ -107,7 +108,7 @@ func TestResolveLogoutIdentity_RejectsForgedCookie(t *testing.T) {
 	})
 
 	r := logoutRequest(forged)
-	userUUID, _, ok := h.resolveLogoutIdentity(r.Context(), r)
+	userUUID, _, _, ok := h.resolveLogoutIdentity(r.Context(), r)
 
 	if ok {
 		t.Fatalf("forged cookie must not resolve an identity, got userUUID=%q", userUUID)
@@ -123,7 +124,7 @@ func TestResolveLogoutIdentity_AcceptsSignedCookie(t *testing.T) {
 	token := signedRefreshCookie(t, h, "real-user", "real-device")
 
 	r := logoutRequest(token)
-	userUUID, deviceID, ok := h.resolveLogoutIdentity(r.Context(), r)
+	userUUID, deviceID, _, ok := h.resolveLogoutIdentity(r.Context(), r)
 
 	if !ok {
 		t.Fatal("a properly signed refresh cookie must resolve an identity")
@@ -146,7 +147,7 @@ func TestResolveLogoutIdentity_RejectsCookieSignedByAnotherKey(t *testing.T) {
 	token := signedRefreshCookie(t, attackerHandler, "victim-uuid", "victim-device")
 
 	r := logoutRequest(token)
-	userUUID, _, ok := h.resolveLogoutIdentity(r.Context(), r)
+	userUUID, _, _, ok := h.resolveLogoutIdentity(r.Context(), r)
 
 	if ok {
 		t.Fatalf("token signed by a foreign key must be rejected, got userUUID=%q", userUUID)
@@ -163,7 +164,7 @@ func TestResolveLogoutIdentity_RejectsAccessTokenInCookie(t *testing.T) {
 	}
 
 	r := logoutRequest(access)
-	if _, _, ok := h.resolveLogoutIdentity(r.Context(), r); ok {
+	if _, _, _, ok := h.resolveLogoutIdentity(r.Context(), r); ok {
 		t.Fatal("an access token presented as the refresh cookie must be rejected")
 	}
 }
@@ -173,7 +174,7 @@ func TestResolveLogoutIdentity_NoCookieResolvesNothing(t *testing.T) {
 	h := logoutTestHandler(t, key)
 
 	r := logoutRequest("")
-	if _, _, ok := h.resolveLogoutIdentity(r.Context(), r); ok {
+	if _, _, _, ok := h.resolveLogoutIdentity(r.Context(), r); ok {
 		t.Fatal("a request with no refresh cookie must not resolve an identity")
 	}
 }
@@ -187,7 +188,7 @@ func TestResolveLogoutIdentity_PrefersAuthenticatedContext(t *testing.T) {
 	r := logoutRequest(token)
 	ctx := context.WithValue(r.Context(), ctxauth.KeyUserUUID, "context-user")
 
-	userUUID, _, ok := h.resolveLogoutIdentity(ctx, r)
+	userUUID, _, _, ok := h.resolveLogoutIdentity(ctx, r)
 	if !ok {
 		t.Fatal("an authenticated context must resolve an identity")
 	}

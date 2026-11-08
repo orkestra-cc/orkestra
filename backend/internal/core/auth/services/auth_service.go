@@ -1332,10 +1332,15 @@ func (s *authService) FindAccountsForConsolidation(ctx context.Context, email st
 // ActiveSessions implements iface.SessionActivityReader for this tier: true
 // for each id whose session doc is isActive and unexpired and, when a
 // revocation store is wired, not in the revocation set.
-// Invariant: every session-ending path flips the doc (revokeSessionInternal,
-// TerminateCurrentSession) AND pushes the sid into Redis; the doc is
-// authoritative, Redis is defense in depth and a Redis error is logged at
-// Warn and ignored so push never hard-depends on Redis.
+// A session therefore reads ended once it expires (idle TTL or max age) or
+// once a revocation runs revokeSessionInternal on it: password change,
+// admin or self revoke, refresh replay, and logout. Logout reaches it only
+// when the request identifies the session: a verified bearer access token
+// of that session (TerminateCurrentSession on its sid) or a verified
+// refresh cookie (TerminateSessionByUUID on the cookie's device). A logout
+// carrying neither ends nothing. The doc is authoritative, Redis is defense
+// in depth and a Redis error is logged at Warn and ignored so push never
+// hard-depends on Redis.
 // Unknown ids are absent from the map; empty input does not query.
 func (s *authService) ActiveSessions(ctx context.Context, sessionIDs []string) (map[string]bool, error) {
 	out := make(map[string]bool, len(sessionIDs))

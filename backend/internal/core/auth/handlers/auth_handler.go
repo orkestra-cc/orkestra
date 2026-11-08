@@ -210,43 +210,103 @@ func currentSessionID(ctx context.Context) string {
 	return sid
 }
 
-// resolveLogoutIdentity determines which user a logout request acts on.
+// resolveLogoutIdentity determines which user, device and session a
+// logout request acts on.
 //
-// The logout route is mounted on the PUBLIC router (module.go →
-// ri.Router) so no auth middleware ever runs ahead of it: an
-// authenticated caller carries the identity in the request context, and
-// everyone else is identified from the refresh cookie alone. Returns
-// ok=false when neither source yields an identity — the handler then
-// clears the cookie and reports success (logout is idempotent).
-func (h *AuthHandler) resolveLogoutIdentity(ctx context.Context, r *http.Request) (userUUID, deviceID string, ok bool) {
+// The logout route is mounted on the raw tier mux (module.go →
+// ri.Router / ri.ClientRouter) and no auth middleware runs ahead of it,
+// so in production the request context carries no identity. The caller
+// is identified, in order, from:
+//
+//  1. an identity already in the context (only when a future mount adds
+//     auth middleware; tests inject it), with its sid;
+//  2. the refresh cookie, signature-verified — yields user and device;
+//  3. the Authorization: Bearer access token, verified by
+//     bearerLogoutIdentity — yields user and sid. This is the mobile
+//     path: an app holds its tokens in memory and sends no cookie.
+//
+// Returns ok=false when no source yields an identity — the handler then
+// clears the cookie and reports success (logout is idempotent, and a
+// rejected credential is never explained).
+func (h *AuthHandler) resolveLogoutIdentity(ctx context.Context, r *http.Request) (userUUID, deviceID, sessionID string, ok bool) {
 	if uuid, found := ctxauth.GetUserUUID(ctx); found && uuid != "" {
 		userUUID = uuid
 	} else if legacy, _ := ctx.Value("userID").(string); legacy != "" {
 		userUUID = legacy
 	}
-
-	refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, h.config.Auth.Cookie.Name)
-	if err != nil || refreshToken == "" {
-		return userUUID, "", userUUID != ""
+	if userUUID != "" {
+		sessionID = currentSessionID(ctx)
 	}
 
-	// SIGNATURE VERIFICATION IS LOAD-BEARING HERE. This route is public,
-	// so the cookie is the only thing standing between an anonymous
-	// caller and TerminateAllSessionsByUUID. ParseUnverifiedClaims —
-	// which the audience gate uses for cheap routing ahead of a real
-	// verifier — must never be used on this path: it would let anyone
-	// hand-roll a JWT naming any userUUID and sign every session of that
-	// user out. ValidateRefreshToken checks the RS256 signature, the
-	// issuer, the audience claim, and that the token really is a refresh
-	// token (an access token in the cookie slot is rejected).
-	claims, err := h.jwtService.ValidateRefreshToken(refreshToken)
-	if err != nil || claims == nil {
-		return userUUID, "", userUUID != ""
+	if refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, h.config.Auth.Cookie.Name); err == nil && refreshToken != "" {
+		// SIGNATURE VERIFICATION IS LOAD-BEARING HERE. This route is
+		// public, so the cookie is the only thing standing between an
+		// anonymous caller and TerminateAllSessionsByUUID.
+		// ParseUnverifiedClaims — which the audience gate uses for cheap
+		// routing ahead of a real verifier — must never be used on this
+		// path: it would let anyone hand-roll a JWT naming any userUUID
+		// and sign every session of that user out. ValidateRefreshToken
+		// checks the RS256 signature, the issuer, the audience claim, and
+		// that the token really is a refresh token (an access token in
+		// the cookie slot is rejected).
+		if claims, verr := h.jwtService.ValidateRefreshToken(refreshToken); verr == nil && claims != nil {
+			if userUUID == "" {
+				userUUID = claims.UserUUID
+			}
+			return userUUID, claims.DeviceID, sessionID, userUUID != ""
+		}
 	}
-	if userUUID == "" {
-		userUUID = claims.UserUUID
+
+	if userUUID != "" {
+		return userUUID, "", sessionID, true
 	}
-	return userUUID, claims.DeviceID, userUUID != ""
+	if uuid, sid, found := h.bearerLogoutIdentity(ctx, r); found {
+		return uuid, "", sid, true
+	}
+	return "", "", "", false
+}
+
+// bearerLogoutIdentity verifies the request's Authorization: Bearer access
+// token the way RequireAuth would on this tier and returns its subject and
+// sid. The same rigour as the cookie path, plus what the middleware adds:
+//
+//   - ValidateAccessToken checks the RS256 signature, the issuer, expiry,
+//     that the token is an access token and that its audience is one this
+//     platform issues;
+//   - the audience must be THIS handler's tier (operator for the legacy
+//     mount): the JWT service deliberately does not pin it, and the mux
+//     gate accepts the service audience on the operator host;
+//   - a sid already in the revocation set is refused, as RequireAuth
+//     refuses it (a Redis error reads as not revoked, the middleware's
+//     fail-open).
+//
+// Any failure returns ok=false and nothing else: the caller answers the
+// usual logout success and the reason is never disclosed.
+func (h *AuthHandler) bearerLogoutIdentity(ctx context.Context, r *http.Request) (userUUID, sessionID string, ok bool) {
+	if h.jwtService == nil {
+		return "", "", false
+	}
+	parts := strings.Fields(r.Header.Get("Authorization"))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return "", "", false
+	}
+	claims, err := h.jwtService.ValidateAccessToken(parts[1])
+	if err != nil || claims == nil || claims.UserUUID == "" {
+		return "", "", false
+	}
+	want := h.tier
+	if want == "" {
+		want = services.AudienceOperator
+	}
+	if claims.Audience != want {
+		return "", "", false
+	}
+	if claims.SessionID != "" && h.sessionRevocation != nil {
+		if revoked, _ := h.sessionRevocation.IsRevoked(ctx, claims.SessionID); revoked {
+			return "", "", false
+		}
+	}
+	return claims.UserUUID, claims.SessionID, true
 }
 
 const invalidOAuthAuthenticationDetail = "Invalid OAuth authentication"
@@ -1486,10 +1546,11 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	userUUID, deviceID, ok := h.resolveLogoutIdentity(ctx, r)
+	userUUID, deviceID, sessionID, ok := h.resolveLogoutIdentity(ctx, r)
 	if !ok {
-		// No authenticated context and no verifiable refresh cookie —
-		// there is nothing we may act on. Clear and report success.
+		// No authenticated context, no verifiable refresh cookie and no
+		// verifiable bearer — there is nothing we may act on. Clear and
+		// report success.
 		respondLoggedOut()
 		return
 	}
@@ -1527,8 +1588,8 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	// nothing. Terminate the bearer's own session doc so every
 	// session-ending path flips isActive (push stops with the session).
 	if !req.AllDevices {
-		if sid := currentSessionID(ctx); sid != "" {
-			if err := h.authService.TerminateCurrentSession(ctx, userUUID, sid); err != nil {
+		if sessionID != "" {
+			if err := h.authService.TerminateCurrentSession(ctx, userUUID, sessionID); err != nil {
 				logger.Warn("logout current session termination degraded",
 					slog.String("outcome", revocationFailureOutcome(err)))
 			}
@@ -1541,8 +1602,8 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	// bearer still works until its exp ticks over. Best-effort: Redis errors
 	// log but do not fail the logout response.
 	if h.sessionRevocation != nil {
-		if sid := currentSessionID(ctx); sid != "" {
-			if err := h.sessionRevocation.Revoke(ctx, sid, "logout"); err != nil {
+		if sessionID != "" {
+			if err := h.sessionRevocation.Revoke(ctx, sessionID, "logout"); err != nil {
 				logger.Warn("logout session revocation degraded",
 					slog.String("outcome", "revocation_store_unavailable"))
 			}
