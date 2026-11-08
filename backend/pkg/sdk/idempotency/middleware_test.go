@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,42 +21,65 @@ type fakeStore struct {
 	abandoned int
 	err       error
 	forced    *Record
+	seq       int
+	renewed   int
 }
 
 func newFake() *fakeStore { return &fakeStore{recs: map[string]*Record{}} }
 
-func (f *fakeStore) Begin(_ context.Context, scope, key, fp string, now, lu, ea time.Time) (*Record, error) {
+func (f *fakeStore) Begin(_ context.Context, scope, key, fp string, now, lu, ea time.Time) (string, *Record, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
-		return nil, f.err
+		return "", nil, f.err
 	}
 	if f.forced != nil {
-		return f.forced, nil
+		return "", f.forced, nil
 	}
 	id := scope + "/" + key
 	if r, ok := f.recs[id]; ok {
 		cp := *r
-		return &cp, nil
+		return "", &cp, nil
 	}
-	f.recs[id] = &Record{Scope: scope, Key: key, Fingerprint: fp, State: StateInProgress, LockedUntil: lu, ExpiresAt: ea}
-	return nil, nil
+	f.seq++
+	owner := fmt.Sprintf("o%d", f.seq)
+	f.recs[id] = &Record{Scope: scope, Key: key, Fingerprint: fp, State: StateInProgress, Owner: owner, LockedUntil: lu, ExpiresAt: ea}
+	return owner, nil, nil
 }
 
-func (f *fakeStore) Finish(_ context.Context, scope, key string, status int, ct, loc string, body []byte, stored bool) error {
+func (f *fakeStore) Renew(_ context.Context, scope, key, owner string, lu time.Time) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r := f.recs[scope+"/"+key]
-	r.State, r.Status, r.ContentType, r.Location, r.Body, r.BodyStored = StateDone, status, ct, loc, body, stored
-	return nil
+	if r == nil || r.Owner != owner || r.State != StateInProgress {
+		return false, nil
+	}
+	r.LockedUntil = lu
+	f.renewed++
+	return true, nil
 }
 
-func (f *fakeStore) Abandon(_ context.Context, scope, key string) error {
+func (f *fakeStore) Finish(_ context.Context, scope, key, owner string, status int, ct, loc string, body []byte, stored bool) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	r := f.recs[scope+"/"+key]
+	if r == nil || r.Owner != owner || r.State != StateInProgress {
+		return false, nil
+	}
+	r.State, r.Status, r.ContentType, r.Location, r.Body, r.BodyStored = StateDone, status, ct, loc, body, stored
+	return true, nil
+}
+
+func (f *fakeStore) Abandon(_ context.Context, scope, key, owner string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.recs[scope+"/"+key]
+	if r == nil || r.Owner != owner || r.State != StateInProgress {
+		return false, nil
+	}
 	f.abandoned++
 	delete(f.recs, scope+"/"+key)
-	return nil
+	return true, nil
 }
 
 const goodKey = "key-12345678"
@@ -297,5 +321,42 @@ func TestUnauthenticatedWithKey(t *testing.T) {
 	rr := do(t, h, "", goodKey, "x")
 	if rr.Code != 400 || code(t, rr) != CodeUnauthenticated || n != 0 {
 		t.Fatalf("got %d %s", rr.Code, rr.Body)
+	}
+}
+
+func TestRenewKeepsLockWhileHandlerRuns(t *testing.T) {
+	fs := newFake()
+	h := Middleware(fs, Options{LockTTL: 30 * time.Millisecond})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(120 * time.Millisecond)
+		w.WriteHeader(201)
+	}))
+	rr := do(t, h, "u1", goodKey, "a")
+	if rr.Code != 201 {
+		t.Fatalf("got %d", rr.Code)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.renewed < 2 {
+		t.Fatalf("renewed=%d", fs.renewed)
+	}
+}
+
+func TestStaleOwnerFinishAndAbandonAreNoOps(t *testing.T) {
+	fs := newFake()
+	ctx := context.Background()
+	now := time.Now()
+	ownerA, _, _ := fs.Begin(ctx, "s", "k", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
+	// Simulate a takeover by B.
+	fs.mu.Lock()
+	fs.recs["s/k"].Owner = "B"
+	fs.mu.Unlock()
+	if ok, _ := fs.Abandon(ctx, "s", "k", ownerA); ok {
+		t.Fatal("stale abandon acted")
+	}
+	if ok, _ := fs.Finish(ctx, "s", "k", ownerA, 200, "", "", nil, true); ok {
+		t.Fatal("stale finish acted")
+	}
+	if r := fs.recs["s/k"]; r == nil || r.State != StateInProgress || r.Owner != "B" {
+		t.Fatalf("record touched: %+v", r)
 	}
 }

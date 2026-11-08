@@ -98,7 +98,7 @@ func Middleware(store Store, opt Options) func(http.Handler) http.Handler {
 			fp := hex.EncodeToString(sum.Sum(nil))
 
 			now := opt.Now()
-			existing, err := store.Begin(r.Context(), scope, key, fp, now, now.Add(opt.LockTTL), now.Add(opt.Retention))
+			owner, existing, err := store.Begin(r.Context(), scope, key, fp, now, now.Add(opt.LockTTL), now.Add(opt.Retention))
 			if err != nil {
 				opt.Logger.Error("idempotency store begin failed", "error", err)
 				writeProblem(w, http.StatusServiceUnavailable, CodeUnavailable, "idempotency store unavailable")
@@ -111,20 +111,51 @@ func Middleware(store Store, opt Options) func(http.Handler) http.Handler {
 
 			// Release/finish outlive a client disconnect.
 			sctx := context.WithoutCancel(r.Context())
+			abandon := func() {
+				if ok, aerr := store.Abandon(sctx, scope, key, owner); aerr != nil {
+					opt.Logger.Error("idempotency abandon failed", "error", aerr)
+				} else if !ok {
+					opt.Logger.Warn("idempotency abandon skipped: lock was taken over", "scope", scope)
+				}
+			}
+			// Keep the lock alive while the handler runs.
+			stopRenew := make(chan struct{})
+			renewDone := make(chan struct{})
+			go func() {
+				defer close(renewDone)
+				t := time.NewTicker(opt.LockTTL / 3)
+				defer t.Stop()
+				for {
+					select {
+					case <-stopRenew:
+						return
+					case <-t.C:
+						ok, rerr := store.Renew(sctx, scope, key, owner, opt.Now().Add(opt.LockTTL))
+						if rerr != nil {
+							opt.Logger.Error("idempotency renew failed", "error", rerr)
+						} else if !ok {
+							opt.Logger.Warn("idempotency renew: lock was taken over", "scope", scope)
+							return
+						}
+					}
+				}
+			}()
+			stop := func() {
+				close(stopRenew)
+				<-renewDone
+			}
 			cw := &captureWriter{ResponseWriter: w}
 			defer func() {
 				if rec := recover(); rec != nil {
-					if aerr := store.Abandon(sctx, scope, key); aerr != nil {
-						opt.Logger.Error("idempotency abandon failed", "error", aerr)
-					}
+					stop()
+					abandon()
 					panic(rec)
 				}
 			}()
 			next.ServeHTTP(cw, r)
+			stop()
 			if !cw.wrote || cw.status >= 500 {
-				if aerr := store.Abandon(sctx, scope, key); aerr != nil {
-					opt.Logger.Error("idempotency abandon failed", "error", aerr)
-				}
+				abandon()
 				return
 			}
 			h := cw.Header()
@@ -132,8 +163,11 @@ func Middleware(store Store, opt Options) func(http.Handler) http.Handler {
 			if !cw.overflow {
 				stored = cw.buf.Bytes()
 			}
-			if ferr := store.Finish(sctx, scope, key, cw.status, h.Get("Content-Type"), h.Get("Location"), stored, !cw.overflow); ferr != nil {
+			ok, ferr := store.Finish(sctx, scope, key, owner, cw.status, h.Get("Content-Type"), h.Get("Location"), stored, !cw.overflow)
+			if ferr != nil {
 				opt.Logger.Error("idempotency finish failed", "error", ferr)
+			} else if !ok {
+				opt.Logger.Warn("idempotency finish skipped: lock was taken over", "scope", scope)
 			}
 		})
 	}

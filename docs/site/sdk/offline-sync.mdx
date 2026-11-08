@@ -29,7 +29,7 @@ A module may require the header (`Options.Required`); otherwise a request withou
 | Situation | Response |
 | --- | --- |
 | First request with the key | Handler runs; the response is stored. |
-| Same key and fingerprint, first request finished | The stored response is replayed with `Idempotent-Replayed: true`. This includes stored 4xx responses: they are deterministic and repeat unchanged. |
+| Same key and fingerprint, first request finished | The stored response is replayed with `Idempotent-Replayed: true`. This includes stored 4xx responses: they are deterministic and repeat unchanged. A replay carries only the status, `Content-Type`, `Location` and the body; other headers such as `ETag` are not replayed, so put anything the client needs in the body. |
 | Same key, first request still running | `409` `idempotency.in_progress` with `Retry-After: 1`. Retry after the delay. |
 | Same key, different method, URI or body | `422` `idempotency.key_reused`. This is a client bug; use a new key. |
 | Stored response was larger than 256 KiB | `409` `idempotency.replay_unavailable`. The operation did apply; fetch the current state instead. |
@@ -99,6 +99,9 @@ A queued operation may be sent days after it happened, so clients send the time 
 | 2xx (replayed or not) | Done. |
 | 409 `idempotency.in_progress` | Retry after `Retry-After`, same key. |
 | 409 `sync.conflict` | Reconcile with `current`, then resubmit with a new key. |
+| 401 | Re-authenticate, then retry with the same key. |
+| 429 | Retry after `Retry-After`, same key. |
+| 409 `idempotency.replay_unavailable` | The operation already applied: do not re-send it; refetch the current state. |
 | 400, 413, 422, other 4xx | Rejected: do not retry the same request. |
 | 410 `sync.cursor_expired` | Full resync. |
 | 5xx, 503, network error | Retry with backoff, same key. |
@@ -120,7 +123,7 @@ import (
 func (m *Module) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
 		// …the module's other collections…
-		idempotency.CollectionSpec("tasks_idempotency_keys", 24*time.Hour),
+		idempotency.CollectionSpec("tasks_idempotency_keys"),
 	}
 }
 
@@ -137,7 +140,7 @@ Rules:
 
 - Each module owns its own collection, named `<module>_idempotency_keys`. There is no shared platform collection. `CollectionSpec` creates the unique index on scope and key and the TTL index on `expiresAt`.
 - `Options.Scope` is the tier prefix of the stored scope (`"operator"` or `"client"`); tenant and user come from the request context.
-- Optional fields: `Required`, `MaxBody` (1 MiB), `LockTTL` (2 min), `Retention` (24 h; keep it equal to the `CollectionSpec` retention), `Now`, `Logger`.
+- Optional fields: `Required`, `MaxBody` (1 MiB), `LockTTL` (2 min), `Retention` (24 h; stamped on each record as its own `expiresAt`, so the collection needs no retention setting), `Now`, `Logger`.
 - The store is fail-closed: if it errors, the request gets 503 and the handler does not run.
 - Only wrap routes whose client retries; a naturally idempotent endpoint does not need it.
 
@@ -223,4 +226,4 @@ A typical field app keeps a local queue of operations (a few retries with backof
 | Photo upload | presign, PUT to storage, commit | The commit is a small JSON protected by `Idempotency-Key`; the bytes go direct to storage ([object storage](/sdk/object-storage)). |
 | Pull (every 5 s, background every 15 min) | `GET …/sync?cursor=` | `syncdelta` cursor, horizon and tombstones replace any "not in the window means inactive" deduction; `410` triggers a full pull. |
 
-Client adaptation: send the queued operation id as `Idempotency-Key`, treat a replayed response as success, retry 409 `idempotency.in_progress` and 5xx with backoff on the same key, and treat the other 4xx as `rejected`.
+Client adaptation: send the queued operation id as `Idempotency-Key`, treat a replayed response as success, retry 409 `idempotency.in_progress`, 429 and 5xx with backoff on the same key, retry 401 with the same key after re-authentication, treat 409 `idempotency.replay_unavailable` as applied (refetch state), and treat the other 4xx as `rejected`.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
@@ -40,7 +42,7 @@ func newTestStore(t *testing.T) (Store, *mongo.Collection) {
 		_ = client.Disconnect(c)
 	})
 	coll := db.Collection("idem")
-	spec := CollectionSpec("idem", time.Hour)
+	spec := CollectionSpec("idem")
 	for _, is := range spec.Indexes {
 		keys := bson.D{}
 		for _, k := range is.OrderedKeys {
@@ -70,7 +72,7 @@ func TestMongoBeginRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			rec, err := s.Begin(context.Background(), "s", "k", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
+			_, rec, err := s.Begin(context.Background(), "s", "k", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
 			if err != nil {
 				t.Errorf("begin: %v", err)
 				return
@@ -94,20 +96,92 @@ func TestMongoTakeOverExpiredLock(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 	now := time.Now()
-	if rec, err := s.Begin(ctx, "s", "k", "fp1", now, now.Add(time.Minute), now.Add(time.Hour)); rec != nil || err != nil {
-		t.Fatalf("first: %v %v", rec, err)
+	ownerA, rec, err := s.Begin(ctx, "s", "k", "fp1", now, now.Add(time.Minute), now.Add(time.Hour))
+	if ownerA == "" || rec != nil || err != nil {
+		t.Fatalf("first: %q %v %v", ownerA, rec, err)
 	}
 	// Lock still valid: not taken over.
-	if rec, _ := s.Begin(ctx, "s", "k", "fp2", now.Add(time.Second), now.Add(2*time.Minute), now.Add(time.Hour)); rec == nil || rec.Fingerprint != "fp1" {
-		t.Fatalf("expected existing fp1, got %+v", rec)
+	if o, rec, _ := s.Begin(ctx, "s", "k", "fp1", now.Add(time.Second), now.Add(2*time.Minute), now.Add(time.Hour)); o != "" || rec == nil || rec.Fingerprint != "fp1" {
+		t.Fatalf("expected existing fp1, got %q %+v", o, rec)
 	}
 	later := now.Add(5 * time.Minute)
-	if rec, err := s.Begin(ctx, "s", "k", "fp2", later, later.Add(time.Minute), later.Add(time.Hour)); rec != nil || err != nil {
-		t.Fatalf("takeover: %v %v", rec, err)
+	// Expired lock, different fingerprint: no takeover, existing record returned.
+	if o, rec, _ := s.Begin(ctx, "s", "k", "fp2", later, later.Add(time.Minute), later.Add(time.Hour)); o != "" || rec == nil || rec.Fingerprint != "fp1" {
+		t.Fatalf("different fingerprint must not take over: %q %+v", o, rec)
 	}
-	rec, _ := s.Begin(ctx, "s", "k", "fp3", later, later.Add(time.Minute), later.Add(time.Hour))
-	if rec == nil || rec.Fingerprint != "fp2" {
-		t.Fatalf("takeover did not update fingerprint: %+v", rec)
+	// Expired lock, same fingerprint: taken over with a new owner.
+	ownerB, rec, err := s.Begin(ctx, "s", "k", "fp1", later, later.Add(time.Minute), later.Add(time.Hour))
+	if ownerB == "" || ownerB == ownerA || rec != nil || err != nil {
+		t.Fatalf("takeover: %q %v %v", ownerB, rec, err)
+	}
+}
+
+func TestMongoStaleOwnerCannotTouchNewOwnerRecord(t *testing.T) {
+	s, coll := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	ownerA, _, _ := s.Begin(ctx, "s", "k", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
+	later := now.Add(5 * time.Minute)
+	ownerB, rec, err := s.Begin(ctx, "s", "k", "fp", later, later.Add(time.Minute), later.Add(time.Hour))
+	if ownerB == "" || rec != nil || err != nil {
+		t.Fatalf("takeover: %q %v %v", ownerB, rec, err)
+	}
+	if ok, err := s.Renew(ctx, "s", "k", ownerA, later.Add(time.Hour)); ok || err != nil {
+		t.Fatalf("stale renew: %v %v", ok, err)
+	}
+	if ok, err := s.Abandon(ctx, "s", "k", ownerA); ok || err != nil {
+		t.Fatalf("stale abandon: %v %v", ok, err)
+	}
+	if ok, err := s.Finish(ctx, "s", "k", ownerA, 200, "", "", []byte("x"), true); ok || err != nil {
+		t.Fatalf("stale finish: %v %v", ok, err)
+	}
+	var cur Record
+	if err := coll.FindOne(ctx, bson.M{"scope": "s", "key": "k"}).Decode(&cur); err != nil {
+		t.Fatalf("record gone: %v", err)
+	}
+	if cur.State != StateInProgress || cur.Owner != ownerB {
+		t.Fatalf("record touched: %+v", cur)
+	}
+	// The new owner still works, and renewal extends the lock.
+	if ok, _ := s.Renew(ctx, "s", "k", ownerB, later.Add(time.Hour)); !ok {
+		t.Fatal("owner renew failed")
+	}
+	if ok, _ := s.Finish(ctx, "s", "k", ownerB, 201, "", "", []byte("y"), true); !ok {
+		t.Fatal("owner finish failed")
+	}
+}
+
+func TestMiddlewareRenewalBlocksConcurrentRetry(t *testing.T) {
+	s, _ := newTestStore(t)
+	n := 0
+	var mu sync.Mutex
+	release := make(chan struct{})
+	h := Middleware(s, Options{LockTTL: 150 * time.Millisecond})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		mu.Unlock()
+		<-release
+		w.WriteHeader(201)
+	}))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- do(t, h, "u1", goodKey, "a") }()
+	// Wait well past several LockTTLs: without renewal the lock would expire.
+	time.Sleep(600 * time.Millisecond)
+	rr := do(t, h, "u1", goodKey, "a")
+	if rr.Code != 409 || code(t, rr) != CodeInProgress {
+		t.Fatalf("retry got %d %s", rr.Code, rr.Body)
+	}
+	close(release)
+	if first := <-done; first.Code != 201 {
+		t.Fatalf("first got %d", first.Code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n != 1 {
+		t.Fatalf("handler ran %d times", n)
+	}
+	if rr := do(t, h, "u1", goodKey, "a"); rr.Code != 201 || rr.Header().Get(HeaderReplayed) != "true" {
+		t.Fatalf("replay got %d", rr.Code)
 	}
 }
 
@@ -115,11 +189,11 @@ func TestMongoFinishThenBeginReturnsDone(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 	now := time.Now()
-	_, _ = s.Begin(ctx, "s", "k", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
-	if err := s.Finish(ctx, "s", "k", 201, "application/json", "/x/1", []byte(`{"a":1}`), true); err != nil {
-		t.Fatal(err)
+	owner, _, _ := s.Begin(ctx, "s", "k", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
+	if ok, err := s.Finish(ctx, "s", "k", owner, 201, "application/json", "/x/1", []byte(`{"a":1}`), true); err != nil || !ok {
+		t.Fatal(ok, err)
 	}
-	rec, err := s.Begin(ctx, "s", "k", "fp", now.Add(time.Hour), now.Add(2*time.Hour), now.Add(3*time.Hour))
+	_, rec, err := s.Begin(ctx, "s", "k", "fp", now.Add(time.Hour), now.Add(2*time.Hour), now.Add(3*time.Hour))
 	if err != nil || rec == nil {
 		t.Fatalf("got %v %v", rec, err)
 	}
@@ -127,11 +201,14 @@ func TestMongoFinishThenBeginReturnsDone(t *testing.T) {
 		t.Fatalf("bad record %+v", rec)
 	}
 	// Abandon after done is a no-op; abandon of an in-progress key frees it.
-	_, _ = s.Begin(ctx, "s", "k2", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
-	if err := s.Abandon(ctx, "s", "k2"); err != nil {
-		t.Fatal(err)
+	if ok, _ := s.Abandon(ctx, "s", "k", owner); ok {
+		t.Fatal("abandon touched a done record")
 	}
-	if rec, _ := s.Begin(ctx, "s", "k2", "fp", now, now.Add(time.Minute), now.Add(time.Hour)); rec != nil {
+	o2, _, _ := s.Begin(ctx, "s", "k2", "fp", now, now.Add(time.Minute), now.Add(time.Hour))
+	if ok, err := s.Abandon(ctx, "s", "k2", o2); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if o, rec, _ := s.Begin(ctx, "s", "k2", "fp", now, now.Add(time.Minute), now.Add(time.Hour)); o == "" || rec != nil {
 		t.Fatal("key not released")
 	}
 }
