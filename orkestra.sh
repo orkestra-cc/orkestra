@@ -166,7 +166,7 @@ COMPOSE_OVERLAY_FILES=()
 ENV_FILE="$DOCKER_DIR/.env"
 
 # ADR-0005 Phase D — self-hosted observability stack (Loki, Tempo,
-# Prometheus, Promtail, otel-collector, Grafana). Orthogonal to the
+# Prometheus, Alloy, otel-collector, Grafana). Orthogonal to the
 # SKU profile / full-stack split: you typically run it alongside
 # whichever app stack is up.
 OBSERVABILITY_COMPOSE="$DOCKER_DIR/docker-compose.observability.yml"
@@ -1389,6 +1389,7 @@ fullstack_execute_deploy() {
     # stack already has observability containers. The overlay is only valid as
     # part of this merged stack, never on its own.
     if observability_project_active; then
+        observability_require_grafana_password
         compose_files+=(-f "$OBSERVABILITY_COMPOSE")
     fi
     # Same for the retrieval overlay's endpoints and retrieval-net.
@@ -1725,7 +1726,7 @@ stack_compose_files() {
 #
 # Orthogonal to the SKU/full-stack split. Operators run this alongside
 # their app stack to get Tempo (traces), Prometheus (metrics), Loki
-# (logs), Grafana (UI), Promtail (log shipper), otel-collector (OTLP
+# (logs), Grafana (UI), Alloy (log shipper), otel-collector (OTLP
 # ingest). The overlay now joins the SAME Compose project as the app
 # stack (COMPOSE_PROJECT_NAME=${APP_NAME}-${ENV} — no more standalone
 # "orkestra-observability" project) via multi-file `-f infra -f app -f
@@ -1749,8 +1750,14 @@ observability_init_env() {
 # so asking Compose to parse that file alone is invalid and must never become
 # service discovery. Keeping service and volume ownership here makes an empty
 # discovery result incapable of widening a lifecycle command to the project.
-declare -ar OBS_SERVICES=(otel-collector tempo prometheus loki promtail grafana)
-declare -ar OBS_VOLUMES=(tempo-data prometheus-data loki-data promtail-positions grafana-data)
+declare -ar OBS_SERVICES=(otel-collector tempo prometheus loki alloy grafana)
+declare -ar OBS_VOLUMES=(tempo-data prometheus-data loki-data alloy-data grafana-data)
+# Promtail was replaced by Alloy (2026-11). A host upgraded from the earlier
+# overlay still carries its container (end-of-life image, Docker socket
+# mounted) and its positions volume, which the lists above no longer name:
+# observability up removes them (observability_migrate_legacy).
+declare -ar OBS_LEGACY_SERVICES=(promtail)
+declare -ar OBS_LEGACY_VOLUMES=(promtail-positions)
 
 # Validate the explicit ownership lists against the only valid configuration:
 # infra + app + observability. Any Compose failure or missing expected resource
@@ -1788,11 +1795,74 @@ observability_remove_volumes() {
     done
 }
 
+# Running containers of one observability service in this stack's project,
+# found by their Compose labels. Never through `compose ps` on the merged
+# files: an unset GRAFANA_ADMIN_PASSWORD makes the overlay fail to render, and
+# a render error read as "overlay not active" would let a deploy recreate the
+# backend without the overlay's Loki/Grafana settings, silently.
+observability_service_containers() {
+    docker ps -q \
+        --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" \
+        --filter "label=com.docker.compose.service=$1" 2> /dev/null
+}
+
 observability_project_active() {
-    local container_ids
-    container_ids=$(compose_stack -f "$OBSERVABILITY_COMPOSE" \
-        --env-file "$ENV_FILE" ps -q "${OBS_SERVICES[@]}" 2> /dev/null) || return 1
-    [ -n "$container_ids" ]
+    local service
+    for service in "${OBS_SERVICES[@]}" "${OBS_LEGACY_SERVICES[@]}"; do
+        [ -n "$(observability_service_containers "$service")" ] && return 0
+    done
+    return 1
+}
+
+# Grafana's admin password has no fallback in the overlay; the shipped
+# docker/.env.example placeholder is a public string, so refuse it too.
+observability_require_grafana_password() {
+    case "$(retrieval_setting GRAFANA_ADMIN_PASSWORD)" in
+        "")
+            die "GRAFANA_ADMIN_PASSWORD is not set in $ENV_FILE: set it (openssl rand -hex 16) before the observability overlay can start; no lifecycle action was taken."
+            ;;
+        REPLACE_WITH_*)
+            die "GRAFANA_ADMIN_PASSWORD still holds the docker/.env.example placeholder: run make init (or set it to the output of openssl rand -hex 16); no lifecycle action was taken."
+            ;;
+    esac
+}
+
+# One-time clean-up of a host upgraded from the 2024 overlay: drop the
+# Promtail container and its positions volume, and hand tempo-data to the uid
+# Tempo 2.10 runs as (10001; 2.4 ran as root, so an old volume is root-owned
+# and the new Tempo would crash-loop on it). Runs only when a Promtail
+# leftover proves this is such a host.
+observability_migrate_legacy() {
+    local service ids volume volume_name legacy=0 grafana_image
+    for service in "${OBS_LEGACY_SERVICES[@]}"; do
+        ids=$(docker ps -aq \
+            --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" \
+            --filter "label=com.docker.compose.service=${service}" 2> /dev/null || true)
+        if [ -n "$ids" ]; then
+            legacy=1
+            p_muted "Removing the retired ${service} container (replaced by Alloy)"
+            # shellcheck disable=SC2086 # one id per word
+            docker rm -f $ids > /dev/null || die "Failed to remove the retired ${service} container."
+        fi
+    done
+    for volume in "${OBS_LEGACY_VOLUMES[@]}"; do
+        volume_name="${COMPOSE_PROJECT_NAME}_${volume}"
+        if docker volume inspect "$volume_name" > /dev/null 2>&1; then
+            legacy=1
+            docker volume rm "$volume_name" > /dev/null || \
+                die "Failed to remove the retired volume '$volume_name'."
+        fi
+    done
+    [ "$legacy" = 1 ] || return 0
+    volume_name="${COMPOSE_PROJECT_NAME}_tempo-data"
+    docker volume inspect "$volume_name" > /dev/null 2>&1 || return 0
+    # Tempo's image is scratch (no chown); Grafana's pinned image has one.
+    grafana_image=$(sed -n 's/^ *image: *\(grafana\/grafana:[^ ]*\) *$/\1/p' "$OBSERVABILITY_COMPOSE" | head -1)
+    [ -n "$grafana_image" ] || die "Cannot find the Grafana image in $OBSERVABILITY_COMPOSE."
+    p_muted "Handing ${volume_name} to Tempo's uid 10001"
+    docker run --rm --user 0 --network none --entrypoint chown \
+        -v "${volume_name}:/var/tempo" "$grafana_image" -R 10001:10001 /var/tempo > /dev/null || \
+        die "Failed to chown ${volume_name} for Tempo 2.10."
 }
 
 # The backend's file list goes through stack_compose_files so that a running
@@ -1816,7 +1886,9 @@ observability_up() {
     check_docker_running
     observability_check_file
     observability_init_env
+    observability_require_grafana_password
     observability_list_services
+    observability_migrate_legacy
     echo
     p_muted "Compose: $(basename "$OBSERVABILITY_COMPOSE")"
     echo
@@ -1910,7 +1982,7 @@ observability_info() {
     page_header "Observability · Info"
     draw_box "URLs" \
         "" \
-        "  ${c_bold}Grafana${c_reset}     http://localhost:${grafana_port}   ${c_muted}(admin/admin; anon viewer enabled)${c_reset}" \
+        "  ${c_bold}Grafana${c_reset}     http://localhost:${grafana_port}   ${c_muted}(${GRAFANA_ADMIN_USER:-admin} / GRAFANA_ADMIN_PASSWORD from docker/.env)${c_reset}" \
         "  ${c_bold}Prometheus${c_reset}  http://localhost:${prometheus_port}" \
         "  ${c_bold}Tempo${c_reset}       http://localhost:${tempo_port}     ${c_muted}(query via Grafana — not for direct use)${c_reset}" \
         "  ${c_bold}Loki${c_reset}        http://localhost:${loki_port}     ${c_muted}(query via Grafana — not for direct use)${c_reset}" \
@@ -3688,7 +3760,7 @@ ${c_bold}FULL STACK${c_reset} ${c_muted}(uses ENV from docker/.env or ENV=... pr
   ${c_accent}logs${c_reset} <service> [flags]            View logs for a full-stack service
 
 ${c_bold}OBSERVABILITY${c_reset} ${c_muted}(self-hosted OTEL stack — runs alongside any app stack)${c_reset}
-  ${c_accent}observability up${c_reset}                  Start Tempo + Prometheus + Loki + Promtail + Grafana
+  ${c_accent}observability up${c_reset}                  Start Tempo + Prometheus + Loki + Alloy + Grafana
   ${c_accent}observability down${c_reset}                Stop containers (volumes kept)
   ${c_accent}observability reset${c_reset} [--yes]       Wipe volumes (dashboards/metrics/logs erased)
   ${c_accent}observability status${c_reset}              Containers + resource usage

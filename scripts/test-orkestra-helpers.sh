@@ -102,11 +102,11 @@ export OBS_RESET_LOG="$obs_reset_log"
         case " $* " in
             *" config --services "*)
                 printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
-                    otel-collector tempo prometheus loki promtail grafana
+                    otel-collector tempo prometheus loki alloy grafana
                 ;;
             *" config --volumes "*)
                 printf '%s\n' mongodb-data redis-data rustfs-data \
-                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                    tempo-data prometheus-data loki-data alloy-data grafana-data
                 ;;
         esac
         return 0
@@ -116,10 +116,10 @@ export OBS_RESET_LOG="$obs_reset_log"
 check "observability reset never falls through to down -v" "no" "$(grep -Eq 'compose .* down -v( |$)' "$obs_reset_log" && printf yes || printf no)"
 check "observability reset removes only six explicit services" \
     "yes" \
-    "$(grep -Eq 'compose .* rm -sfv otel-collector tempo prometheus loki promtail grafana$' "$obs_reset_log" && printf yes || printf no)"
+    "$(grep -Eq 'compose .* rm -sfv otel-collector tempo prometheus loki alloy grafana$' "$obs_reset_log" && printf yes || printf no)"
 check "observability reset removes five explicit named volumes" \
     "5" \
-    "$(grep -Ec '^volume rm orkestra-test-development_(tempo-data|prometheus-data|loki-data|promtail-positions|grafana-data)$' "$obs_reset_log" || true)"
+    "$(grep -Ec '^volume rm orkestra-test-development_(tempo-data|prometheus-data|loki-data|alloy-data|grafana-data)$' "$obs_reset_log" || true)"
 check "observability reset never targets application or infra volumes" \
     "no" \
     "$(grep -Eq '^volume rm .*_(mongodb-data|redis-data|rustfs-data)$' "$obs_reset_log" && printf yes || printf no)"
@@ -142,6 +142,7 @@ export OBS_UP_LOG="$obs_up_log"
     p_muted() { :; }
     p_ok() { :; }
     observability_info() { :; }
+    GRAFANA_ADMIN_PASSWORD=test-grafana-password
     with_spinner() {
         shift
         "$@"
@@ -150,13 +151,14 @@ export OBS_UP_LOG="$obs_up_log"
         local IFS=' '
         printf '%s\n' "$*" >> "$OBS_UP_LOG"
         case " $* " in
+            *" volume inspect "*) return 1 ;;
             *" config --services "*)
                 printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
-                    otel-collector tempo prometheus loki promtail grafana
+                    otel-collector tempo prometheus loki alloy grafana
                 ;;
             *" config --volumes "*)
                 printf '%s\n' mongodb-data redis-data rustfs-data \
-                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                    tempo-data prometheus-data loki-data alloy-data grafana-data
                 ;;
             *" ps -q backend "*) printf 'backend-id\n' ;;
         esac
@@ -167,7 +169,82 @@ export OBS_UP_LOG="$obs_up_log"
 check "observability up applies its backend override through the merged stack" \
     "yes" \
     "$(grep -Eq 'compose .* -f .*docker-compose.observability.yml .* up -d --no-deps backend$' "$obs_up_log" && printf yes || printf no)"
+check "observability up on a fresh host runs no legacy clean-up" \
+    "no" \
+    "$(grep -Eq '^(rm -f|run --rm --user 0)' "$obs_up_log" && printf yes || printf no)"
 rm -f "$obs_up_log"
+
+# The overlay counts as active from its containers' labels, never from a
+# compose render (which an unset Grafana password breaks), and a leftover
+# Promtail container counts too.
+obs_active() {
+    (
+        COMPOSE_PROJECT_NAME=orkestra-test-development
+        OBS_ACTIVE_SERVICE=$1
+        docker() {
+            local IFS=' '
+            case " $* " in
+                *" ps -q --filter label=com.docker.compose.project=orkestra-test-development --filter label=com.docker.compose.service=${OBS_ACTIVE_SERVICE} "*)
+                    printf 'container-id\n' ;;
+            esac
+            return 0
+        }
+        compose_stack() { return 1; }
+        observability_project_active && printf yes || printf no
+    )
+}
+check "observability is active when its alloy container runs" "yes" "$(obs_active alloy)"
+check "observability is active when only a legacy promtail runs" "yes" "$(obs_active promtail)"
+check "observability is not active without any of its containers" "no" "$(obs_active none)"
+
+# observability up refuses an empty or placeholder Grafana password before
+# touching anything.
+obs_pw_log="$(mktemp)"
+export OBS_PW_LOG="$obs_pw_log"
+obs_pw_out=$(
+    check_docker_running() { :; }
+    observability_check_file() { :; }
+    observability_init_env() { ENV_FILE=/nonexistent/.env; COMPOSE_PROJECT_NAME=orkestra-test-development; }
+    page_header() { :; }
+    GRAFANA_ADMIN_PASSWORD=REPLACE_WITH_RANDOM_HEX_32_GRAFANA_ADMIN
+    docker() { local IFS=' '; printf '%s\n' "$*" >> "$OBS_PW_LOG"; return 0; }
+    observability_up 2>&1
+)
+check "observability up refuses the placeholder Grafana password" \
+    "yes/no" \
+    "$(printf '%s' "$obs_pw_out" | grep -q 'GRAFANA_ADMIN_PASSWORD still holds the docker/.env.example placeholder' && printf yes || printf no)/$([ -s "$obs_pw_log" ] && printf yes || printf no)"
+rm -f "$obs_pw_log"
+
+# A host upgraded from the Promtail overlay: the retired container and volume
+# go, and tempo-data is handed to Tempo 2.10's uid through the pinned Grafana
+# image (Tempo's own image has no chown).
+obs_mig_log="$(mktemp)"
+export OBS_MIG_LOG="$obs_mig_log"
+(
+    COMPOSE_PROJECT_NAME=orkestra-test-development
+    OBSERVABILITY_COMPOSE="$PROJECT_ROOT/docker/docker-compose.observability.yml"
+    p_muted() { :; }
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$OBS_MIG_LOG"
+        case " $* " in
+            *" ps -aq "*"service=promtail "*) printf 'old-promtail-id\n' ;;
+            *" volume inspect orkestra-test-development_promtail-positions "*) return 0 ;;
+            *" volume inspect orkestra-test-development_tempo-data "*) return 0 ;;
+            *" volume inspect "*) return 1 ;;
+        esac
+        return 0
+    }
+    observability_migrate_legacy
+) >/dev/null 2>&1
+obs_grafana_image=$(sed -n 's/^ *image: *\(grafana\/grafana:[^ ]*\) *$/\1/p' "$PROJECT_ROOT/docker/docker-compose.observability.yml" | head -1)
+check "observability migration removes the retired promtail container" "yes" \
+    "$(grep -qx 'rm -f old-promtail-id' "$obs_mig_log" && printf yes || printf no)"
+check "observability migration removes the promtail positions volume" "yes" \
+    "$(grep -qx 'volume rm orkestra-test-development_promtail-positions' "$obs_mig_log" && printf yes || printf no)"
+check "observability migration hands tempo-data to uid 10001" "yes" \
+    "$(grep -qxF "run --rm --user 0 --network none --entrypoint chown -v orkestra-test-development_tempo-data:/var/tempo ${obs_grafana_image} -R 10001:10001 /var/tempo" "$obs_mig_log" && printf yes || printf no)"
+rm -f "$obs_mig_log"
 
 obs_down_log="$(mktemp)"
 export OBS_DOWN_LOG="$obs_down_log"
@@ -194,11 +271,11 @@ export OBS_DOWN_LOG="$obs_down_log"
         case " $* " in
             *" config --services "*)
                 printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
-                    otel-collector tempo prometheus loki promtail grafana
+                    otel-collector tempo prometheus loki alloy grafana
                 ;;
             *" config --volumes "*)
                 printf '%s\n' mongodb-data redis-data rustfs-data \
-                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                    tempo-data prometheus-data loki-data alloy-data grafana-data
                 ;;
             *" ps -q backend "*) printf 'backend-id\n' ;;
         esac
@@ -208,7 +285,7 @@ export OBS_DOWN_LOG="$obs_down_log"
 ) >/dev/null 2>&1
 check "observability down dry-run removes only six explicit services" \
     "yes" \
-    "$(grep -Eq 'compose .* rm -sf otel-collector tempo prometheus loki promtail grafana$' "$obs_down_log" && printf yes || printf no)"
+    "$(grep -Eq 'compose .* rm -sf otel-collector tempo prometheus loki alloy grafana$' "$obs_down_log" && printf yes || printf no)"
 check "observability down dry-run never uses project-wide down" \
     "no" \
     "$(grep -Eq 'compose .* down( |$)' "$obs_down_log" && printf yes || printf no)"
@@ -284,12 +361,12 @@ ret_run() {
             case " $* " in
                 *" config --services "*)
                     printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
-                        otel-collector tempo prometheus loki promtail grafana \
+                        otel-collector tempo prometheus loki alloy grafana \
                         qdrant tei-embed tei-rerank tei-embed-seed tei-rerank-seed
                     ;;
                 *" config --volumes "*)
                     printf '%s\n' mongodb-data redis-data rustfs-data \
-                        tempo-data prometheus-data loki-data promtail-positions grafana-data \
+                        tempo-data prometheus-data loki-data alloy-data grafana-data \
                         qdrant-data tei-weights
                     ;;
                 *" ps -q backend "*) printf 'backend-id\n' ;;
@@ -454,6 +531,7 @@ check "observability down keeps the retrieval override" "yes/no" \
     "$(has "$ret_log" 'docker-compose.retrieval.yml .*up -d --no-deps backend$')/$(has "$ret_log" 'docker-compose.observability.yml .*up -d --no-deps backend$')"
 (
     retrieval_project_active() { return 0; }
+    GRAFANA_ADMIN_PASSWORD=test-grafana-password
     ret_run observability_up
 )
 check "observability up keeps the retrieval override" "yes" \
@@ -543,7 +621,7 @@ ret_catalog_count="$(
 check "retrieval log picker uses the explicit service catalog" "5" "$ret_catalog_count"
 ret_run logs_cli retrieval qdrant -n 20 -t; rc=$?
 check "retrieval logs read the merged stack, scoped to the project" "0/yes/no" \
-    "$rc/$(has "$ret_log" '^compose -f .*docker-compose.infra.yml -f .*docker-compose.dev.yml -f .*docker-compose.retrieval.yml --env-file .* logs --timestamps --tail=20 qdrant$')/$(has "$ret_log" '^ps .*--filter')"
+    "$rc/$(has "$ret_log" '^compose -f .*docker-compose.infra.yml -f .*docker-compose.dev.yml -f .*docker-compose.retrieval.yml --env-file .* logs --timestamps --tail=20 qdrant$')/$(has "$ret_log" '^ps .*--filter .*service=(qdrant|tei-)')"
 ret_run logs_cli retrieval tei-embed-seed -f
 check "retrieval logs of a seed carry its profile" "yes" \
     "$(has "$ret_log" '-f .*docker-compose.retrieval.yml --env-file .* --profile retrieval-seed logs --follow tei-embed-seed$')"

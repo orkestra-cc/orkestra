@@ -1,0 +1,98 @@
+// Grafana Alloy config for the Orkestra observability overlay (ADR-0005
+// Phase D). Translated from the former promtail/promtail.yaml with
+// `alloy convert --source-format=promtail` (2026-11 security audit: Promtail
+// reached end of life on 2026-03-02), then adjusted by hand:
+//   - ${STACK} expansion becomes sys.env("STACK") (Promtail's
+//     -config.expand-env had no direct translation);
+//   - Promtail's client batching (1s / 1 MiB) is restated on loki.write.
+// The labels are the ones Promtail set, so the provisioned dashboards and the
+// per-level retention rules in ../loki/loki.yaml keep working unchanged.
+
+// Containers of this stack only (orkestra.stack=<APP_NAME>-<ENV>).
+discovery.docker "orkestra" {
+	host             = "unix:///var/run/docker.sock"
+	refresh_interval = "5s"
+
+	filter {
+		name   = "label"
+		values = ["orkestra.stack=" + sys.env("STACK")]
+	}
+}
+
+discovery.relabel "orkestra" {
+	targets = []
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "compose_service"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+		target_label  = "compose_project"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_orkestra_stack"]
+		target_label  = "stack"
+	}
+}
+
+loki.source.docker "orkestra" {
+	host          = "unix:///var/run/docker.sock"
+	targets       = discovery.docker.orkestra.targets
+	forward_to    = [loki.process.orkestra.receiver]
+	relabel_rules = discovery.relabel.orkestra.rules
+}
+
+// Parse the backend's JSON log lines: level/module/service/audience become
+// labels (low cardinality), trace_id/tenant_id structured metadata.
+loki.process "orkestra" {
+	forward_to = [loki.write.default.receiver]
+
+	stage.json {
+		expressions = {
+			audience  = "audience",
+			level     = "level",
+			module    = "module",
+			service   = "service",
+			tenant_id = "tenant_id",
+			trace_id  = "trace_id",
+		}
+	}
+
+	stage.labels {
+		values = {
+			audience = null,
+			level    = null,
+			module   = null,
+			service  = null,
+		}
+	}
+
+	stage.structured_metadata {
+		values = {
+			tenant_id = null,
+			trace_id  = null,
+		}
+	}
+}
+
+loki.write "default" {
+	endpoint {
+		url        = "http://loki:3100/loki/api/v1/push"
+		batch_wait = "1s"
+		batch_size = "1MiB"
+	}
+}
