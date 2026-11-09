@@ -1355,9 +1355,13 @@ fullstack_execute_deploy() {
         p_muted "  Commit     $GIT_COMMIT"
         echo
 
+        # --pull: --no-cache rebuilds our layers but still takes each FROM
+        # from the local image store, so a tag pinned to a minor (dhi.io/golang:1.27)
+        # or a base without a digest stays at whatever this host pulled months
+        # ago, missing its security patches. Pull the bases on every rebuild.
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Building backend image (no cache)" \
-                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" build --no-cache \
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" build --no-cache --pull \
                 --build-arg VERSION="$VERSION" \
                 --build-arg BUILD_TIME="$BUILD_TIME" \
                 --build-arg GIT_COMMIT="$GIT_COMMIT" \
@@ -1365,7 +1369,7 @@ fullstack_execute_deploy() {
         fi
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Building admin frontend image (no cache)" \
-                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" build --no-cache \
+                compose_stack ${compose_files[@]+"${compose_files[@]}"} --env-file "$ENV_FILE" build --no-cache --pull \
                 --build-arg VERSION="$VERSION" \
                 --build-arg BUILD_TIME="$BUILD_TIME" \
                 --build-arg GIT_COMMIT="$GIT_COMMIT" \

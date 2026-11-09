@@ -17,7 +17,7 @@ PDF_RENDERER_PASSWORD=x
 EOF
 infra=$(docker compose --env-file "$env_file" -f docker-compose.infra.yml config)
 need() { grep -qF -- "$1" <<<"$infra" || { echo "FAIL: infra compose lacks: $1"; fail=1; }; }
-need "gotenberg/gotenberg:8@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769"
+need "gotenberg/gotenberg:8.40.0@sha256:53073e798c8ef39ea2187e44cb67bab77894ea2509100b94c4fe3b461f7b2996"
 need "--chromium-disable-javascript=true"
 need "--chromium-deny-list=^(?!file:///tmp/).*"
 need "--chromium-deny-private-ips=true"

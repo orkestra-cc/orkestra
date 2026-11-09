@@ -45,3 +45,32 @@ updates:
       interval: weekly
     open-pull-requests-limit: 3
     labels: [dependencies, flutter]
+
+  # Added by the 2026-11 security audit: these manifests had no update source.
+  - package-ecosystem: npm
+    directory: /frontend-client
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, npm]
+
+  # Base images are pinned to a version tag plus digest; this keeps the
+  # digests moving. backend/ is left out on purpose: its dhi.io bases need
+  # registry credentials Dependabot does not have, and are pinned to the Go
+  # minor (patches arrive through orkestra.sh building with --pull).
+  - package-ecosystem: docker
+    directories: [/frontend-admin, /frontend-client, /docker]
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]
+
+  - package-ecosystem: docker-compose
+    directory: /docker
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]
