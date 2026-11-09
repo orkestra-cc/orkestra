@@ -58,9 +58,10 @@ updates:
   # Base images are pinned to a version tag plus digest; this keeps the
   # digests moving. backend/ is left out on purpose: its dhi.io bases need
   # registry credentials Dependabot does not have, and are pinned to the Go
-  # minor (patches arrive through orkestra.sh building with --pull).
+  # minor (patches arrive through orkestra.sh building with --pull). So is
+# docker/Dockerfile.dev-backend, whose FROM is an ARG Dependabot cannot bump.
   - package-ecosystem: docker
-    directories: [/frontend-admin, /frontend-client, /docker]
+    directories: [/frontend-admin, /frontend-client]
     target-branch: dev
     schedule:
       interval: weekly
