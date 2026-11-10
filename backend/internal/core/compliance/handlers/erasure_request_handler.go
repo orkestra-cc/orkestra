@@ -69,7 +69,7 @@ const defaultErasureListLimit = 50
 
 // List returns requests by status, newest first, paged by cursor.
 func (h *ErasureRequestHandler) List(ctx context.Context, in *ListErasureRequestsInput) (*ListErasureRequestsOutput, error) {
-	f := repository.ErasureListFilter{UserUUID: in.UserUUID, Limit: in.Limit, After: in.After}
+	f := repository.ErasureListFilter{UserUUID: services.NormalizeSubjectUUID(in.UserUUID), Limit: in.Limit, After: in.After}
 	isOpen := in.Status == "" || in.Status == "open"
 	switch {
 	case isOpen:
