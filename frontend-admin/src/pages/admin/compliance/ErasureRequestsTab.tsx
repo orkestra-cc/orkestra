@@ -30,6 +30,7 @@ import SearchablePagedTable from 'components/common/advance-table/SearchablePage
 import { erasureStatusColor, formatDateTime } from './complianceFormat';
 import ReasonModal from './policies/ReasonModal';
 import ApproveErasureModal from './ApproveErasureModal';
+import ExecuteErasureModal from './ExecuteErasureModal';
 import ErasureReceiptModal from './ErasureReceiptModal';
 import OpenErasureRequestModal from './OpenErasureRequestModal';
 import { erasureErrorMessage } from './erasureErrors';
@@ -78,7 +79,7 @@ const ErasureRequestsTab = () => {
     items: ErasureRequest[];
     next?: string;
   } | null>(null);
-  useEffect(() => setMore(null), [data, status]);
+  useEffect(() => setMore(null), [status]);
   const onLoadMore = async () => {
     const cursor = more ? more.next : data?.next;
     if (!cursor) return;
@@ -104,6 +105,9 @@ const ErasureRequestsTab = () => {
     useApproveErasureRequestMutation();
   const [closeTarget, setCloseTarget] = useState<ErasureRequest | null>(null);
   const [approveTarget, setApproveTarget] = useState<ErasureRequest | null>(
+    null
+  );
+  const [executeTarget, setExecuteTarget] = useState<ErasureRequest | null>(
     null
   );
   const [showOpen, setShowOpen] = useState(false);
@@ -305,14 +309,7 @@ const ErasureRequestsTab = () => {
             request={original}
             me={me}
             onApprove={() => setApproveTarget(original)}
-            onExecute={() =>
-              onExecute(
-                original.uuid,
-                (original.approvals ?? []).length > 0
-                  ? undefined
-                  : (original.mode ?? 'hard_delete')
-              )
-            }
+            onExecute={() => setExecuteTarget(original)}
             onReject={() => onReject(original.uuid)}
           />
         ) : original.status === 'completed' ||
@@ -329,7 +326,12 @@ const ErasureRequestsTab = () => {
     }
   ];
 
-  const items = [...(data?.items ?? []), ...(more?.items ?? [])];
+  const first = data?.items ?? [];
+  const seen = new Set(first.map(r => r.uuid));
+  const items = [
+    ...first,
+    ...(more?.items ?? []).filter(r => !seen.has(r.uuid))
+  ];
 
   // No SectionCard shell: the pane sits under the page's card-header-tabs,
   // and the active tab already names this section.
@@ -413,13 +415,20 @@ const ErasureRequestsTab = () => {
       <ApproveErasureModal
         show={approveTarget !== null}
         busy={approving}
-        lockedMode={
-          (approveTarget?.approvals ?? []).length > 0
-            ? approveTarget?.mode
-            : undefined
-        }
+        lockedMode={approveTarget?.mode || undefined}
         onCancel={() => setApproveTarget(null)}
         onConfirm={onApprove}
+      />
+      <ExecuteErasureModal
+        show={executeTarget !== null}
+        busy={false}
+        lockedMode={executeTarget?.mode || undefined}
+        onCancel={() => setExecuteTarget(null)}
+        onConfirm={async mode => {
+          const target = executeTarget;
+          setExecuteTarget(null);
+          if (target) await onExecute(target.uuid, mode);
+        }}
       />
       <ErasureReceiptModal
         requestId={receiptId}
@@ -465,7 +474,7 @@ const PendingActions = ({
   );
   return (
     <>
-      {need > 1 && (
+      {need > 1 && !(me && by.has(me)) && (
         <IconButton
           size="sm"
           variant="outline-primary"

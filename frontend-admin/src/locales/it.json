@@ -2643,17 +2643,34 @@
       },
       "errors": {
         "erasure_approvals_missing": "Approvazioni insufficienti: {{have}} su {{need}}",
-        "erasure_self_approval": "Non puoi approvare una richiesta che hai aperto",
+        "erasure_self_approval": "Non puoi aprire, approvare o eseguire la cancellazione del tuo stesso account",
         "erasure_already_approved": "Hai già approvato questa richiesta",
         "erasure_mode_mismatch": "La modalità è diversa da quella già approvata",
         "erasure_request_exists": "Esiste già una richiesta aperta per questo soggetto ({{requestId}})",
         "erasure_request_busy": "Un'altra esecuzione è in corso; riprova tra qualche minuto",
         "legal_hold_active": "Bloccata da un blocco legale",
-        "retention_minimum_not_met": "La cancellazione definitiva non è consentita prima del {{date}} (conservazione minima); usa l'anonimizzazione",
+        "retention_minimum_not_met": "La cancellazione definitiva non è consentita prima del {{date}} ({{reasons}}); usa l'anonimizzazione",
         "retention_check_unavailable": "Il controllo di conservazione non è disponibile; riprova più tardi",
         "reason_required": "Motivo o nota devono avere da 1 a 500 caratteri",
         "invalid_cursor": "Il cursore di pagina non è più valido; ricarica l'elenco",
-        "erasure_receipt_unavailable": "La ricevuta non è disponibile per questa richiesta"
+        "erasure_receipt_unavailable": "La ricevuta non è disponibile per questa richiesta",
+        "erasure_request_started": "La richiesta è già avviata e non può più essere rifiutata",
+        "erasure_request_not_closable": "Questa richiesta non può essere chiusa come parziale",
+        "erasure_close_note_required": "Serve una nota per chiudere la richiesta"
+      },
+      "retentionReason": {
+        "platform_minimum": "conservazione minima di piattaforma"
+      },
+      "outcome": {
+        "done": "Completato",
+        "pending": "In attesa",
+        "failed": "Non riuscito"
+      },
+      "execute_modal": {
+        "title": "Esegui la cancellazione",
+        "mode": "Modalità",
+        "locked": "Modalità fissata dalla richiesta",
+        "submit": "Esegui"
       }
     },
     "holds": {

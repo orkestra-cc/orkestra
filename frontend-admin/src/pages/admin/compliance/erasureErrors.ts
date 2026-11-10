@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next';
+import { formatDate } from './complianceFormat';
 
 // Backend error codes the erasure workflow can answer with. Each has a
 // translated message under adminCompliance.erasure.errors; the body members
@@ -10,6 +11,9 @@ const KNOWN = new Set([
   'compliance.erasure_mode_mismatch',
   'compliance.erasure_request_exists',
   'compliance.erasure_request_busy',
+  'compliance.erasure_request_started',
+  'compliance.erasure_request_not_closable',
+  'compliance.erasure_close_note_required',
   'compliance.legal_hold_active',
   'compliance.retention_minimum_not_met',
   'compliance.retention_check_unavailable',
@@ -24,6 +28,7 @@ interface ErrBody {
   need?: number;
   requestId?: string;
   retainUntil?: string;
+  reasons?: string[];
 }
 
 // erasureErrorMessage maps an RTK Query error to a translated message, or to
@@ -42,9 +47,12 @@ export const erasureErrorMessage = (
       have: body.have,
       need: body.need,
       requestId: body.requestId,
-      date: body.retainUntil
-        ? new Date(body.retainUntil).toLocaleDateString()
-        : ''
+      date: body.retainUntil ? formatDate(body.retainUntil) : '',
+      reasons: (body.reasons ?? [])
+        .map(r =>
+          t(`adminCompliance.erasure.retentionReason.${r}`, { defaultValue: r })
+        )
+        .join(', ')
     }
   );
 };

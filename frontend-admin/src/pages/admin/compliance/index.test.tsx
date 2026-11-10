@@ -437,6 +437,11 @@ describe('CompliancePage', () => {
 
     await screen.findByText('u-erase-1');
     await userEvent.click(screen.getByRole('button', { name: /^execute$/i }));
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: /^execute$/i
+      })
+    );
 
     await waitFor(() => expect(executeHit).not.toBeNull());
     expect(executeHit!.path).toBe(
@@ -648,6 +653,11 @@ describe('CompliancePage', () => {
     renderWithProviders(<CompliancePage />);
     await screen.findByText('u-erase-1');
     await userEvent.click(screen.getByRole('button', { name: /^execute$/i }));
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: /^execute$/i
+      })
+    );
     await waitFor(() =>
       expect(toast.warning).toHaveBeenCalledWith(
         expect.stringMatching(/will be retried/i)

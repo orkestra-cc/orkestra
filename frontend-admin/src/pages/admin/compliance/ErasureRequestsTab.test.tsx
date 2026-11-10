@@ -84,8 +84,12 @@ describe('ErasureRequestsTab', () => {
     ).toBeDisabled();
     const run = rowOf('u-b').getByRole('button', { name: /execute/i });
     expect(run).toBeEnabled();
-    await userEvent.setup().click(run);
-    // Approvals exist: the mode is the locked one, so none is sent.
+    const user = userEvent.setup();
+    await user.click(run);
+    // Mode is locked by the request: shown read-only, none is sent.
+    const dlg = within(await screen.findByRole('dialog'));
+    expect(dlg.getByDisplayValue('Anonymize')).toHaveAttribute('readonly');
+    await user.click(dlg.getByRole('button', { name: /^execute$/i }));
     await waitFor(() => expect(execBody).toEqual({}));
     expect(toast.success).toHaveBeenCalled();
   });
@@ -175,7 +179,7 @@ describe('ErasureRequestsTab', () => {
     );
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        'You cannot approve a request you opened'
+        'You cannot open, approve or execute the erasure of your own account'
       )
     );
   });
@@ -219,5 +223,90 @@ describe('ErasureRequestsTab', () => {
     expect(create).toHaveBeenCalledTimes(1);
     const blob = (create.mock.calls[0] as unknown as [Blob])[0];
     expect(JSON.parse(await blob.text())).toEqual(receipt);
+  });
+
+  it('asks for a mode when the request has none and sends it', async () => {
+    let body: unknown;
+    server.use(
+      http.get(url(LIST), () => HttpResponse.json({ items: [row({})] })),
+      http.post(url(`${LIST}/:id/execute`), async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ status: 'completed' });
+      })
+    );
+    renderWithProviders(<ErasureRequestsTab />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^execute$/i }));
+    const dlg = within(await screen.findByRole('dialog'));
+    expect(dlg.getByLabelText(/^mode/i)).toHaveValue('hard_delete');
+    await user.selectOptions(dlg.getByLabelText(/^mode/i), 'anonymize');
+    await user.click(dlg.getByRole('button', { name: /^execute$/i }));
+    await waitFor(() => expect(body).toEqual({ mode: 'anonymize' }));
+  });
+
+  it('hides Approve once the operator approved, and keeps loaded pages across a refetch', async () => {
+    let calls = 0;
+    server.use(
+      http.get(url(LIST), ({ request }) => {
+        const after = new URL(request.url).searchParams.get('after');
+        calls++;
+        return HttpResponse.json(
+          after
+            ? { items: [row({ uuid: 'p2', userUuid: 'u-page2' })] }
+            : {
+                items: [
+                  row({
+                    uuid: 'p1',
+                    userUuid: 'u-page1',
+                    requiredApprovals: 2,
+                    mode: 'anonymize',
+                    approvals: [{ by: 'op-me', at: '2026-06-01T11:00:00Z' }]
+                  })
+                ],
+                next: 'c1'
+              }
+        );
+      })
+    );
+    renderWithProviders(<ErasureRequestsTab />);
+    const user = userEvent.setup();
+    await screen.findByText('u-page1');
+    expect(
+      rowOf('u-page1').queryByRole('button', { name: /^approve$/i })
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /load more/i }));
+    expect(await screen.findByText('u-page2')).toBeInTheDocument();
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  it('shows retention reasons and the date for retention_minimum_not_met', async () => {
+    server.use(
+      http.get(url(LIST), () => HttpResponse.json({ items: [row({})] })),
+      http.post(url(`${LIST}/:id/execute`), () =>
+        HttpResponse.json(
+          {
+            code: 'compliance.retention_minimum_not_met',
+            retainUntil: '2028-03-05T00:00:00Z',
+            reasons: ['platform_minimum', 'billing.invoices']
+          },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<ErasureRequestsTab />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^execute$/i }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: /^execute$/i
+      })
+    );
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const msg = String(
+      (toast.error as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    );
+    expect(msg).toContain('platform minimum retention');
+    expect(msg).toContain('billing.invoices');
+    expect(msg).toContain('2028');
   });
 });

@@ -92,7 +92,11 @@ const ErasureReceiptModal = ({ requestId, onClose }: Props) => {
                 {(data.producers ?? []).map(p => (
                   <tr key={p.key}>
                     <td>{p.key}</td>
-                    <td>{p.outcome}</td>
+                    <td>
+                      {t(`adminCompliance.erasure.outcome.${p.outcome}`, {
+                        defaultValue: p.outcome
+                      })}
+                    </td>
                   </tr>
                 ))}
               </tbody>

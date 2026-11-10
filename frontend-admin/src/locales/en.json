@@ -2643,17 +2643,34 @@
       },
       "errors": {
         "erasure_approvals_missing": "Not enough approvals: {{have}} of {{need}}",
-        "erasure_self_approval": "You cannot approve a request you opened",
+        "erasure_self_approval": "You cannot open, approve or execute the erasure of your own account",
         "erasure_already_approved": "You have already approved this request",
         "erasure_mode_mismatch": "The mode differs from the one already approved",
         "erasure_request_exists": "An open request already exists for this subject ({{requestId}})",
         "erasure_request_busy": "Another run is in progress; try again in a few minutes",
         "legal_hold_active": "Blocked by a legal hold",
-        "retention_minimum_not_met": "Hard delete is not allowed before {{date}} (minimum retention); anonymize instead",
+        "retention_minimum_not_met": "Hard delete is not allowed before {{date}} ({{reasons}}); anonymize instead",
         "retention_check_unavailable": "The retention check is unavailable; try again later",
         "reason_required": "The reason or note must be 1 to 500 characters",
         "invalid_cursor": "The page cursor is no longer valid; reload the list",
-        "erasure_receipt_unavailable": "The receipt is not available for this request"
+        "erasure_receipt_unavailable": "The receipt is not available for this request",
+        "erasure_request_started": "The request has already started and can no longer be rejected",
+        "erasure_request_not_closable": "This request cannot be closed as partial",
+        "erasure_close_note_required": "A note is required to close the request"
+      },
+      "retentionReason": {
+        "platform_minimum": "platform minimum retention"
+      },
+      "outcome": {
+        "done": "Done",
+        "pending": "Pending",
+        "failed": "Failed"
+      },
+      "execute_modal": {
+        "title": "Execute erasure",
+        "mode": "Mode",
+        "locked": "Mode locked by the request",
+        "submit": "Execute"
       }
     },
     "holds": {
