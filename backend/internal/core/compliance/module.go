@@ -44,6 +44,7 @@ type Module struct {
 	legalHoldSvc  *services.LegalHoldService
 	dsrExport     *handlers.DSRExportHandler
 	dsrExportSvc  *services.DSRExportService
+	dsrPreview    *handlers.DSRPreviewHandler
 	retention     *handlers.RetentionHandler
 	retentionSvc  *services.RetentionService
 	erasureRetry  *services.ErasureRetryWorker
@@ -407,6 +408,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		erasureReqSvc.SetRequiredApprovals(func(context.Context) int {
 			return deps.GetConfigInt("compliance", "erasure_required_approvals", 1)
 		})
+		m.dsrPreview = handlers.NewDSRPreviewHandler(services.NewDSRPreviewService(dsrSvc, legalHoldSvc, erasureReqSvc, deps.Logger))
 		m.me = handlers.NewMeHandler(dsrSvc, erasureReqSvc)
 		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
 		m.erasureRetry = services.NewErasureRetryWorker(erasureReqSvc, deps.Logger)
@@ -547,7 +549,7 @@ func (m *Module) Stop(_ context.Context) error {
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// Admin reads — audit events, SOC2 (when enabled), legal-hold list —
 	// gated by the audit read permission.
-	if m.admin != nil || m.soc2 != nil || m.legalHold != nil || m.retention != nil || m.erasureReq != nil || m.dsrExport != nil {
+	if m.admin != nil || m.soc2 != nil || m.legalHold != nil || m.retention != nil || m.erasureReq != nil || m.dsrExport != nil || m.dsrPreview != nil {
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.compliance.audit.read"))
 			api := humachi.New(r, ri.APIConfig)
@@ -568,6 +570,9 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 			}
 			if m.dsrExport != nil {
 				handlers.RegisterDSRExportReadRoutes(api, m.dsrExport)
+			}
+			if m.dsrPreview != nil {
+				handlers.RegisterDSRPreviewRoutes(api, m.dsrPreview)
 			}
 		})
 	}

@@ -11,6 +11,7 @@ module.go                         Module: collections, permissions, config, nav,
 models/dsr_export.go              DSRExport (`compliance_dsr_exports`) and the per-subject erasure marker (`compliance_dsr_export_erasures`)
 repository/dsr_export_repo.go     export rows and erasure markers
 handlers/dsr_export_handler.go    list / create / download of stored exports
+handlers/dsr_preview_handler.go   GET …/compliance/dsr/preview (audit.read)
 services/
   sink.go                         AuditSink impl (append-only compliance_audit_events); satisfies iface.AuditSink
   dsr.go                          DSRService: Export + Erase/EraseRemaining over iface.PIIProducerRegistry; EraseMode; legal-hold gate (ErrLegalHoldActive)
@@ -20,6 +21,7 @@ services/
   dsr_export.go                   DSRExportService: operator export on behalf of a subject stored as an expiring blob (bucket `dsr-exports`, key `<uuid>.<json|csv>`), 5-minute download URL, CleanupExpired, PurgeUser
   dsr_export_csv.go               FlattenBundleCSV (`producer,path,value`, csvsafe cells)
   dsr_export_producer.go          the PII producer `compliance.dsr_exports` (export list, purge both modes, count)
+  dsr_preview.go                  DSRService.CountAll (per-producer `iface.PIIProducerCounter` walk: 5 s timeout, panic recovery, Error "count failed") + DSRPreviewService.Preview (holds, retention gate, open requests, counts, hard-delete/anonymize flags)
   dsr_export_jobs.go              RunDSRExportsCleanup: body of the job `compliance.dsr_exports_cleanup`
   exporttest/                     in-memory export repository and object store (with download presigner) for tests
   retention.go                    RetentionService: daily Loop reaping anonymized user tombstones through ErasureRequestService.EraseNow (durable `retention` request; skips subjects with an incomplete erasure, or whose retention request another replica inserted first; off by default)
@@ -88,6 +90,7 @@ All five are `System: true`. `audit.read` and `policy.read` are Cedar-covered by
 
 - Self-service: `POST /v1/me/dsr/{export,erase,erasure-request}`.
 - Admin reads (audit.read): `GET /v1/admin/audit-events`, `…/compliance/legal-holds` (`?userUuid=&includeReleased=`), `…/compliance/retention/preview`, `…/compliance/erasure-requests` (`?status=open|completed|rejected|closed_partial|all&userUuid=&limit=&after=`, `{items, next}`; `open`, the default, is pending + incomplete with `closable`, unpaged unless `limit` is given) and `…/erasure-requests/{id}/receipt`; SOC2 `GET …/compliance/soc2/evidence` (always mounted; 404 when `soc2_enabled` is off).
+- Dry-run: `GET /v1/admin/compliance/dsr/preview?userUuid=` (audit.read, required query; nothing is deleted). Per-producer counts are never summed: `auth.operator` and `auth.client` both report the shared device-trust and security-event rows, so any total would be an upper bound. A counter that errors, panics or exceeds 5 s is `countable: true, error: "count failed"`; `hardDeleteAllowed` = no hold, no retention obligation, gate evaluated; `anonymizeAllowed` = no hold.
 - Stored exports: `GET /v1/admin/compliance/dsr/exports?userUuid=` (audit.read, required query); `POST …/compliance/dsr/exports` (201) and `GET …/dsr/exports/{id}/download` (dsr.manage + step-up).
 - Admin writes (step-up): `POST/PATCH/DELETE …/compliance/legal-holds[/{id}]` and `POST …/legal-holds/{id}/notes` (legalhold.manage); `POST …/compliance/erasure-requests` (open, 201), `POST …/compliance/erasure-requests/{id}/{approve,execute,reject,close}` (dsr.manage); execute on an incomplete request retries it with the stored mode, reject on one is 409, close ends one whose remaining producers are unregistered as `closed_partial`.
 - Policy engine reads (policy.read): `GET …/compliance/policies[/{id}[/versions]]`, `GET …/compliance/policies/effective?tenantId=`, `POST …/compliance/policies/validate`, `GET …/compliance/retention-classes`, `GET …/compliance/policy-assignments`, `POST …/compliance/policy-assignments/{tenantId}/validate`, `GET …/compliance/change-requests[/{id}]`.

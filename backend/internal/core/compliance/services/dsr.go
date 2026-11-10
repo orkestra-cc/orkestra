@@ -47,7 +47,8 @@ type DSRService struct {
 	logger        *slog.Logger
 	holdChecker   LegalHoldChecker
 	retentionGate *RetentionGate
-	warnedKeys    sync.Map // suffixed producer keys already warned about
+	warnedKeys    sync.Map      // suffixed producer keys already warned about
+	countTimeout  time.Duration // per-producer count timeout; 0 = producerCountTimeout
 }
 
 // SetLegalHoldChecker wires the legal-hold gate. When set, Erase refuses to
