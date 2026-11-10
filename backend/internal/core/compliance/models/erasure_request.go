@@ -51,6 +51,7 @@ const (
 const (
 	ErasureLastErrorLegalHold = "legal_hold_active"
 	ErasureLastErrorRun       = "run_failed"
+	ErasureLastErrorRetention = "retention_minimum"
 )
 
 // ErasureProducerProgress is one producer instance's erasure state on a request.

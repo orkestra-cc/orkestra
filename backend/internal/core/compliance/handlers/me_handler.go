@@ -6,7 +6,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -95,8 +94,8 @@ func (h *MeHandler) Erase(ctx context.Context, _ *struct{}) (*EraseOutput, error
 	}
 	tenantID, _ := ctxauth.GetTenantID(ctx)
 	outcome, err := h.erasures.EraseNow(ctx, userUUID, tenantID, models.ErasureSourceSelfService, userUUID, iface.EraseHardDelete)
-	if errors.Is(err, services.ErrLegalHoldActive) {
-		return nil, huma.Error409Conflict("erasure blocked: the account is under an active legal hold")
+	if gateErr := erasureGateError(err, "the account"); gateErr != nil {
+		return nil, gateErr
 	}
 	if err != nil {
 		return nil, huma.Error500InternalServerError("dsr erase", err)

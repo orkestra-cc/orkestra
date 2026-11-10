@@ -42,11 +42,12 @@ type LegalHoldChecker interface {
 // can add a job table and run DSRs asynchronously if the round-trip
 // becomes a UX issue.
 type DSRService struct {
-	registry    *iface.PIIProducerRegistry
-	sink        iface.AuditSink
-	logger      *slog.Logger
-	holdChecker LegalHoldChecker
-	warnedKeys  sync.Map // suffixed producer keys already warned about
+	registry      *iface.PIIProducerRegistry
+	sink          iface.AuditSink
+	logger        *slog.Logger
+	holdChecker   LegalHoldChecker
+	retentionGate *RetentionGate
+	warnedKeys    sync.Map // suffixed producer keys already warned about
 }
 
 // SetLegalHoldChecker wires the legal-hold gate. When set, Erase refuses to
@@ -292,6 +293,9 @@ func (s *DSRService) Erase(ctx context.Context, userUUID string, mode iface.Eras
 // erasure still reduces personal data and the audit row makes it auditable.
 func (s *DSRService) EraseRemaining(ctx context.Context, userUUID string, mode iface.EraseMode, prior []models.ErasureProducerProgress) (*EraseResult, error) {
 	if err := s.CheckLegalHold(ctx, userUUID); err != nil {
+		return nil, err
+	}
+	if err := s.CheckRetention(ctx, userUUID, mode); err != nil {
 		return nil, err
 	}
 

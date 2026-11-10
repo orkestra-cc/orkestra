@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/compliance/models"
@@ -88,8 +89,8 @@ func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureR
 		mode = iface.EraseAnonymize
 	}
 	out0, err := h.svc.Execute(ctx, in.ID, mode, actor)
-	if errors.Is(err, services.ErrLegalHoldActive) {
-		return nil, huma.Error409Conflict("erasure blocked: the subject is under an active legal hold")
+	if gateErr := erasureGateError(err, "the subject"); gateErr != nil {
+		return nil, gateErr
 	}
 	if errors.Is(err, repository.ErrErasureRequestNotFound) {
 		return nil, huma.Error404NotFound("erasure request not found or already resolved")
@@ -210,4 +211,25 @@ func RegisterErasureRequestAdminWriteRoutes(api huma.API, h *ErasureRequestHandl
 		Description: "Closes an incomplete request whose remaining producers are no longer installed, recording them as abandoned. Requires a note.",
 		Tags:        []string{"Compliance"},
 	}, h.Close)
+}
+
+// erasureGateError maps the refusals that precede an erasure (legal hold,
+// minimum retention, an unavailable retention check) to their coded responses;
+// nil when err is none of them. subject reads "the subject" or "the account".
+func erasureGateError(err error, subject string) error {
+	var gerr *services.RetentionGateError
+	switch {
+	case errors.Is(err, services.ErrLegalHoldActive):
+		return errcode.Conflict(errcode.ComplianceLegalHoldActive,
+			"Erasure blocked: "+subject+" is under an active legal hold.")
+	case errors.As(err, &gerr):
+		return errcode.Conflict(errcode.ComplianceRetentionMinimumNotMet,
+			"Hard delete refused: the data must be retained until "+gerr.RetainUntil.UTC().Format("2006-01-02")+".").
+			WithExtension("retainUntil", gerr.RetainUntil.UTC().Format(time.RFC3339)).
+			WithExtension("reasons", append([]string{}, gerr.Reasons...))
+	case errors.Is(err, services.ErrRetentionCheckUnavailable):
+		return errcode.ServiceUnavailable(errcode.ComplianceRetentionCheckUnavailable,
+			"The retention check could not be completed; the hard delete was not run. Try again later.")
+	}
+	return nil
 }

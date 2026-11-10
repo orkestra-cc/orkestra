@@ -61,6 +61,12 @@ func (m *Module) Description() string {
 	return "Platform compliance plane: append-only audit log consumed by every module, GDPR DSR pipeline (right-of-access export + right-to-erasure), per-tenant KMS crypto-shred, and SOC2 evidence."
 }
 
+// Bounds of min_retention_years.
+var (
+	minRetentionYearsMin = 0
+	minRetentionYearsMax = 30
+)
+
 // ConfigSchema gates optional sub-features. SOC2 evidence is off by default —
 // most deployments don't pursue SOC2, so the evidence page + API stay dormant
 // unless explicitly enabled. The audit log + GDPR DSR pipeline are always on
@@ -77,6 +83,7 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 		// DSR export (always-on right-of-access pipeline), independent of the
 		// cleanup job — it must stay visible whether or not auto-cleanup is on.
 		{Key: "export_retention_days", Label: "Export retention (days)", Group: "retention", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
+		{Key: "min_retention_years", Label: "Minimum retention (years)", Group: "retention", Description: "Years after an account was created before it can be hard-deleted. A hard delete earlier is refused with the date it becomes possible; anonymize is not affected, and producers can require longer. 0 turns the platform floor off.", Type: module.FieldInt, Default: "0", Min: &minRetentionYearsMin, Max: &minRetentionYearsMax, EnvVar: "COMPLIANCE_MIN_RETENTION_YEARS"},
 		// Four eyes (compliance spec §1.5): a policy change with warnings
 		// waits for a second operator. Turning it off is itself a module
 		// config change, audited by the SDK module admin handler.
@@ -93,7 +100,7 @@ func (m *Module) ConfigGroups() []module.ConfigGroup {
 		{Key: "soc2", Label: "SOC2 evidence", Order: 1,
 			Description: "The SOC2 evidence page and API, off unless you pursue certification."},
 		{Key: "retention", Label: "Retention & DSR", Order: 2,
-			Description: "How long anonymized tombstones and generated DSR exports are kept."},
+			Description: "How long anonymized tombstones, generated DSR exports and accounts before a hard delete are kept."},
 		{Key: "policy", Label: "Policy engine", Order: 3,
 			Description: "How changes to the compliance policies are approved."},
 	}
@@ -324,6 +331,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
 		dsrSvc := services.NewDSRService(reg, sink, deps.Logger)
 		dsrSvc.SetLegalHoldChecker(legalHoldSvc)
+		// Minimum-retention gate on hard delete: a platform floor from the
+		// account's creation (min_retention_years, read fresh) plus the
+		// obligations producers report. Anonymize is not gated.
+		dsrSvc.SetRetentionGate(services.NewRetentionGate(deps.DB, reg, func() int {
+			return deps.GetConfigInt("compliance", "min_retention_years", 0)
+		}))
 
 		// Mediated right-to-erasure workflow — subjects lodge a request, an
 		// operator reviews and executes (running the DSR erase) or rejects it.

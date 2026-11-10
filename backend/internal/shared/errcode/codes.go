@@ -824,3 +824,16 @@ const ComplianceErasureRequestNotClosable = "compliance.erasure_request_not_clos
 // ComplianceErasureCloseNoteRequired signals a close without a note of 1 to
 // 500 characters. 422.
 const ComplianceErasureCloseNoteRequired = "compliance.erasure_close_note_required"
+
+// ComplianceLegalHoldActive signals an erasure refused because the subject is
+// under an active legal hold. 409.
+const ComplianceLegalHoldActive = "compliance.legal_hold_active"
+
+// ComplianceRetentionMinimumNotMet signals a hard delete refused because the
+// subject's data must be kept longer; the body carries retainUntil (RFC 3339)
+// and reasons. 409.
+const ComplianceRetentionMinimumNotMet = "compliance.retention_minimum_not_met"
+
+// ComplianceRetentionCheckUnavailable signals a hard delete refused because the
+// retention check could not be completed (it fails closed). 503.
+const ComplianceRetentionCheckUnavailable = "compliance.retention_check_unavailable"

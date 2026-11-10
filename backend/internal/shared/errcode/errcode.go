@@ -14,7 +14,10 @@
 // rename.
 package errcode
 
-import "net/http"
+import (
+	"encoding/json"
+	"net/http"
+)
 
 // Error is the response envelope for code-bearing handler failures.
 // JSON tags are the wire format consumed by the SPA — do not rename
@@ -31,6 +34,12 @@ type Error struct {
 	// body — the {status,title,detail,code} envelope is a frozen wire
 	// contract. Retry-After on a 429 is the motivating case.
 	Headers http.Header `json:"-"`
+
+	// Extensions are additional top-level members of the response body (for
+	// example the date a refusal lifts). They are added next to, never over,
+	// the frozen {status,title,detail,code} members; empty means the body is
+	// exactly the envelope.
+	Extensions map[string]any `json:"-"`
 
 	// expectedUnavailable marks a 503 the handler returns on purpose because
 	// an optional feature is not configured on this installation — see
@@ -67,6 +76,43 @@ func (e *Error) WithHeader(k, v string) *Error {
 	}
 	e.Headers.Set(k, v)
 	return e
+}
+
+// WithExtension adds one top-level member to the response body and returns
+// the receiver. The envelope members cannot be overridden.
+func (e *Error) WithExtension(k string, v any) *Error {
+	if e.Extensions == nil {
+		e.Extensions = map[string]any{}
+	}
+	e.Extensions[k] = v
+	return e
+}
+
+// MarshalJSON writes the envelope, plus Extensions when there are any.
+func (e *Error) MarshalJSON() ([]byte, error) {
+	type envelope Error // no methods: avoids recursing into MarshalJSON
+	if len(e.Extensions) == 0 {
+		return json.Marshal((*envelope)(e))
+	}
+	base, err := json.Marshal((*envelope)(e))
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]json.RawMessage{}
+	if err := json.Unmarshal(base, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range e.Extensions {
+		if _, taken := m[k]; taken {
+			continue
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		m[k] = raw
+	}
+	return json.Marshal(m)
 }
 
 // New constructs an Error with an arbitrary status. Prefer the named

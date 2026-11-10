@@ -303,3 +303,44 @@ func TestRetentionTwoReplicasRecordOneRequestPerSubject(t *testing.T) {
 		t.Fatalf("purge calls = %d; want 1", crm.purgeCalls)
 	}
 }
+
+// TestRetentionGateFloorFromUserRowsAndReaperSkips pins the platform floor
+// against the real user collections (client tier included) and that the reaper
+// skips a gated tombstone without recording a request, while one past its floor
+// is reaped.
+func TestRetentionGateFloorFromUserRowsAndReaperSkips(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	old := time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)
+	twoYears := time.Now().UTC().AddDate(-2, 0, 0)
+	insertDoc(t, db, "client_users", bson.M{"uuid": "gated", "deletedAt": old, "createdAt": twoYears})
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "free", "deletedAt": old, "createdAt": old})
+
+	reg := iface.NewPIIProducerRegistry()
+	gate := NewRetentionGate(db, reg, func() int { return 5 })
+	got, err := gate.Evaluate(ctx, "gated")
+	if err != nil || got == nil || got.Reasons[0] != "platform_minimum" {
+		t.Fatalf("Evaluate(gated) = %+v, %v", got, err)
+	}
+	if got, err := gate.Evaluate(ctx, "free"); err != nil || got != nil {
+		t.Fatalf("Evaluate(free) = %+v, %v", got, err)
+	}
+	if got, err := gate.Evaluate(ctx, "nobody"); err != nil || got != nil {
+		t.Fatalf("Evaluate(nobody) = %+v, %v", got, err)
+	}
+
+	dsr := NewDSRService(reg, nil, slog.Default())
+	dsr.SetRetentionGate(gate)
+	erasures := NewErasureRequestService(repository.NewErasureRequestRepo(db), dsr, nil, slog.Default())
+	svc := NewRetentionService(db, erasures, slog.Default(), func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} })
+	purged, err := svc.RunOnce(ctx)
+	if err != nil || purged != 1 {
+		t.Fatalf("RunOnce = %d, %v; want 1 (only the subject past its floor)", purged, err)
+	}
+	rows, _ := erasures.repo.ListByStatus(ctx, models.ErasureRequestCompleted, models.ErasureRequestIncomplete)
+	if len(rows) != 1 || rows[0].UserUUID != "free" {
+		t.Fatalf("rows = %+v; want only the free subject", rows)
+	}
+}

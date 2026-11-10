@@ -224,6 +224,15 @@ func (s *ErasureRequestService) Execute(ctx context.Context, requestUUID string,
 	if err := s.dsr.CheckLegalHold(ctx, req.UserUUID); err != nil {
 		return nil, err
 	}
+	// An incomplete request keeps its stored mode; only a pending one takes the
+	// mode chosen now.
+	effective := mode
+	if req.Status == models.ErasureRequestIncomplete {
+		effective = parseEraseMode(req.Mode)
+	}
+	if err := s.dsr.CheckRetention(ctx, req.UserUUID, effective); err != nil {
+		return nil, err
+	}
 	now := s.now()
 	row, err := s.repo.Claim(ctx, requestUUID, req.Status, eraseModeLabel(mode), resolvedBy, now, now.Add(erasureRunLease))
 	if err != nil {
@@ -247,6 +256,9 @@ func (s *ErasureRequestService) Reject(ctx context.Context, requestUUID, resolve
 // worker finishes. A subject already under a legal hold records nothing.
 func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID, source, actor string, mode iface.EraseMode) (*ErasureOutcome, error) {
 	if err := s.dsr.CheckLegalHold(ctx, userUUID); err != nil {
+		return nil, err
+	}
+	if err := s.dsr.CheckRetention(ctx, userUUID, mode); err != nil {
 		return nil, err
 	}
 	now := s.now()
@@ -324,6 +336,8 @@ func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequ
 	switch {
 	case errors.Is(runErr, ErrLegalHoldActive):
 		st.LastError = models.ErasureLastErrorLegalHold
+	case errors.Is(runErr, ErrRetentionMinimum):
+		st.LastError = models.ErasureLastErrorRetention
 	case runErr != nil:
 		st.LastError = models.ErasureLastErrorRun
 	default:
