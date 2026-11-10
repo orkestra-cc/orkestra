@@ -68,6 +68,7 @@ var goldenCodes = map[string]string{
 	"ComplianceErasureReceiptUnavailable":    "compliance.erasure_receipt_unavailable",
 	"ComplianceInvalidCursor":                "compliance.invalid_cursor",
 	"ComplianceReasonRequired":               "compliance.reason_required",
+	"ComplianceLegalHoldExpiryPast":          "compliance.legal_hold_expiry_past",
 	"AuthEmailInUse":                         "auth.email_in_use",
 	"AuthJWTNotConfigured":                   "auth.jwt_not_configured",
 	"AuthUnavailable":                        "auth.unavailable",

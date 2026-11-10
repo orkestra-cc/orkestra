@@ -869,3 +869,7 @@ const ComplianceInvalidCursor = "compliance.invalid_cursor"
 // ComplianceReasonRequired signals a reason or note outside 1 to 500
 // characters. 422.
 const ComplianceReasonRequired = "compliance.reason_required"
+
+// ComplianceLegalHoldExpiryPast signals a legal-hold expiry that is not in the
+// future. 422.
+const ComplianceLegalHoldExpiryPast = "compliance.legal_hold_expiry_past"

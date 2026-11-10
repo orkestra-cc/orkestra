@@ -27,6 +27,7 @@ import (
 	"github.com/orkestra/backend/internal/core/compliance/services"
 	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/jobs"
 	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -40,6 +41,7 @@ type Module struct {
 	me            *handlers.MeHandler
 	soc2          *handlers.SOC2Handler
 	legalHold     *handlers.LegalHoldHandler
+	legalHoldSvc  *services.LegalHoldService
 	retention     *handlers.RetentionHandler
 	retentionSvc  *services.RetentionService
 	erasureRetry  *services.ErasureRetryWorker
@@ -338,6 +340,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// Legal-hold subsystem — gates DSR erasure (and, later, retention
 	// auto-cleanup) for subjects under an active litigation/investigation hold.
 	legalHoldSvc := services.NewLegalHoldService(repository.NewLegalHoldRepo(deps.DB))
+	legalHoldSvc.SetAuditSink(sink)
+	m.legalHoldSvc = legalHoldSvc
 	m.legalHold = handlers.NewLegalHoldHandler(legalHoldSvc)
 
 	// DSR pipeline — drives every registered PII producer. The registry is
@@ -438,6 +442,25 @@ func publishAuditSink(registry *module.ServiceRegistry, sink iface.AuditSink) {
 // 5 s), the change-request expiry (hourly) and the retention auto-cleanup
 // ticker (which re-reads its enable flag every run), plus the erasure retry
 // worker (every minute) that finishes incomplete erasure requests.
+// Jobs declares the background jobs of the jobs framework: the hourly legal
+// hold expiry (key compliance.legal_hold_expiry). Collected after Init, so the
+// closures see the services Init built.
+func (m *Module) Jobs() []jobs.Definition {
+	return []jobs.Definition{{
+		Name:        "legal_hold_expiry",
+		Title:       "Legal hold expiry",
+		Description: "Releases legal holds whose expiry date has passed and audits each release. A hold stops blocking erasure at its expiry even before this job runs.",
+		Schedule:    jobs.Every(time.Hour),
+		Timeout:     5 * time.Minute,
+		Run: func(ctx context.Context, run *jobs.Run) error {
+			if m.legalHoldSvc == nil {
+				return nil
+			}
+			return services.RunLegalHoldExpiry(m.legalHoldSvc)(ctx, run)
+		},
+	}}
+}
+
 func (m *Module) Start(ctx context.Context) error {
 	m.stopCh = make(chan struct{})
 	if m.policySvc != nil {

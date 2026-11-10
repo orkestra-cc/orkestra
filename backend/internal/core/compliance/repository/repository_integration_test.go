@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,27 +123,170 @@ func TestLegalHoldLifecycle(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	held, err := r.IsHeld(ctx, "u-1")
+	held, err := r.IsHeld(ctx, "u-1", time.Now())
 	if err != nil || !held {
 		t.Fatalf("IsHeld after place = %v, %v; want true, nil", held, err)
 	}
 
-	active, err := r.ListActive(ctx, "u-1")
+	active, err := r.ListActive(ctx, "u-1", time.Now())
 	if err != nil || len(active) != 1 {
 		t.Fatalf("ListActive = %d holds, %v; want 1", len(active), err)
 	}
 
-	if err := r.Release(ctx, "h-1", "admin-1", "case closed"); err != nil {
+	if err := r.Release(ctx, "h-1", "admin-1", "case closed", time.Now()); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	held, err = r.IsHeld(ctx, "u-1")
+	held, err = r.IsHeld(ctx, "u-1", time.Now())
 	if err != nil || held {
 		t.Fatalf("IsHeld after release = %v, %v; want false, nil", held, err)
 	}
 
 	// Releasing again finds nothing active.
-	if err := r.Release(ctx, "h-1", "admin-1", "again"); err != ErrLegalHoldNotFound {
+	if err := r.Release(ctx, "h-1", "admin-1", "again", time.Now()); err != ErrLegalHoldNotFound {
 		t.Fatalf("double release err = %v; want ErrLegalHoldNotFound", err)
+	}
+}
+
+func TestLegalHoldExpiryAwareReads(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewLegalHoldRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	placed := now.Add(-48 * time.Hour)
+	mustInsert := func(h *models.LegalHold) {
+		t.Helper()
+		h.Active, h.PlacedAt = true, placed
+		if err := r.Insert(ctx, h); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	mustInsert(&models.LegalHold{UUID: "past", UserUUID: "u-past", Reason: "r", ExpiresAt: tp(now.Add(-time.Minute))})
+	mustInsert(&models.LegalHold{UUID: "future", UserUUID: "u-future", Reason: "r", ExpiresAt: tp(now.Add(time.Hour))})
+	mustInsert(&models.LegalHold{UUID: "never", UserUUID: "u-never", Reason: "r"})
+
+	for u, want := range map[string]bool{"u-past": false, "u-future": true, "u-never": true} {
+		got, err := r.IsHeld(ctx, u, now)
+		if err != nil || got != want {
+			t.Fatalf("IsHeld(%s) = %v, %v; want %v", u, got, err, want)
+		}
+	}
+	// Expired but not yet released: still active in the row, absent from ListActive.
+	active, err := r.ListActive(ctx, "", now)
+	if err != nil || len(active) != 2 {
+		t.Fatalf("ListActive = %d, %v; want 2 (expired hold excluded)", len(active), err)
+	}
+	all, err := r.List(ctx, "", true, now)
+	if err != nil || len(all) != 3 {
+		t.Fatalf("List includeReleased = %d, %v; want 3", len(all), err)
+	}
+	inForce, err := r.List(ctx, "", false, now)
+	if err != nil || len(inForce) != 2 {
+		t.Fatalf("List in force = %d, %v; want 2", len(inForce), err)
+	}
+}
+
+func TestLegalHoldExpireDueCAS(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewLegalHoldRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	const due = 40
+	for i := 0; i < due; i++ {
+		id := "due-" + uuid.NewString()
+		if err := r.Insert(ctx, &models.LegalHold{UUID: id, UserUUID: id, Reason: "r", Active: true,
+			PlacedAt: now.Add(-time.Hour), ExpiresAt: tp(now.Add(-time.Minute))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Insert(ctx, &models.LegalHold{UUID: "keep", UserUUID: "keep", Reason: "r", Active: true,
+		PlacedAt: now.Add(-time.Hour), ExpiresAt: tp(now.Add(time.Hour))}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two replicas at once: every hold is released by exactly one of them.
+	var wg sync.WaitGroup
+	results := make([][]models.LegalHold, 2)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rel, err := r.ExpireDue(ctx, now, 500)
+			if err != nil {
+				t.Errorf("ExpireDue: %v", err)
+			}
+			results[i] = rel
+		}(i)
+	}
+	wg.Wait()
+	seen := map[string]int{}
+	for _, rel := range results {
+		for _, h := range rel {
+			seen[h.UUID]++
+			if h.Active || h.ReleasedBy != models.LegalHoldExpiryActor || h.ReleasedAt == nil {
+				t.Fatalf("returned row not the released state: %+v", h)
+			}
+		}
+	}
+	if len(seen) != due {
+		t.Fatalf("released %d distinct holds, want %d", len(seen), due)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Fatalf("hold %s released by %d callers", id, n)
+		}
+	}
+
+	again, err := r.ExpireDue(ctx, now, 500)
+	if err != nil || len(again) != 0 {
+		t.Fatalf("second ExpireDue = %d, %v; want 0", len(again), err)
+	}
+	if held, _ := r.IsHeld(ctx, "keep", now); !held {
+		t.Fatal("a hold with a future expiry must stay")
+	}
+
+	// The batch bound.
+	for i := 0; i < 3; i++ {
+		id := "b-" + uuid.NewString()
+		_ = r.Insert(ctx, &models.LegalHold{UUID: id, UserUUID: id, Reason: "r", Active: true, PlacedAt: now, ExpiresAt: tp(now.Add(-time.Second))})
+	}
+	if got, _ := r.ExpireDue(ctx, now, 2); len(got) != 2 {
+		t.Fatalf("batch of 2 released %d", len(got))
+	}
+}
+
+func TestLegalHoldUpdateAndNotes(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewLegalHoldRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	if err := r.Insert(ctx, &models.LegalHold{UUID: "h", UserUUID: "u", Reason: "r", Active: true, PlacedAt: now,
+		ExpiresAt: tp(now.Add(time.Hour))}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := r.Update(ctx, "h", bson.M{"reviewAt": now.Add(time.Minute), "updatedAt": now}, []string{"expiresAt"})
+	if err != nil || h.ReviewAt == nil || h.ExpiresAt != nil || h.UpdatedAt == nil {
+		t.Fatalf("Update = %+v, %v", h, err)
+	}
+	for _, txt := range []string{"one", "two"} {
+		if _, err := r.AddNote(ctx, "h", models.LegalHoldNote{ID: uuid.NewString(), By: "op", At: now, Text: txt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := r.Get(ctx, "h")
+	if len(got.Notes) != 2 || got.Notes[0].Text != "one" || got.Notes[1].Text != "two" {
+		t.Fatalf("notes = %+v", got.Notes)
+	}
+	if err := r.Release(ctx, "h", "op", "done", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddNote(ctx, "h", models.LegalHoldNote{ID: "x", Text: "late"}); err != ErrLegalHoldNotFound {
+		t.Fatalf("note on released = %v", err)
+	}
+	if _, err := r.Update(ctx, "h", bson.M{"updatedAt": now}, nil); err != ErrLegalHoldNotFound {
+		t.Fatalf("update on released = %v", err)
 	}
 }
 

@@ -21,4 +21,26 @@ type LegalHold struct {
 	ReleasedAt    *time.Time `bson:"releasedAt,omitempty" json:"releasedAt,omitempty"`
 	ReleasedBy    string     `bson:"releasedBy,omitempty" json:"releasedBy,omitempty"`
 	ReleaseReason string     `bson:"releaseReason,omitempty" json:"releaseReason,omitempty"`
+
+	// ReviewAt is when the hold is due for a review; it never releases the hold.
+	ReviewAt *time.Time `bson:"reviewAt,omitempty" json:"reviewAt,omitempty"`
+	// ExpiresAt releases the hold on its own once reached (the expiry job
+	// records it; the hold stops counting at this instant either way).
+	ExpiresAt *time.Time `bson:"expiresAt,omitempty" json:"expiresAt,omitempty"`
+	// Notes are append-only operator notes (masked), never edited.
+	Notes     []LegalHoldNote `bson:"notes,omitempty" json:"notes,omitempty"`
+	UpdatedAt *time.Time      `bson:"updatedAt,omitempty" json:"updatedAt,omitempty"`
+	// ReviewDue is computed on read: an active hold whose ReviewAt has passed.
+	ReviewDue bool `bson:"-" json:"reviewDue"`
+}
+
+// LegalHoldExpiryActor is the ReleasedBy value of a hold the expiry job released.
+const LegalHoldExpiryActor = "system:expiry"
+
+// LegalHoldNote is one operator note on a hold.
+type LegalHoldNote struct {
+	ID   string    `bson:"id" json:"id"`
+	By   string    `bson:"by" json:"by"`
+	At   time.Time `bson:"at" json:"at"`
+	Text string    `bson:"text" json:"text"`
 }
