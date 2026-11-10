@@ -141,7 +141,7 @@ Label detection has nothing to read when no container exists. Then:
 | `docker-compose.staging.yml` | Staging — on this repo also runs AIR + source mount |
 | `docker-compose.prod.yml` | Production (real image build) |
 | `docker-compose.infra.yml` | This stack's own MongoDB + Redis + RustFS (isolated per stack, not shared) |
-| `docker-compose.observability.yml` | Grafana + Loki + Tempo + Promtail + Prometheus + OTel, layered into the same stack project |
+| `docker-compose.observability.yml` | Grafana + Loki + Tempo + Alloy + Prometheus + OTel, layered into the same stack project |
 
 Prefer `orkestra.sh deploy` (the `orkestra-stack` skill) for bring-up so `ORKESTRA_VERSION` is injected and `COMPOSE_PROJECT_NAME` is set correctly.
 
