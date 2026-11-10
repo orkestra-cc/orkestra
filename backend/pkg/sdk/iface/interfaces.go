@@ -1528,6 +1528,42 @@ type PIIProducerKeyer interface {
 	ProducerKey() string
 }
 
+// PersonalDataCount is what a producer holds for a subject, counted with the
+// same filters its PurgePersonalData uses. Rows is the number of records; the
+// counts carry no personal data. Collections names the stores that hold them
+// (machine labels, no personal data).
+type PersonalDataCount struct {
+	Rows        int      `json:"rows"`
+	Collections []string `json:"collections,omitempty"`
+}
+
+// PIIProducerCounter is an optional companion to PIIProducer, resolved by a
+// type assertion on the registered producer. It lets compliance show an admin
+// what a subject's erasure would touch before anything is deleted. The count
+// must mirror the filters PurgePersonalData uses: a count that includes rows
+// the purge would skip (or the reverse) misleads the operator who reviews it.
+type PIIProducerCounter interface {
+	CountPersonalData(ctx context.Context, userUUID string) (PersonalDataCount, error)
+}
+
+// RetentionObligation is data a producer must keep until Until. Reason is a
+// short machine label without personal data (for example "fiscal_records").
+type RetentionObligation struct {
+	Until  time.Time `json:"until"`
+	Reason string    `json:"reason"`
+}
+
+// PIIRetentionReporter is an optional companion to PIIProducer, resolved by a
+// type assertion on the registered producer. Compliance consults it before a
+// hard delete, so a producer that must keep records for a legal period reports
+// them here. A reporter error makes the hard-delete gate fail closed: compliance
+// refuses the hard delete rather than guessing that no obligation exists.
+// Anonymize is not affected by it.
+type PIIRetentionReporter interface {
+	// RetainUntil returns nil when the producer has no obligation for the subject.
+	RetainUntil(ctx context.Context, userUUID string) (*RetentionObligation, error)
+}
+
 // PIIProducerRegistry is the boot-time catalog of registered producers.
 // cmd/server/main.go constructs it before InitAll so producer modules
 // can register during their own Init. The compliance module resolves
