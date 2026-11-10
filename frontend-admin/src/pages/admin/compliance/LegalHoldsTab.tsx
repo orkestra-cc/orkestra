@@ -20,10 +20,12 @@ import SearchablePagedTable from 'components/common/advance-table/SearchablePage
 import { formatDate, formatDateTime } from './complianceFormat';
 import { erasureErrorMessage } from './erasureErrors';
 import ReasonModal from './policies/ReasonModal';
-import LegalHoldEditModal, {
-  dayToInstant,
-  type LegalHoldPatch
-} from './LegalHoldEditModal';
+import LegalHoldEditModal, { type LegalHoldPatch } from './LegalHoldEditModal';
+import {
+  expiryDayToInstant,
+  expiryDisplayInstant,
+  reviewDayToInstant
+} from './legalHoldDates';
 import LegalHoldNotesModal from './LegalHoldNotesModal';
 
 // LegalHoldsTab lets operators place a litigation hold on a subject (which
@@ -54,8 +56,8 @@ const LegalHoldsTab = () => {
         userUuid,
         reason,
         caseRef: caseRef || undefined,
-        reviewAt: reviewAt ? dayToInstant(reviewAt) : undefined,
-        expiresAt: expiresAt ? dayToInstant(expiresAt) : undefined
+        reviewAt: reviewAt ? reviewDayToInstant(reviewAt) : undefined,
+        expiresAt: expiresAt ? expiryDayToInstant(expiresAt) : undefined
       }).unwrap();
       toast.success(t('adminCompliance.holds.placeSuccess'));
       setUserUuid('');
@@ -164,7 +166,9 @@ const LegalHoldsTab = () => {
           </div>
           <div>
             {t('adminCompliance.holds.expiresAt')}:{' '}
-            {original.expiresAt ? formatDate(original.expiresAt) : '—'}
+            {original.expiresAt
+              ? formatDate(expiryDisplayInstant(original.expiresAt))
+              : '—'}
           </div>
         </div>
       )

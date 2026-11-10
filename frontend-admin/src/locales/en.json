@@ -2722,7 +2722,7 @@
         "reviewAt": "Review date",
         "expiresAt": "Expiry date",
         "clearReviewAt": "Clear the review date",
-        "clearExpiresAt": "Clear the expiry date (the hold never expires)",
+        "clearExpiresAt": "Clear the expiry date",
         "expiryHint": "The hold is released automatically on this date.",
         "submit": "Save",
         "success": "Legal hold updated",
@@ -3085,8 +3085,11 @@
         "created": "Created",
         "expires": "Expires",
         "expired": "Expired",
-        "download": "Download"
-      }
+        "download": "Download",
+        "actions": "Actions"
+      },
+      "invalidUuid": "Enter a valid user UUID",
+      "holdExpired": "No longer blocking (expired)"
     }
   },
   "adminComplianceSoc2": {

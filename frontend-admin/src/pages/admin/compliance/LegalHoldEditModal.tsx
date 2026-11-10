@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 import { Button, Form, Modal } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import type { LegalHold, UpdateLegalHoldArgs } from 'store/api/complianceApi';
+import {
+  expiryDayToInstant,
+  instantToExpiryDay,
+  instantToReviewDay,
+  reviewDayToInstant
+} from './legalHoldDates';
 
 export type LegalHoldPatch = Omit<UpdateLegalHoldArgs, 'id'>;
 
@@ -12,35 +18,33 @@ interface Props {
   onSave: (patch: LegalHoldPatch) => void;
 }
 
-const day = (iso?: string) => (iso ? iso.slice(0, 10) : '');
-// Date inputs carry a calendar day; the backend wants an instant.
-export const dayToInstant = (d: string) => `${d}T00:00:00Z`;
-
 // LegalHoldEditModal changes a hold's review and expiry dates. A date can be
 // cleared (the hold then has none), which is sent as an explicit clear flag.
 const LegalHoldEditModal = ({ hold, busy, onCancel, onSave }: Props) => {
   const { t } = useTranslation();
   const [reviewAt, setReviewAt] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
-  const [clearReview, setClearReview] = useState(false);
-  const [clearExpiry, setClearExpiry] = useState(false);
   useEffect(() => {
-    setReviewAt(day(hold?.reviewAt));
-    setExpiresAt(day(hold?.expiresAt));
-    setClearReview(false);
-    setClearExpiry(false);
+    setReviewAt(instantToReviewDay(hold?.reviewAt));
+    setExpiresAt(instantToExpiryDay(hold?.expiresAt));
   }, [hold]);
 
-  const submit = () => {
+  // An emptied field that had a value is a clear; an unchanged one is omitted.
+  const buildPatch = (): LegalHoldPatch => {
     const patch: LegalHoldPatch = {};
-    if (clearReview) patch.clearReviewAt = true;
-    else if (reviewAt && reviewAt !== day(hold?.reviewAt))
-      patch.reviewAt = dayToInstant(reviewAt);
-    if (clearExpiry) patch.clearExpiresAt = true;
-    else if (expiresAt && expiresAt !== day(hold?.expiresAt))
-      patch.expiresAt = dayToInstant(expiresAt);
-    onSave(patch);
+    const wasReview = instantToReviewDay(hold?.reviewAt);
+    const wasExpiry = instantToExpiryDay(hold?.expiresAt);
+    if (!reviewAt && wasReview) patch.clearReviewAt = true;
+    else if (reviewAt && reviewAt !== wasReview)
+      patch.reviewAt = reviewDayToInstant(reviewAt);
+    if (!expiresAt && wasExpiry) patch.clearExpiresAt = true;
+    else if (expiresAt && expiresAt !== wasExpiry)
+      patch.expiresAt = expiryDayToInstant(expiresAt);
+    return patch;
   };
+  const patch = buildPatch();
+  const empty = Object.keys(patch).length === 0;
+  const submit = () => onSave(patch);
 
   return (
     <Modal show={!!hold} onHide={onCancel} centered>
@@ -55,17 +59,17 @@ const LegalHoldEditModal = ({ hold, busy, onCancel, onSave }: Props) => {
           <Form.Control
             type="date"
             value={reviewAt}
-            disabled={clearReview}
             onChange={e => setReviewAt(e.target.value)}
           />
-          {hold?.reviewAt && (
-            <Form.Check
-              className="mt-1"
-              id="hold-edit-clear-review"
-              label={t('adminCompliance.holds.edit.clearReviewAt')}
-              checked={clearReview}
-              onChange={e => setClearReview(e.target.checked)}
-            />
+          {reviewAt && (
+            <Button
+              variant="link"
+              size="sm"
+              className="p-0 mt-1"
+              onClick={() => setReviewAt('')}
+            >
+              {t('adminCompliance.holds.edit.clearReviewAt')}
+            </Button>
           )}
         </Form.Group>
         <Form.Group controlId="hold-edit-expiry">
@@ -73,17 +77,17 @@ const LegalHoldEditModal = ({ hold, busy, onCancel, onSave }: Props) => {
           <Form.Control
             type="date"
             value={expiresAt}
-            disabled={clearExpiry}
             onChange={e => setExpiresAt(e.target.value)}
           />
-          {hold?.expiresAt && (
-            <Form.Check
-              className="mt-1"
-              id="hold-edit-clear-expiry"
-              label={t('adminCompliance.holds.edit.clearExpiresAt')}
-              checked={clearExpiry}
-              onChange={e => setClearExpiry(e.target.checked)}
-            />
+          {expiresAt && (
+            <Button
+              variant="link"
+              size="sm"
+              className="p-0 mt-1"
+              onClick={() => setExpiresAt('')}
+            >
+              {t('adminCompliance.holds.edit.clearExpiresAt')}
+            </Button>
           )}
           <Form.Text muted>
             {t('adminCompliance.holds.edit.expiryHint')}
@@ -94,7 +98,11 @@ const LegalHoldEditModal = ({ hold, busy, onCancel, onSave }: Props) => {
         <Button variant="orkestra-default" onClick={onCancel} disabled={busy}>
           {t('adminCompliance.saveModal.cancel')}
         </Button>
-        <Button variant="orkestra-primary" onClick={submit} disabled={busy}>
+        <Button
+          variant="orkestra-primary"
+          onClick={submit}
+          disabled={busy || empty}
+        >
           {t('adminCompliance.holds.edit.submit')}
         </Button>
       </Modal.Footer>

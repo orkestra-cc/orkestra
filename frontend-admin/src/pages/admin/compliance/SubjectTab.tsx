@@ -23,6 +23,7 @@ import { formatDate, formatDateTime } from './complianceFormat';
 import { erasureErrorMessage } from './erasureErrors';
 import OpenErasureRequestModal from './OpenErasureRequestModal';
 import ReasonModal from './policies/ReasonModal';
+import { UUID_RE, expiryDisplayInstant } from './legalHoldDates';
 
 // SubjectTab is the per-subject DSR workbench: what an erasure would do (dry
 // run), an export on behalf of the subject, and opening an erasure request.
@@ -32,9 +33,17 @@ import ReasonModal from './policies/ReasonModal';
 const SubjectTab = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const userUuid = (searchParams.get('userUuid') ?? '').trim();
-  const [draft, setDraft] = useState(userUuid);
-  useEffect(() => setDraft(userUuid), [userUuid]);
+  const rawUuid = (searchParams.get('userUuid') ?? '').trim();
+  // Only a well-formed UUID is loaded; anything else shows a field error.
+  const userUuid = UUID_RE.test(rawUuid) ? rawUuid : '';
+  const [draft, setDraft] = useState(rawUuid);
+  const [fieldError, setFieldError] = useState(
+    rawUuid !== '' && userUuid === ''
+  );
+  useEffect(() => {
+    setDraft(rawUuid);
+    setFieldError(rawUuid !== '' && !UUID_RE.test(rawUuid));
+  }, [rawUuid]);
 
   const preview = useDsrPreviewQuery(userUuid, { skip: !userUuid });
   const exportsQ = useListDsrExportsQuery(userUuid, { skip: !userUuid });
@@ -49,6 +58,11 @@ const SubjectTab = () => {
   const onLoad = (e: FormEvent) => {
     e.preventDefault();
     const v = draft.trim();
+    if (v && !UUID_RE.test(v)) {
+      setFieldError(true);
+      return;
+    }
+    setFieldError(false);
     setSearchParams(
       prev => {
         if (v) prev.set('userUuid', v);
@@ -72,11 +86,20 @@ const SubjectTab = () => {
     }
   };
 
-  // The signed URL is opened and dropped: never stored, never logged.
+  // The signed URL is followed through a synthetic link click (a popup
+  // opened after an await would be blocked) and dropped: never stored or
+  // logged.
   const onDownload = async (id: string) => {
     try {
       const res = await download(id).unwrap();
-      window.open(res.url, '_blank', 'noopener');
+      const a = document.createElement('a');
+      a.href = res.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     } catch (err) {
       toast.error(
         erasureErrorMessage(err, t, t('adminCompliance.subject.downloadError'))
@@ -181,7 +204,7 @@ const SubjectTab = () => {
     },
     {
       id: 'actions',
-      header: t('adminCompliance.holds.columns.actions'),
+      header: t('adminCompliance.subject.exports.actions'),
       enableSorting: false,
       meta: {
         headerProps: { className: 'text-end text-900' },
@@ -221,8 +244,12 @@ const SubjectTab = () => {
               size="sm"
               value={draft}
               placeholder={t('adminCompliance.holds.form.subjectPlaceholder')}
+              isInvalid={fieldError}
               onChange={e => setDraft(e.target.value)}
             />
+            <Form.Control.Feedback type="invalid">
+              {t('adminCompliance.subject.invalidUuid')}
+            </Form.Control.Feedback>
           </Col>
           <Col xs="auto">
             <Button type="submit" size="sm" variant="orkestra-primary">
@@ -266,12 +293,38 @@ const SubjectTab = () => {
                     : t('adminCompliance.subject.anonymizeBlocked')}
                 </SubtleBadge>
               </div>
-              <p className="fs-10 mb-1">
+              <div className="fs-10 mb-1">
                 <strong>{t('adminCompliance.subject.holds')}:</strong>{' '}
-                {holds.length === 0
-                  ? t('adminCompliance.subject.noHolds')
-                  : holds.map(h => h.reason).join('; ')}
-              </p>
+                {holds.length === 0 ? (
+                  t('adminCompliance.subject.noHolds')
+                ) : (
+                  <ul className="mb-0 ps-3">
+                    {holds.map(h => (
+                      <li
+                        key={h.uuid}
+                        className={h.expired ? 'text-500' : undefined}
+                      >
+                        {h.reason}
+                        {h.caseRef && ` (${h.caseRef})`}
+                        {h.expiresAt &&
+                          ` — ${t('adminCompliance.holds.expiresAt')}: ${formatDate(
+                            expiryDisplayInstant(h.expiresAt)
+                          )}`}
+                        {h.reviewDue && (
+                          <SubtleBadge pill bg="danger" className="ms-2">
+                            {t('adminCompliance.holds.reviewDue')}
+                          </SubtleBadge>
+                        )}
+                        {h.expired && (
+                          <SubtleBadge pill bg="secondary" className="ms-2">
+                            {t('adminCompliance.subject.holdExpired')}
+                          </SubtleBadge>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <p className="fs-10 mb-1">
                 <strong>{t('adminCompliance.subject.retention')}:</strong>{' '}
                 {data.retentionError
@@ -364,6 +417,7 @@ const SubjectTab = () => {
         body={t('adminCompliance.subject.exportModal.body')}
         confirmLabel={t('adminCompliance.subject.exportModal.submit')}
         busy={exporting}
+        variant="orkestra-primary"
         onCancel={() => setExportFormat(null)}
         onConfirm={onExport}
       />

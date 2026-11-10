@@ -111,8 +111,9 @@ describe('LegalHoldsTab', () => {
       expect(body).toEqual({
         userUuid: 'u-2',
         reason: 'dispute',
-        reviewAt: '2030-01-02T00:00:00Z',
-        expiresAt: '2031-01-02T00:00:00Z'
+        reviewAt: new Date(2030, 0, 2).toISOString(),
+        // the whole chosen day: next local midnight
+        expiresAt: new Date(2031, 0, 3).toISOString()
       })
     );
     await waitFor(() =>
@@ -138,9 +139,37 @@ describe('LegalHoldsTab', () => {
     renderWithProviders(<LegalHoldsTab />);
     await screen.findByText('u-1');
     await userEvent.click(rowOf('u-1').getByRole('button', { name: /edit/i }));
-    await userEvent.click(screen.getByLabelText(/clear the expiry date/i));
+    await userEvent.click(
+      screen.getByRole('button', { name: /clear the expiry date/i })
+    );
     await userEvent.click(screen.getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(body).toEqual({ clearExpiresAt: true }));
+  });
+
+  it('disables save when nothing changed and shows the stored local day', async () => {
+    server.use(
+      http.get(url(L), () =>
+        HttpResponse.json({
+          items: [
+            hold({
+              reviewAt: new Date(2030, 4, 1).toISOString(),
+              // end of 5 June local: stored as the next local midnight
+              expiresAt: new Date(2030, 5, 6).toISOString()
+            })
+          ]
+        })
+      )
+    );
+    renderWithProviders(<LegalHoldsTab />);
+    await screen.findByText('u-1');
+    await userEvent.click(rowOf('u-1').getByRole('button', { name: /edit/i }));
+    expect(
+      screen.getByLabelText(/^review date$/i, { selector: '#hold-edit-review' })
+    ).toHaveValue('2030-05-01');
+    expect(
+      screen.getByLabelText(/^expiry date$/i, { selector: '#hold-edit-expiry' })
+    ).toHaveValue('2030-06-05');
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
   });
 
   it('lists notes and adds one', async () => {

@@ -2722,7 +2722,7 @@
         "reviewAt": "Data di revisione",
         "expiresAt": "Data di scadenza",
         "clearReviewAt": "Rimuovi la data di revisione",
-        "clearExpiresAt": "Rimuovi la data di scadenza (il blocco non scade mai)",
+        "clearExpiresAt": "Rimuovi la data di scadenza",
         "expiryHint": "Il blocco viene rilasciato automaticamente in questa data.",
         "submit": "Salva",
         "success": "Blocco legale aggiornato",
@@ -3085,8 +3085,11 @@
         "created": "Creata",
         "expires": "Scade",
         "expired": "Scaduta",
-        "download": "Scarica"
-      }
+        "download": "Scarica",
+        "actions": "Azioni"
+      },
+      "invalidUuid": "Inserisci un UUID utente valido",
+      "holdExpired": "Non più bloccante (scaduto)"
     }
   },
   "adminComplianceSoc2": {
