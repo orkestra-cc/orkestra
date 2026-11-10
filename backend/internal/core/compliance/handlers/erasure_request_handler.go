@@ -92,6 +92,9 @@ func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureR
 	if gateErr := erasureGateError(err, "the subject"); gateErr != nil {
 		return nil, gateErr
 	}
+	if apprErr := erasureApprovalError(err); apprErr != nil {
+		return nil, apprErr
+	}
 	if errors.Is(err, repository.ErrErasureRequestNotFound) {
 		return nil, huma.Error404NotFound("erasure request not found or already resolved")
 	}
@@ -106,6 +109,74 @@ func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureR
 	out.Body.Purged = out0.Run.Purged
 	out.Body.Progress = out0.Run.Progress
 	return out, nil
+}
+
+// OpenErasureRequestInput is the body an operator sends to open an erasure
+// request for a subject.
+type OpenErasureRequestInput struct {
+	Body struct {
+		UserUUID string `json:"userUuid" minLength:"1" doc:"UUID of the data subject to erase"`
+		Reason   string `json:"reason" minLength:"1" maxLength:"500" doc:"Why the subject is erased; also the opener's approval note"`
+		Mode     string `json:"mode" enum:"hard_delete,anonymize" doc:"Erasure mode; the request is locked to it"`
+	}
+}
+type OpenErasureRequestOutput struct {
+	Body models.ErasureRequest
+}
+
+// Open records a pending erasure request an operator opens for a subject.
+func (h *ErasureRequestHandler) Open(ctx context.Context, in *OpenErasureRequestInput) (*OpenErasureRequestOutput, error) {
+	actor, ok := ctxauth.GetUserUUID(ctx)
+	if !ok || actor == "" {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	req, err := h.svc.Open(ctx, services.OpenInput{
+		UserUUID: in.Body.UserUUID, Reason: in.Body.Reason, RequestedBy: actor, Mode: parseHandlerMode(in.Body.Mode),
+	})
+	if gateErr := erasureGateError(err, "the subject"); gateErr != nil {
+		return nil, gateErr
+	}
+	if apprErr := erasureApprovalError(err); apprErr != nil {
+		return nil, apprErr
+	}
+	if err != nil {
+		return nil, huma.Error500InternalServerError("open erasure request", err)
+	}
+	return &OpenErasureRequestOutput{Body: *req}, nil
+}
+
+type ApproveErasureRequestInput struct {
+	ID   string `path:"id"`
+	Body struct {
+		Mode string `json:"mode" enum:"hard_delete,anonymize" doc:"Erasure mode; the first approval locks it"`
+		Note string `json:"note" minLength:"1" maxLength:"500" doc:"Why the operator approves"`
+	}
+}
+
+// Approve records the calling operator's approval of a pending request.
+func (h *ErasureRequestHandler) Approve(ctx context.Context, in *ApproveErasureRequestInput) (*ErasureRequestOutput, error) {
+	actor, ok := ctxauth.GetUserUUID(ctx)
+	if !ok || actor == "" {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	req, err := h.svc.Approve(ctx, in.ID, parseHandlerMode(in.Body.Mode), actor, in.Body.Note)
+	if apprErr := erasureApprovalError(err); apprErr != nil {
+		return nil, apprErr
+	}
+	if errors.Is(err, repository.ErrErasureRequestNotFound) {
+		return nil, huma.Error404NotFound("erasure request not found or already resolved")
+	}
+	if err != nil {
+		return nil, huma.Error500InternalServerError("approve erasure request", err)
+	}
+	return &ErasureRequestOutput{Body: *req}, nil
+}
+
+func parseHandlerMode(mode string) iface.EraseMode {
+	if mode == "anonymize" {
+		return iface.EraseAnonymize
+	}
+	return iface.EraseHardDelete
 }
 
 type RejectErasureRequestInput struct {
@@ -189,6 +260,23 @@ func RegisterErasureRequestAdminReadRoutes(api huma.API, h *ErasureRequestHandle
 
 func RegisterErasureRequestAdminWriteRoutes(api huma.API, h *ErasureRequestHandler) {
 	huma.Register(api, huma.Operation{
+		OperationID:   "compliance-erasure-request-open",
+		Method:        http.MethodPost,
+		Path:          "/v1/admin/compliance/erasure-requests",
+		Summary:       "Open a right-to-erasure request for a subject",
+		Description:   "Records a pending request on behalf of a subject, with the opener's approval and the mode locked. Refused when the subject is under a legal hold, already has an open request, or (hard delete) is inside a minimum retention. The reason is mandatory.",
+		Tags:          []string{"Compliance"},
+		DefaultStatus: http.StatusCreated,
+	}, h.Open)
+	huma.Register(api, huma.Operation{
+		OperationID: "compliance-erasure-request-approve",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/compliance/erasure-requests/{id}/approve",
+		Summary:     "Approve a pending right-to-erasure request",
+		Description: "Adds the calling operator's approval; the first approval locks the mode. The data subject cannot approve and an operator approves once. Execute needs the configured number of distinct approvals, the executor counting as one.",
+		Tags:        []string{"Compliance"},
+	}, h.Approve)
+	huma.Register(api, huma.Operation{
 		OperationID: "compliance-erasure-request-execute",
 		Method:      http.MethodPost,
 		Path:        "/v1/admin/compliance/erasure-requests/{id}/execute",
@@ -230,6 +318,32 @@ func erasureGateError(err error, subject string) error {
 	case errors.Is(err, services.ErrRetentionCheckUnavailable):
 		return errcode.ServiceUnavailable(errcode.ComplianceRetentionCheckUnavailable,
 			"The retention check could not be completed; the hard delete was not run. Try again later.")
+	}
+	return nil
+}
+
+// erasureApprovalError maps the approval workflow's refusals to their coded
+// responses; nil when err is none of them.
+func erasureApprovalError(err error) error {
+	var miss *services.ErasureApprovalsMissingError
+	var exists *services.ErasureRequestExistsError
+	switch {
+	case errors.Is(err, services.ErrReasonRequired):
+		return errcode.UnprocessableEntity(errcode.ComplianceReasonRequired, "A reason or note of 1 to 500 characters is required.")
+	case errors.As(err, &exists):
+		return errcode.Conflict(errcode.ComplianceErasureRequestExists, "The subject already has an open erasure request.").
+			WithExtension("requestId", exists.UUID)
+	case errors.As(err, &miss):
+		return errcode.Conflict(errcode.ComplianceErasureApprovalsMissing, "The request needs more distinct operator approvals before it can run.").
+			WithExtension("have", miss.Have).WithExtension("need", miss.Need)
+	case errors.Is(err, services.ErrErasureSelfApproval):
+		return errcode.Conflict(errcode.ComplianceErasureSelfApproval, "An operator cannot open, approve or execute the erasure of their own account.")
+	case errors.Is(err, services.ErrErasureAlreadyApproved):
+		return errcode.Conflict(errcode.ComplianceErasureAlreadyApproved, "You already approved this erasure request.")
+	case errors.Is(err, services.ErrErasureModeMismatch):
+		return errcode.Conflict(errcode.ComplianceErasureModeMismatch, "The request is locked to a different erasure mode.")
+	case errors.Is(err, repository.ErrErasureApprovalConflict):
+		return errcode.Conflict(errcode.ComplianceErasureRequestBusy, "The request changed while you acted on it; reload and try again.")
 	}
 	return nil
 }

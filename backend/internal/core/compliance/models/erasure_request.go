@@ -24,6 +24,7 @@ const (
 	ErasureSourceRequest     = "request"      // lodged by the subject, executed by an operator (absent on legacy rows)
 	ErasureSourceSelfService = "self_service" // POST /v1/me/dsr/erase
 	ErasureSourceRetention   = "retention"    // retention auto-cleanup
+	ErasureSourceAdmin       = "admin"        // opened by an operator on behalf of the subject
 )
 
 // ActiveRetentionErasurePartialFilter scopes the unique userUuid index of
@@ -65,6 +66,14 @@ type ErasureProducerProgress struct {
 	UpdatedAt      time.Time `bson:"updatedAt" json:"updatedAt"`
 }
 
+// ErasureApproval is one operator's approval of a pending erasure request:
+// the operator's UUID, when, and the note (masked) they gave. UUIDs only.
+type ErasureApproval struct {
+	By   string    `bson:"by" json:"by"`
+	At   time.Time `bson:"at" json:"at"`
+	Note string    `bson:"note,omitempty" json:"note,omitempty"`
+}
+
 // ErasureRequest is one lodged right-to-erasure request.
 type ErasureRequest struct {
 	UUID           string     `bson:"uuid" json:"uuid"`
@@ -85,5 +94,13 @@ type ErasureRequest struct {
 	LeaseUntil    *time.Time                `bson:"leaseUntil,omitempty" json:"-"`
 	LastError     string                    `bson:"lastError,omitempty" json:"lastError,omitempty"`
 	Abandoned     []string                  `bson:"abandoned,omitempty" json:"abandoned,omitempty"` // closed_partial: producer keys never done
-	Closable      bool                      `bson:"-" json:"closable,omitempty"`                    // response-only, filled by ListOpen
+
+	// RequestedBy is the operator who opened an admin request; RequiredApprovals
+	// is the number of distinct operators snapshotted at creation (absent = 1);
+	// Approvals are the distinct operators who approved so far.
+	RequestedBy       string            `bson:"requestedBy,omitempty" json:"requestedBy,omitempty"`
+	RequiredApprovals int               `bson:"requiredApprovals,omitempty" json:"requiredApprovals,omitempty"`
+	Approvals         []ErasureApproval `bson:"approvals,omitempty" json:"approvals,omitempty"`
+
+	Closable bool `bson:"-" json:"closable,omitempty"` // response-only, filled by ListOpen
 }

@@ -226,7 +226,7 @@ func TestErasureClaimFromPendingSetsModeAndLease(t *testing.T) {
 	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 
 	lease := now.Add(5 * time.Minute)
-	got, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease)
+	got, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease, nil)
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -239,10 +239,10 @@ func TestErasureClaimFromPendingSetsModeAndLease(t *testing.T) {
 	if got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(*got.LeaseUntil) {
 		t.Fatalf("NextAttemptAt = %v; want the lease %v", got.NextAttemptAt, got.LeaseUntil)
 	}
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "admin-2", now, lease); !errors.Is(err, ErrErasureRequestBusy) {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "admin-2", now, lease, nil); !errors.Is(err, ErrErasureRequestBusy) {
 		t.Fatalf("second Claim err = %v; want ErrErasureRequestBusy", err)
 	}
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "hard_delete", "admin-2", now, lease); !errors.Is(err, ErrErasureRequestNotFound) {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "hard_delete", "admin-2", now, lease, nil); !errors.Is(err, ErrErasureRequestNotFound) {
 		t.Fatalf("Claim pending on incomplete err = %v; want ErrErasureRequestNotFound", err)
 	}
 }
@@ -284,7 +284,7 @@ func TestErasureSettleIsFencedByLease(t *testing.T) {
 	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 
 	l1 := now.Add(5 * time.Minute).Truncate(time.Millisecond)
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	later := l1.Add(time.Second)
@@ -341,7 +341,7 @@ func TestErasureSettleIncompleteThenCompleted(t *testing.T) {
 	now := time.Now().UTC()
 	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 	lease := now.Add(5 * time.Minute)
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	next := now.Add(time.Minute)
@@ -383,7 +383,7 @@ func TestErasureClaimFromIncompleteKeepsModeAndResets(t *testing.T) {
 	now := time.Now().UTC()
 	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now,
 		Mode: "anonymize", ResolvedBy: "admin-1", Attempts: 20, LastError: models.ErasureLastErrorRun, LeaseUntil: tp(now.Add(-time.Minute))})
-	got, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "ignored", "admin-2", now, now.Add(5*time.Minute))
+	got, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "ignored", "admin-2", now, now.Add(5*time.Minute), nil)
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestErasureClosePartialReleasesLeaseAndRefusesStaleSettle(t *testing.T) {
 	now := time.Now().UTC()
 	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 	lease := now.Add(5 * time.Minute)
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	later := lease.Add(time.Second) // the run died; its lease expired
@@ -551,7 +551,7 @@ func TestErasureRecordProgressIsFencedByLeaseAndKeepsIt(t *testing.T) {
 	if err := r.RecordProgress(ctx, "r-1", l1, plan); !errors.Is(err, ErrErasureLeaseLost) {
 		t.Fatalf("RecordProgress on a pending row err = %v; want ErrErasureLeaseLost", err)
 	}
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	if err := r.RecordProgress(ctx, "r-1", l1.Add(time.Second), plan); !errors.Is(err, ErrErasureLeaseLost) {
@@ -600,7 +600,7 @@ func TestErasureInsertOneActiveRetentionRequestPerSubject(t *testing.T) {
 		t.Fatalf("self-service Insert next to a retention request: %v", err)
 	}
 	lease := now.Add(5 * time.Minute).Truncate(time.Millisecond)
-	if _, err := r.Claim(ctx, "a", models.ErasureRequestIncomplete, "", "", now, lease); err != nil {
+	if _, err := r.Claim(ctx, "a", models.ErasureRequestIncomplete, "", "", now, lease, nil); err != nil {
 		t.Fatalf("Claim a: %v", err)
 	}
 	if err := r.Settle(ctx, "a", lease, ErasureSettlement{Status: models.ErasureRequestCompleted, ResolvedAt: &now}); err != nil {
@@ -633,7 +633,7 @@ func TestErasureClosePartialIsFencedByProgress(t *testing.T) {
 
 	// A concurrent run claims, records a new producer and settles.
 	lease := now.Add(5 * time.Minute).Truncate(time.Millisecond)
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "", now, lease); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "", now, lease, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	moved := append(append([]models.ErasureProducerProgress(nil), checked...),
@@ -658,5 +658,129 @@ func TestErasureClosePartialIsFencedByProgress(t *testing.T) {
 	}
 	if row, _ := r.Get(ctx, "r-1"); row.Status != models.ErasureRequestClosedPartial {
 		t.Fatalf("row = %+v; want closed_partial", row)
+	}
+}
+
+// --- admin-opened requests and approvals -----------------------------------
+
+func TestErasureAddApprovalAppendsOnceAndLocksMode(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now, RequiredApprovals: 2})
+
+	got, err := r.AddApproval(ctx, "r-1", "anonymize", models.ErasureApproval{By: "op-a", At: now, Note: "ok"})
+	if err != nil {
+		t.Fatalf("AddApproval: %v", err)
+	}
+	if got.Mode != "anonymize" || len(got.Approvals) != 1 || got.Approvals[0].By != "op-a" {
+		t.Fatalf("row = %+v; want mode anonymize and one approval by op-a", got)
+	}
+	if _, err := r.AddApproval(ctx, "r-1", "anonymize", models.ErasureApproval{By: "op-a", At: now}); !errors.Is(err, ErrErasureApprovalConflict) {
+		t.Fatalf("same operator twice err = %v; want ErrErasureApprovalConflict", err)
+	}
+	if _, err := r.AddApproval(ctx, "r-1", "hard_delete", models.ErasureApproval{By: "op-b", At: now}); !errors.Is(err, ErrErasureApprovalConflict) {
+		t.Fatalf("different mode err = %v; want ErrErasureApprovalConflict", err)
+	}
+	if got, err := r.AddApproval(ctx, "r-1", "anonymize", models.ErasureApproval{By: "op-b", At: now}); err != nil || len(got.Approvals) != 2 {
+		t.Fatalf("second operator = %+v, %v; want two approvals", got, err)
+	}
+	if _, err := r.AddApproval(ctx, "nope", "anonymize", models.ErasureApproval{By: "op-c", At: now}); !errors.Is(err, ErrErasureRequestNotFound) {
+		t.Fatalf("missing row err = %v; want ErrErasureRequestNotFound", err)
+	}
+}
+
+func TestErasureAddApprovalRefusesNonPending(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now})
+	if _, err := r.AddApproval(ctx, "r-1", "anonymize", models.ErasureApproval{By: "op-a", At: now}); !errors.Is(err, ErrErasureApprovalConflict) {
+		t.Fatalf("incomplete row err = %v; want ErrErasureApprovalConflict", err)
+	}
+}
+
+func TestErasureAddApprovalConcurrentOperatorsBothLand(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now, RequiredApprovals: 2})
+
+	start := make(chan struct{})
+	errs := make(chan error, 6)
+	for _, by := range []string{"op-a", "op-b", "op-a", "op-b", "op-a", "op-b"} {
+		go func() {
+			<-start
+			_, err := r.AddApproval(ctx, "r-1", "anonymize", models.ErasureApproval{By: by, At: now})
+			errs <- err
+		}()
+	}
+	close(start)
+	landed := 0
+	for range 6 {
+		switch err := <-errs; {
+		case err == nil:
+			landed++
+		case errors.Is(err, ErrErasureApprovalConflict):
+		default:
+			t.Fatalf("AddApproval: %v", err)
+		}
+	}
+	if landed != 2 {
+		t.Fatalf("landed = %d; want exactly 2 (one per operator)", landed)
+	}
+	row, _ := r.Get(ctx, "r-1")
+	if len(row.Approvals) != 2 {
+		t.Fatalf("approvals = %+v; want two distinct", row.Approvals)
+	}
+}
+
+func TestErasureClaimPendingAppendsExecutorApprovalAndFencesMode(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now, Mode: "anonymize",
+		Approvals: []models.ErasureApproval{{By: "op-a", At: now}}})
+	lease := now.Add(5 * time.Minute)
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "hard_delete", "op-b", now, lease, &models.ErasureApproval{By: "op-b", At: now, Note: "executed"}); !errors.Is(err, ErrErasureApprovalConflict) {
+		t.Fatalf("Claim with another mode err = %v; want ErrErasureApprovalConflict", err)
+	}
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "op-a", now, lease, &models.ErasureApproval{By: "op-a", At: now, Note: "executed"}); !errors.Is(err, ErrErasureApprovalConflict) {
+		t.Fatalf("Claim with an existing approver err = %v; want ErrErasureApprovalConflict", err)
+	}
+	got, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "op-b", now, lease, &models.ErasureApproval{By: "op-b", At: now, Note: "executed"})
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if got.Status != models.ErasureRequestIncomplete || len(got.Approvals) != 2 || got.Approvals[1].By != "op-b" || got.Approvals[1].Note != "executed" {
+		t.Fatalf("claimed = %+v; want incomplete with approvals [op-a op-b]", got)
+	}
+}
+
+func TestErasureHasOpen(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-done", UserUUID: "u-1", Status: models.ErasureRequestCompleted, RequestedAt: now})
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-pend", UserUUID: "u-2", Status: models.ErasureRequestPending, RequestedAt: now})
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-inc", UserUUID: "u-3", Status: models.ErasureRequestIncomplete, RequestedAt: now})
+	if id, ok, err := r.HasOpen(ctx, "u-1"); err != nil || ok || id != "" {
+		t.Fatalf("completed only = %q, %v, %v; want none", id, ok, err)
+	}
+	if id, ok, err := r.HasOpen(ctx, "u-2"); err != nil || !ok || id != "r-pend" {
+		t.Fatalf("pending = %q, %v, %v; want r-pend", id, ok, err)
+	}
+	if id, ok, err := r.HasOpen(ctx, "u-3"); err != nil || !ok || id != "r-inc" {
+		t.Fatalf("incomplete = %q, %v, %v; want r-inc", id, ok, err)
 	}
 }

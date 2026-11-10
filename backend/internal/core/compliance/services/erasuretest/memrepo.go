@@ -68,6 +68,7 @@ func (m *MemRepo) FailNextSettle(err error) {
 func clone(r models.ErasureRequest) models.ErasureRequest {
 	r.Progress = append([]models.ErasureProducerProgress(nil), r.Progress...)
 	r.Abandoned = append([]string(nil), r.Abandoned...)
+	r.Approvals = append([]models.ErasureApproval(nil), r.Approvals...)
 	r.RequestedAt = r.RequestedAt.Truncate(time.Millisecond)
 	r.ResolvedAt = cloneTime(r.ResolvedAt)
 	r.NextAttemptAt = cloneTime(r.NextAttemptAt)
@@ -182,7 +183,7 @@ func (m *MemRepo) Resolve(_ context.Context, uuid, status, resolvedBy, mode, not
 }
 
 // Claim takes the lease on one request; see repository.ErasureRequestRepository.Claim.
-func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time) (*models.ErasureRequest, error) {
+func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time, approval *models.ErasureApproval) (*models.ErasureRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.rows[uuid]
@@ -192,6 +193,19 @@ func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string,
 	if !leaseFree(r, now) {
 		return nil, repository.ErrErasureRequestBusy
 	}
+	if fromStatus == models.ErasureRequestPending {
+		if r.Mode != "" && r.Mode != mode {
+			return nil, repository.ErrErasureApprovalConflict
+		}
+		if approval != nil {
+			if approvedBy(r, approval.By) {
+				return nil, repository.ErrErasureApprovalConflict
+			}
+			a := *approval
+			a.At = a.At.Truncate(time.Millisecond)
+			r.Approvals = append(r.Approvals, a)
+		}
+	}
 	lease := leaseUntil.Truncate(time.Millisecond)
 	r.LeaseUntil, r.NextAttemptAt, r.Attempts, r.LastError = &lease, cloneTime(&lease), 1, ""
 	if fromStatus == models.ErasureRequestPending {
@@ -200,6 +214,56 @@ func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string,
 	m.rows[uuid] = r
 	c := clone(r)
 	return &c, nil
+}
+
+func approvedBy(r models.ErasureRequest, by string) bool {
+	for _, a := range r.Approvals {
+		if a.By == by {
+			return true
+		}
+	}
+	return false
+}
+
+// AddApproval appends an approval to a pending request and locks its mode;
+// see repository.ErasureRequestRepository.AddApproval.
+func (m *MemRepo) AddApproval(_ context.Context, uuid, mode string, a models.ErasureApproval) (*models.ErasureRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rows[uuid]
+	if !ok {
+		return nil, repository.ErrErasureRequestNotFound
+	}
+	if r.Status != models.ErasureRequestPending || approvedBy(r, a.By) || (r.Mode != "" && r.Mode != mode) {
+		return nil, repository.ErrErasureApprovalConflict
+	}
+	a.At = a.At.Truncate(time.Millisecond)
+	r.Approvals = append(r.Approvals, a)
+	r.Mode = mode
+	m.rows[uuid] = r
+	c := clone(r)
+	return &c, nil
+}
+
+// HasOpen returns the UUID of a pending or incomplete request of the subject
+// (the oldest when there are several).
+func (m *MemRepo) HasOpen(_ context.Context, userUUID string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var best *models.ErasureRequest
+	for _, r := range m.rows {
+		if r.UserUUID != userUUID || (r.Status != models.ErasureRequestPending && r.Status != models.ErasureRequestIncomplete) {
+			continue
+		}
+		if best == nil || r.RequestedAt.Before(best.RequestedAt) {
+			c := r
+			best = &c
+		}
+	}
+	if best == nil {
+		return "", false, nil
+	}
+	return best.UUID, true, nil
 }
 
 // ClaimDue leases the next incomplete request whose retry is due and counts

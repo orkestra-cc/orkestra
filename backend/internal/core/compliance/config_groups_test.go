@@ -53,3 +53,19 @@ func TestRetention_GatingMatchesConsumption(t *testing.T) {
 		t.Errorf("export_retention_days DependsOn = %+v, want none — DSR export TTL is independent of retention auto-cleanup", erd.DependsOn)
 	}
 }
+
+func TestErasureRequiredApprovalsField(t *testing.T) {
+	var f *module.ConfigField
+	for _, c := range complianceSchema() {
+		if c.Key == "erasure_required_approvals" {
+			f = &c
+		}
+	}
+	if f == nil {
+		t.Fatal("erasure_required_approvals missing")
+	}
+	if f.Type != module.FieldInt || f.Default != "1" || f.Group != "retention" || f.EnvVar != "COMPLIANCE_ERASURE_REQUIRED_APPROVALS" ||
+		f.Min == nil || *f.Min != 1 || f.Max == nil || *f.Max != 5 || len(f.DependsOn) != 0 {
+		t.Errorf("field = %+v", *f)
+	}
+}

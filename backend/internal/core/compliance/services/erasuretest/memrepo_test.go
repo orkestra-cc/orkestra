@@ -42,7 +42,7 @@ func TestMemErasureClaimFromPendingSetsModeAndLease(t *testing.T) {
 	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 
 	lease := now.Add(5 * time.Minute)
-	got, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease)
+	got, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease, nil)
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -55,10 +55,10 @@ func TestMemErasureClaimFromPendingSetsModeAndLease(t *testing.T) {
 	if got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(*got.LeaseUntil) {
 		t.Fatalf("NextAttemptAt = %v; want the lease %v", got.NextAttemptAt, got.LeaseUntil)
 	}
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "admin-2", now, lease); !errors.Is(err, repository.ErrErasureRequestBusy) {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "admin-2", now, lease, nil); !errors.Is(err, repository.ErrErasureRequestBusy) {
 		t.Fatalf("second Claim err = %v; want repository.ErrErasureRequestBusy", err)
 	}
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "hard_delete", "admin-2", now, lease); !errors.Is(err, repository.ErrErasureRequestNotFound) {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "hard_delete", "admin-2", now, lease, nil); !errors.Is(err, repository.ErrErasureRequestNotFound) {
 		t.Fatalf("Claim pending on incomplete err = %v; want repository.ErrErasureRequestNotFound", err)
 	}
 }
@@ -96,7 +96,7 @@ func TestMemErasureSettleIsFencedByLease(t *testing.T) {
 	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 
 	l1 := now.Add(5 * time.Minute).Truncate(time.Millisecond)
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	later := l1.Add(time.Second)
@@ -143,7 +143,7 @@ func TestMemErasureSettleIncompleteThenCompleted(t *testing.T) {
 	now := time.Now().UTC()
 	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 	lease := now.Add(5 * time.Minute)
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	next := now.Add(time.Minute)
@@ -177,7 +177,7 @@ func TestMemErasureClaimFromIncompleteKeepsModeAndResets(t *testing.T) {
 	now := time.Now().UTC()
 	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now,
 		Mode: "anonymize", ResolvedBy: "admin-1", Attempts: 20, LastError: models.ErasureLastErrorRun, LeaseUntil: tp(now.Add(-time.Minute))})
-	got, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "ignored", "admin-2", now, now.Add(5*time.Minute))
+	got, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "ignored", "admin-2", now, now.Add(5*time.Minute), nil)
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestMemErasureClosePartialReleasesLeaseAndRefusesStaleSettle(t *testing.T) 
 	now := time.Now().UTC()
 	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
 	lease := now.Add(5 * time.Minute)
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	later := lease.Add(time.Second) // the run died; its lease expired
@@ -297,7 +297,7 @@ func TestMemErasureRecordProgressIsFencedByLeaseAndKeepsIt(t *testing.T) {
 	if err := r.RecordProgress(ctx, "r-1", l1, plan); !errors.Is(err, repository.ErrErasureLeaseLost) {
 		t.Fatalf("RecordProgress on a pending row err = %v; want ErrErasureLeaseLost", err)
 	}
-	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1, nil); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	if err := r.RecordProgress(ctx, "r-1", l1.Add(time.Second), plan); !errors.Is(err, repository.ErrErasureLeaseLost) {

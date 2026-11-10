@@ -26,6 +26,12 @@ var ErrErasureLeaseLost = errors.New("compliance: the erasure run lease was take
 // models.ActiveRetentionErasurePartialFilter): another run owns the subject.
 var ErrErasureRequestActive = errors.New("compliance: the subject already has an incomplete retention erasure")
 
+// ErrErasureApprovalConflict is returned by AddApproval, and by Claim of a
+// pending request with an approval, when the compare-and-set lost: the request
+// is not pending, the operator already approved, or the mode differs from the
+// one an earlier approval locked. The caller re-reads the row to tell which.
+var ErrErasureApprovalConflict = errors.New("compliance: the approval conflicts with the request's state")
+
 // ErasureSettlement is the outcome of one leased run.
 type ErasureSettlement struct {
 	Status        string // models.ErasureRequestCompleted or models.ErasureRequestIncomplete
@@ -104,21 +110,32 @@ func leaseFree(now time.Time) []bson.M {
 // incomplete with mode and resolver recorded) or incomplete (an operator
 // retry: mode and resolver stay). Either way the attempt budget restarts and
 // this run is attempt 1. It returns the row after the update.
-func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time) (*models.ErasureRequest, error) {
+//
+// approval (pending only) is appended to the row's approvals in the same
+// update: the executor counts as an approver. The claim is fenced by it and by
+// the mode: it misses with ErrErasureApprovalConflict when the operator
+// already approved, or an earlier approval locked a different mode.
+func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time, approval *models.ErasureApproval) (*models.ErasureRequest, error) {
 	// nextAttemptAt = the lease, so the worker takes the row over if this run
 	// dies before Settle (pending rows and exhausted rows have none).
 	lease := leaseUntil.Truncate(time.Millisecond)
 	set := bson.M{"leaseUntil": lease, "nextAttemptAt": lease, "attempts": 1}
+	filter := bson.M{"uuid": uuid, "status": fromStatus, "$or": leaseFree(now)}
+	update := bson.M{"$set": set, "$unset": bson.M{"lastError": ""}}
 	if fromStatus == models.ErasureRequestPending {
 		set["status"] = models.ErasureRequestIncomplete
 		set["mode"] = mode
 		set["resolvedBy"] = actor
+		// A mode locked by an approval cannot be overridden by the executor.
+		filter["mode"] = bson.M{"$in": bson.A{nil, "", mode}}
+		if approval != nil {
+			filter["approvals.by"] = bson.M{"$ne": approval.By}
+			update["$push"] = bson.M{"approvals": *approval}
+		}
 	}
 	var req models.ErasureRequest
 	//tenantscope:allow compliance admin executes a specific erasure request by its own UUID — cross-tenant by design.
-	err := r.coll.FindOneAndUpdate(ctx,
-		bson.M{"uuid": uuid, "status": fromStatus, "$or": leaseFree(now)},
-		bson.M{"$set": set, "$unset": bson.M{"lastError": ""}},
+	err := r.coll.FindOneAndUpdate(ctx, filter, update,
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&req)
 	if err == nil {
@@ -131,10 +148,65 @@ func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, 
 	if gerr != nil {
 		return nil, gerr
 	}
-	if cur.Status == fromStatus {
-		return nil, ErrErasureRequestBusy
+	if cur.Status != fromStatus {
+		return nil, ErrErasureRequestNotFound
 	}
-	return nil, ErrErasureRequestNotFound
+	if fromStatus == models.ErasureRequestPending && leaseFreeRow(cur, now) {
+		return nil, ErrErasureApprovalConflict
+	}
+	return nil, ErrErasureRequestBusy
+}
+
+func leaseFreeRow(r *models.ErasureRequest, now time.Time) bool {
+	return r.LeaseUntil == nil || r.LeaseUntil.Before(now.Truncate(time.Millisecond))
+}
+
+// AddApproval appends one operator's approval to a pending request and locks
+// its mode when none is set yet, in one compare-and-set: the row must be
+// pending, not yet approved by a.By, and have no mode or the same one. Two
+// operators approving at once both land (each update only pushes its own
+// element). A lost CAS is ErrErasureApprovalConflict; an absent row
+// ErrErasureRequestNotFound. It returns the row after the update.
+func (r *ErasureRequestRepository) AddApproval(ctx context.Context, uuid, mode string, a models.ErasureApproval) (*models.ErasureRequest, error) {
+	var req models.ErasureRequest
+	//tenantscope:allow compliance admin approves a specific erasure request by its own UUID — cross-tenant by design.
+	err := r.coll.FindOneAndUpdate(ctx,
+		bson.M{
+			"uuid":         uuid,
+			"status":       models.ErasureRequestPending,
+			"approvals.by": bson.M{"$ne": a.By},
+			"mode":         bson.M{"$in": bson.A{nil, "", mode}},
+		},
+		bson.M{"$push": bson.M{"approvals": a}, "$set": bson.M{"mode": mode}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	).Decode(&req)
+	if err == nil {
+		return &req, nil
+	}
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, err
+	}
+	if _, gerr := r.Get(ctx, uuid); gerr != nil {
+		return nil, gerr
+	}
+	return nil, ErrErasureApprovalConflict
+}
+
+// HasOpen returns the UUID of a pending or incomplete request of the subject.
+func (r *ErasureRequestRepository) HasOpen(ctx context.Context, userUUID string) (string, bool, error) {
+	var req models.ErasureRequest
+	//tenantscope:allow dsr: open erasure lookup by data subject across tenants
+	err := r.coll.FindOne(ctx,
+		bson.M{"userUuid": userUUID, "status": bson.M{"$in": bson.A{models.ErasureRequestPending, models.ErasureRequestIncomplete}}},
+		options.FindOne().SetSort(bson.D{{Key: "requestedAt", Value: 1}}),
+	).Decode(&req)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return req.UUID, true, nil
 }
 
 // ClaimDue leases the next incomplete request whose retry is due, of any

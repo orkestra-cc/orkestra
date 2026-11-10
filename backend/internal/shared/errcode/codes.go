@@ -837,3 +837,27 @@ const ComplianceRetentionMinimumNotMet = "compliance.retention_minimum_not_met"
 // ComplianceRetentionCheckUnavailable signals a hard delete refused because the
 // retention check could not be completed (it fails closed). 503.
 const ComplianceRetentionCheckUnavailable = "compliance.retention_check_unavailable"
+
+// ComplianceErasureRequestExists signals that the subject already has a
+// pending or incomplete erasure request; the body carries its id. 409.
+const ComplianceErasureRequestExists = "compliance.erasure_request_exists"
+
+// ComplianceErasureApprovalsMissing signals an execute with fewer distinct
+// approvals than the request requires; the body carries have and need. 409.
+const ComplianceErasureApprovalsMissing = "compliance.erasure_approvals_missing"
+
+// ComplianceErasureSelfApproval signals the data subject acting as approver or
+// executor of their own erasure request. 409.
+const ComplianceErasureSelfApproval = "compliance.erasure_self_approval"
+
+// ComplianceErasureAlreadyApproved signals an operator approving a request
+// they already approved. 409.
+const ComplianceErasureAlreadyApproved = "compliance.erasure_already_approved"
+
+// ComplianceErasureModeMismatch signals an approve or execute in a mode other
+// than the one the first approval locked. 409.
+const ComplianceErasureModeMismatch = "compliance.erasure_mode_mismatch"
+
+// ComplianceReasonRequired signals a reason or note outside 1 to 500
+// characters. 422.
+const ComplianceReasonRequired = "compliance.reason_required"

@@ -65,6 +65,9 @@ func (m *Module) Description() string {
 var (
 	minRetentionYearsMin = 0
 	minRetentionYearsMax = 30
+
+	erasureRequiredApprovalsMin = 1
+	erasureRequiredApprovalsMax = 5
 )
 
 // ConfigSchema gates optional sub-features. SOC2 evidence is off by default —
@@ -84,6 +87,7 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 		// cleanup job — it must stay visible whether or not auto-cleanup is on.
 		{Key: "export_retention_days", Label: "Export retention (days)", Group: "retention", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
 		{Key: "min_retention_years", Label: "Minimum retention (years)", Group: "retention", Description: "Years after an account was created before it can be hard-deleted. A hard delete earlier is refused with the date it becomes possible; anonymize is not affected, and producers can require longer. 0 turns the platform floor off.", Type: module.FieldInt, Default: "0", Min: &minRetentionYearsMin, Max: &minRetentionYearsMax, EnvVar: "COMPLIANCE_MIN_RETENTION_YEARS"},
+		{Key: "erasure_required_approvals", Label: "Erasure approvals", Group: "retention", Description: "Distinct operators that must approve an erasure request before it runs; the operator who executes it counts as one and the data subject never counts. Read when a request is created. 1 keeps a single operator enough.", Type: module.FieldInt, Default: "1", Min: &erasureRequiredApprovalsMin, Max: &erasureRequiredApprovalsMax, EnvVar: "COMPLIANCE_ERASURE_REQUIRED_APPROVALS"},
 		// Four eyes (compliance spec §1.5): a policy change with warnings
 		// waits for a second operator. Turning it off is itself a module
 		// config change, audited by the SDK module admin handler.
@@ -100,7 +104,7 @@ func (m *Module) ConfigGroups() []module.ConfigGroup {
 		{Key: "soc2", Label: "SOC2 evidence", Order: 1,
 			Description: "The SOC2 evidence page and API, off unless you pursue certification."},
 		{Key: "retention", Label: "Retention & DSR", Order: 2,
-			Description: "How long anonymized tombstones, generated DSR exports and accounts before a hard delete are kept."},
+			Description: "How long anonymized tombstones, generated DSR exports and accounts before a hard delete are kept, and how many operators approve an erasure."},
 		{Key: "policy", Label: "Policy engine", Order: 3,
 			Description: "How changes to the compliance policies are approved."},
 	}
@@ -159,7 +163,7 @@ func (m *Module) Permissions() []iface.PermissionSpec {
 		{
 			Key:         "system.compliance.dsr.manage",
 			Module:      "compliance",
-			Description: "Execute or reject right-to-erasure requests on behalf of data subjects",
+			Description: "Open, approve, execute or reject right-to-erasure requests on behalf of data subjects",
 			System:      true,
 		},
 		{
@@ -346,6 +350,9 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		// request kept incomplete until every producer is done; the retry
 		// worker, launched by Start(), finishes the ones that are not.
 		erasureReqSvc := services.NewErasureRequestService(repository.NewErasureRequestRepo(deps.DB), dsrSvc, sink, deps.Logger)
+		erasureReqSvc.SetRequiredApprovals(func(context.Context) int {
+			return deps.GetConfigInt("compliance", "erasure_required_approvals", 1)
+		})
 		m.me = handlers.NewMeHandler(dsrSvc, erasureReqSvc)
 		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
 		m.erasureRetry = services.NewErasureRetryWorker(erasureReqSvc, deps.Logger)
