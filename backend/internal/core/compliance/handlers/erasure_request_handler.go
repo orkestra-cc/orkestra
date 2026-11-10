@@ -52,20 +52,69 @@ func (h *ErasureRequestHandler) Lodge(ctx context.Context, in *LodgeErasureReque
 
 // --- admin ---
 
+type ListErasureRequestsInput struct {
+	Status   string `query:"status" enum:"open,completed,rejected,closed_partial,all" default:"open" doc:"open (pending and incomplete, the default), completed, rejected, closed_partial or all"`
+	UserUUID string `query:"userUuid" doc:"Only the requests of this data subject"`
+	Limit    int    `query:"limit" minimum:"1" maximum:"200" doc:"Page size (1-200). Omitted: 50, except for status open, which lists every open request"`
+	After    string `query:"after" doc:"Opaque cursor: the next of the previous page"`
+}
 type ListErasureRequestsOutput struct {
 	Body struct {
 		Items []models.ErasureRequest `json:"items"`
+		Next  string                  `json:"next,omitempty" doc:"Cursor of the next page; absent on the last"`
 	}
 }
 
-func (h *ErasureRequestHandler) ListOpen(ctx context.Context, _ *struct{}) (*ListErasureRequestsOutput, error) {
-	items, err := h.svc.ListOpen(ctx)
+const defaultErasureListLimit = 50
+
+// List returns requests by status, newest first, paged by cursor.
+func (h *ErasureRequestHandler) List(ctx context.Context, in *ListErasureRequestsInput) (*ListErasureRequestsOutput, error) {
+	f := repository.ErasureListFilter{UserUUID: in.UserUUID, Limit: in.Limit, After: in.After}
+	switch in.Status {
+	case "", "open":
+		f.Statuses = []string{models.ErasureRequestPending, models.ErasureRequestIncomplete}
+	case "all":
+	default:
+		f.Statuses = []string{in.Status}
+	}
+	if f.Limit == 0 && len(f.Statuses) != 2 {
+		f.Limit = defaultErasureListLimit
+	}
+	items, next, err := h.svc.List(ctx, f)
+	if errors.Is(err, repository.ErrErasureCursorInvalid) {
+		return nil, huma.Error422UnprocessableEntity("invalid cursor")
+	}
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list erasure requests", err)
 	}
+	if items == nil {
+		items = []models.ErasureRequest{}
+	}
 	out := &ListErasureRequestsOutput{}
 	out.Body.Items = items
+	out.Body.Next = next
 	return out, nil
+}
+
+type ErasureReceiptInput struct {
+	ID string `path:"id"`
+}
+type ErasureReceiptOutput struct {
+	Body services.ErasureReceipt
+}
+
+// Receipt returns the receipt of a completed or closed_partial request.
+func (h *ErasureRequestHandler) Receipt(ctx context.Context, in *ErasureReceiptInput) (*ErasureReceiptOutput, error) {
+	rc, err := h.svc.Receipt(ctx, in.ID)
+	switch {
+	case errors.Is(err, repository.ErrErasureRequestNotFound):
+		return nil, huma.Error404NotFound("erasure request not found")
+	case errors.Is(err, services.ErrErasureReceiptUnavailable):
+		return nil, errcode.Conflict(errcode.ComplianceErasureReceiptUnavailable, "Only a completed or closed erasure request has a receipt.")
+	case err != nil:
+		return nil, huma.Error500InternalServerError("erasure receipt", err)
+	}
+	return &ErasureReceiptOutput{Body: *rc}, nil
 }
 
 type ExecuteErasureRequestInput struct {
@@ -252,9 +301,18 @@ func RegisterErasureRequestAdminReadRoutes(api huma.API, h *ErasureRequestHandle
 		OperationID: "compliance-erasure-requests-list",
 		Method:      http.MethodGet,
 		Path:        "/v1/admin/compliance/erasure-requests",
-		Summary:     "List open (pending or incomplete) right-to-erasure requests",
+		Summary:     "List right-to-erasure requests",
+		Description: "Newest first, filtered by status (default open: pending and incomplete, with closable) and subject, paged by the opaque cursor in next.",
 		Tags:        []string{"Compliance"},
-	}, h.ListOpen)
+	}, h.List)
+	huma.Register(api, huma.Operation{
+		OperationID: "compliance-erasure-request-receipt",
+		Method:      http.MethodGet,
+		Path:        "/v1/admin/compliance/erasure-requests/{id}/receipt",
+		Summary:     "Receipt of a completed or closed erasure request",
+		Description: "Built from the request row: subject and operators by UUID, approvals, per-producer outcomes and totals, abandoned keys and the close note. 409 for a request that is pending, incomplete or rejected.",
+		Tags:        []string{"Compliance"},
+	}, h.Receipt)
 }
 
 func RegisterErasureRequestAdminWriteRoutes(api huma.API, h *ErasureRequestHandler) {

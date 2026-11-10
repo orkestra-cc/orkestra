@@ -450,8 +450,8 @@ func TestClosePartialRecordsAbandonedProducersAndAudits(t *testing.T) {
 	if got.Status != models.ErasureRequestClosedPartial || len(got.Abandoned) != 1 || got.Abandoned[0] != "gone" || got.ResolutionNote != "module removed in v2" {
 		t.Fatalf("returned row = %+v", got)
 	}
-	if len(sink.events) != 1 {
-		t.Fatalf("events = %+v; want one", sink.events)
+	if len(sink.events) != 2 || sink.events[1].Action != "gdpr.dsr.erasure_receipt" {
+		t.Fatalf("events = %+v; want closed_partial then receipt", sink.events)
 	}
 	ev := sink.events[0]
 	ab, _ := ev.Metadata["abandoned"].([]string)

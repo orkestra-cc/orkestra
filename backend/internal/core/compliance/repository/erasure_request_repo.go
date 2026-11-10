@@ -2,7 +2,10 @@ package repository
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
@@ -107,6 +110,87 @@ func (r *ErasureRequestRepository) ListByStatus(ctx context.Context, statuses ..
 		return nil, err
 	}
 	return out, nil
+}
+
+// ErasureListFilter selects a page of erasure requests. Statuses empty means
+// every status. Limit 0 means no limit (and no cursor is returned). After is
+// the opaque cursor a previous page returned.
+type ErasureListFilter struct {
+	Statuses []string
+	UserUUID string
+	Limit    int
+	After    string
+}
+
+// ErrErasureCursorInvalid is returned for a cursor this repository did not issue.
+var ErrErasureCursorInvalid = errors.New("compliance: invalid erasure request cursor")
+
+// EncodeErasureCursor is the opaque cursor after row in the stable order
+// requestedAt desc, uuid desc (requestedAt at BSON millisecond precision).
+func EncodeErasureCursor(requestedAt time.Time, uuid string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(requestedAt.UnixMilli(), 10) + "|" + uuid))
+}
+
+// DecodeErasureCursor reverses EncodeErasureCursor.
+func DecodeErasureCursor(c string) (time.Time, string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(c)
+	if err != nil {
+		return time.Time{}, "", ErrErasureCursorInvalid
+	}
+	ms, id, ok := strings.Cut(string(raw), "|")
+	n, perr := strconv.ParseInt(ms, 10, 64)
+	if !ok || perr != nil || id == "" {
+		return time.Time{}, "", ErrErasureCursorInvalid
+	}
+	return time.UnixMilli(n).UTC(), id, nil
+}
+
+// List returns a page of requests ordered requestedAt desc, uuid desc, and the
+// cursor of the next page ("" on the last). The uuid tie-break keeps paging
+// exact across equal requestedAt values.
+func (r *ErasureRequestRepository) List(ctx context.Context, f ErasureListFilter) ([]models.ErasureRequest, string, error) {
+	filter := bson.M{}
+	switch len(f.Statuses) {
+	case 0:
+	case 1:
+		filter["status"] = f.Statuses[0]
+	default:
+		filter["status"] = bson.M{"$in": f.Statuses}
+	}
+	if f.UserUUID != "" {
+		filter["userUuid"] = f.UserUUID
+	}
+	if f.After != "" {
+		at, id, err := DecodeErasureCursor(f.After)
+		if err != nil {
+			return nil, "", err
+		}
+		filter["$or"] = bson.A{
+			bson.M{"requestedAt": bson.M{"$lt": at}},
+			bson.M{"requestedAt": at, "uuid": bson.M{"$lt": id}},
+		}
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "requestedAt", Value: -1}, {Key: "uuid", Value: -1}})
+	if f.Limit > 0 {
+		opts.SetLimit(int64(f.Limit) + 1)
+	}
+	//tenantscope:allow compliance admin reviews erasure requests platform-wide.
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, "", err
+	}
+	defer cur.Close(ctx)
+	var out []models.ErasureRequest
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+		last := out[len(out)-1]
+		next = EncodeErasureCursor(last.RequestedAt, last.UUID)
+	}
+	return out, next, nil
 }
 
 // leaseFree matches a row nobody holds: leaseUntil absent, null or expired.

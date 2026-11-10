@@ -171,6 +171,45 @@ func (m *MemRepo) ListByStatus(_ context.Context, statuses ...string) ([]models.
 	return out, nil
 }
 
+// List mirrors repository.ErasureRequestRepository.List: requestedAt desc,
+// uuid desc, filtered by statuses and subject, paged by the opaque cursor.
+func (m *MemRepo) List(_ context.Context, f repository.ErasureListFilter) ([]models.ErasureRequest, string, error) {
+	var afterAt time.Time
+	var afterID string
+	if f.After != "" {
+		var err error
+		if afterAt, afterID, err = repository.DecodeErasureCursor(f.After); err != nil {
+			return nil, "", err
+		}
+	}
+	m.mu.Lock()
+	var out []models.ErasureRequest
+	for _, r := range m.rows {
+		r = clone(r)
+		if len(f.Statuses) > 0 && !contains(f.Statuses, r.Status) || f.UserUUID != "" && r.UserUUID != f.UserUUID {
+			continue
+		}
+		if f.After != "" && !(r.RequestedAt.Before(afterAt) || r.RequestedAt.Equal(afterAt) && r.UUID < afterID) {
+			continue
+		}
+		out = append(out, r)
+	}
+	m.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].RequestedAt.Equal(out[j].RequestedAt) {
+			return out[i].RequestedAt.After(out[j].RequestedAt)
+		}
+		return out[i].UUID > out[j].UUID
+	})
+	next := ""
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+		last := out[len(out)-1]
+		next = repository.EncodeErasureCursor(last.RequestedAt, last.UUID)
+	}
+	return out, next, nil
+}
+
 func contains(list []string, s string) bool {
 	for _, v := range list {
 		if v == s {

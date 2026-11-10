@@ -225,6 +225,12 @@ func (m *Module) Collections() []module.CollectionSpec {
 				{Field: "status", Direction: 1},
 				{Field: "requestedAt", Direction: -1},
 			}},
+			// The list's stable order (requestedAt desc, uuid desc), for the
+			// cursor paging of any status filter.
+			{OrderedKeys: []module.IndexKey{
+				{Field: "requestedAt", Direction: -1},
+				{Field: "uuid", Direction: -1},
+			}},
 			{OrderedKeys: []module.IndexKey{
 				{Field: "status", Direction: 1},
 				{Field: "nextAttemptAt", Direction: 1},

@@ -858,6 +858,11 @@ const ComplianceErasureAlreadyApproved = "compliance.erasure_already_approved"
 // than the one the first approval locked. 409.
 const ComplianceErasureModeMismatch = "compliance.erasure_mode_mismatch"
 
+// ComplianceErasureReceiptUnavailable signals a receipt request for an erasure
+// request that is not completed or closed_partial (pending, incomplete or
+// rejected). 409.
+const ComplianceErasureReceiptUnavailable = "compliance.erasure_receipt_unavailable"
+
 // ComplianceReasonRequired signals a reason or note outside 1 to 500
 // characters. 422.
 const ComplianceReasonRequired = "compliance.reason_required"

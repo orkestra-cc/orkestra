@@ -53,7 +53,7 @@ func TestErasureLodgeSuccess(t *testing.T) {
 func TestErasureListOpen(t *testing.T) {
 	t.Parallel()
 	h := newErasureHandler(seeded(models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestPending}), newDSR())
-	out, err := h.ListOpen(context.Background(), &struct{}{})
+	out, err := h.List(context.Background(), &ListErasureRequestsInput{})
 	if err != nil {
 		t.Fatalf("ListOpen: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestErasureListOpenIncludesIncomplete(t *testing.T) {
 		models.ErasureRequest{UUID: "r-2", Status: models.ErasureRequestIncomplete},
 		models.ErasureRequest{UUID: "r-3", Status: models.ErasureRequestCompleted},
 	), newDSR())
-	out, err := h.ListOpen(context.Background(), &struct{}{})
+	out, err := h.List(context.Background(), &ListErasureRequestsInput{})
 	if err != nil {
 		t.Fatalf("ListOpen: %v", err)
 	}
@@ -247,5 +247,71 @@ func TestErasureCloseRouteIsBehindDSRManageAndStepUp(t *testing.T) {
 	}
 	if slices.Contains(mount(RegisterErasureRequestAdminReadRoutes), closePath) {
 		t.Fatal("close must not be registered by the read group")
+	}
+}
+
+func TestErasureListStatusFilterAndPaging(t *testing.T) {
+	t.Parallel()
+	t0 := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	repo := seeded(
+		models.ErasureRequest{UUID: "p", Status: models.ErasureRequestPending, RequestedAt: t0},
+		models.ErasureRequest{UUID: "c1", Status: models.ErasureRequestCompleted, RequestedAt: t0},
+		models.ErasureRequest{UUID: "c2", Status: models.ErasureRequestCompleted, RequestedAt: t0},
+		models.ErasureRequest{UUID: "c3", Status: models.ErasureRequestCompleted, RequestedAt: t0},
+		models.ErasureRequest{UUID: "x", Status: models.ErasureRequestRejected, RequestedAt: t0},
+	)
+	h := newErasureHandler(repo, newDSR())
+	ctx := context.Background()
+
+	open, err := h.List(ctx, &ListErasureRequestsInput{})
+	if err != nil || len(open.Body.Items) != 1 || open.Body.Items[0].UUID != "p" || open.Body.Next != "" {
+		t.Fatalf("default open = %+v, %v", open, err)
+	}
+	p1, err := h.List(ctx, &ListErasureRequestsInput{Status: "completed", Limit: 2})
+	if err != nil || len(p1.Body.Items) != 2 || p1.Body.Next == "" {
+		t.Fatalf("page 1 = %+v, %v", p1, err)
+	}
+	p2, err := h.List(ctx, &ListErasureRequestsInput{Status: "completed", Limit: 2, After: p1.Body.Next})
+	if err != nil || len(p2.Body.Items) != 1 || p2.Body.Items[0].UUID != "c1" || p2.Body.Next != "" {
+		t.Fatalf("page 2 = %+v, %v", p2, err)
+	}
+	all, err := h.List(ctx, &ListErasureRequestsInput{Status: "all"})
+	if err != nil || len(all.Body.Items) != 5 {
+		t.Fatalf("all = %+v, %v", all, err)
+	}
+	_, err = h.List(ctx, &ListErasureRequestsInput{After: "garbage!"})
+	assertStatus(t, err, 422)
+}
+
+func TestErasureReceiptHandler(t *testing.T) {
+	t.Parallel()
+	repo := seeded(
+		models.ErasureRequest{UUID: "done", UserUUID: "u-1", Status: models.ErasureRequestCompleted,
+			Progress: []models.ErasureProducerProgress{{Key: "user", Outcome: models.ProducerOutcomeDone, RowsDeleted: 2}}},
+		models.ErasureRequest{UUID: "pend", Status: models.ErasureRequestPending},
+		models.ErasureRequest{UUID: "inc", Status: models.ErasureRequestIncomplete},
+		models.ErasureRequest{UUID: "rej", Status: models.ErasureRequestRejected},
+	)
+	h := newErasureHandler(repo, newDSR())
+	ctx := context.Background()
+	out, err := h.Receipt(ctx, &ErasureReceiptInput{ID: "done"})
+	if err != nil || out.Body.TotalRowsDeleted != 2 || out.Body.SubjectUserUUID != "u-1" {
+		t.Fatalf("receipt = %+v, %v", out, err)
+	}
+	_, err = h.Receipt(ctx, &ErasureReceiptInput{ID: "nope"})
+	assertStatus(t, err, 404)
+	for _, id := range []string{"pend", "inc", "rej"} {
+		_, err = h.Receipt(ctx, &ErasureReceiptInput{ID: id})
+		assertCoded(t, err, 409, errcode.ComplianceErasureReceiptUnavailable)
+	}
+}
+
+func TestErasureReceiptRouteIsInTheReadGroup(t *testing.T) {
+	t.Parallel()
+	api := humachi.New(chi.NewRouter(), huma.DefaultConfig("test", "1.0.0"))
+	RegisterErasureRequestAdminReadRoutes(api, &ErasureRequestHandler{})
+	item := api.OpenAPI().Paths["/v1/admin/compliance/erasure-requests/{id}/receipt"]
+	if item == nil || item.Get == nil {
+		t.Fatal("receipt must be a GET in the audit.read group")
 	}
 }

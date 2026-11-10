@@ -829,3 +829,54 @@ func TestErasureConcurrentAdminInsertOnePendingPerSubject(t *testing.T) {
 		t.Fatalf("HasOpen = %q, %v, %v", id, ok, err)
 	}
 }
+
+func TestErasureListFiltersAndCursorAcrossEqualRequestedAt(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	t0 := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		insertErasure(t, r, models.ErasureRequest{UUID: id, UserUUID: "u-" + id, Status: models.ErasureRequestCompleted, RequestedAt: t0})
+	}
+	insertErasure(t, r, models.ErasureRequest{UUID: "n", UserUUID: "u-n", Status: models.ErasureRequestCompleted, RequestedAt: t0.Add(time.Minute)})
+	insertErasure(t, r, models.ErasureRequest{UUID: "p", UserUUID: "u-p", Status: models.ErasureRequestPending, RequestedAt: t0})
+
+	var got []string
+	after := ""
+	pages := 0
+	for {
+		rows, next, err := r.List(ctx, ErasureListFilter{Statuses: []string{models.ErasureRequestCompleted}, Limit: 3, After: after})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		pages++
+		for _, x := range rows {
+			got = append(got, x.UUID)
+		}
+		if next == "" {
+			break
+		}
+		after = next
+	}
+	want := []string{"n", "g", "f", "e", "d", "c", "b", "a"}
+	if pages != 3 || len(got) != len(want) {
+		t.Fatalf("pages=%d got=%v; want %v", pages, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got=%v; want %v", got, want)
+		}
+	}
+	all, next, err := r.List(ctx, ErasureListFilter{})
+	if err != nil || len(all) != 9 || next != "" {
+		t.Fatalf("unlimited all = %d, %q, %v", len(all), next, err)
+	}
+	one, _, err := r.List(ctx, ErasureListFilter{UserUUID: "u-c"})
+	if err != nil || len(one) != 1 || one[0].UUID != "c" {
+		t.Fatalf("userUuid filter = %+v, %v", one, err)
+	}
+	if _, _, err := r.List(ctx, ErasureListFilter{After: "%%"}); !errors.Is(err, ErrErasureCursorInvalid) {
+		t.Fatalf("bad cursor err = %v", err)
+	}
+}

@@ -102,6 +102,7 @@ type erasureRequestRepo interface {
 	Insert(ctx context.Context, req *models.ErasureRequest) error
 	Get(ctx context.Context, uuid string) (*models.ErasureRequest, error)
 	ListByStatus(ctx context.Context, statuses ...string) ([]models.ErasureRequest, error)
+	List(ctx context.Context, f repository.ErasureListFilter) ([]models.ErasureRequest, string, error)
 	Resolve(ctx context.Context, uuid, status, resolvedBy, mode, note string) error
 	Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time, approval *models.ErasureApproval) (*models.ErasureRequest, error)
 	AddApproval(ctx context.Context, uuid, mode string, a models.ErasureApproval) (*models.ErasureRequest, error)
@@ -329,16 +330,24 @@ func approvedBy(r *models.ErasureRequest, by string) bool {
 
 // ListOpen returns requests awaiting operator action or further erasure work.
 func (s *ErasureRequestService) ListOpen(ctx context.Context) ([]models.ErasureRequest, error) {
-	rows, err := s.repo.ListByStatus(ctx, models.ErasureRequestPending, models.ErasureRequestIncomplete)
+	rows, _, err := s.List(ctx, repository.ErasureListFilter{Statuses: []string{models.ErasureRequestPending, models.ErasureRequestIncomplete}})
+	return rows, err
+}
+
+// List returns a page of requests, newest first, filtered by status and
+// subject (see repository.ErasureListFilter), with the next-page cursor ("" on
+// the last page). Incomplete rows carry Closable.
+func (s *ErasureRequestService) List(ctx context.Context, f repository.ErasureListFilter) ([]models.ErasureRequest, string, error) {
+	rows, next, err := s.repo.List(ctx, f)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	for i := range rows {
 		if rows[i].Status == models.ErasureRequestIncomplete {
 			_, rows[i].Closable = s.closable(rows[i].Progress)
 		}
 	}
-	return rows, nil
+	return rows, next, nil
 }
 
 // closable reports the abandoned keys of a request with progress, judged
@@ -411,7 +420,12 @@ func (s *ErasureRequestService) ClosePartial(ctx context.Context, requestUUID, c
 			},
 		})
 	}
-	return s.repo.Get(ctx, requestUUID)
+	closed, err := s.repo.Get(ctx, requestUUID)
+	if err != nil {
+		return nil, err
+	}
+	s.emitReceipt(ctx, closed, closedBy)
+	return closed, nil
 }
 
 // HasIncomplete reports whether the subject has an erasure still incomplete.
@@ -638,6 +652,10 @@ func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequ
 		settled.NextAttemptAt, settled.LastError, settled.LeaseUntil = st.NextAttemptAt, st.LastError, nil
 		if st.ResolvedAt != nil {
 			settled.ResolvedAt = st.ResolvedAt
+		}
+		if st.Status == models.ErasureRequestCompleted {
+			// Only a settle that landed is a transition to completed.
+			s.emitReceipt(context.WithoutCancel(ctx), &settled, settled.ResolvedBy)
 		}
 	}
 	if runErr != nil {
