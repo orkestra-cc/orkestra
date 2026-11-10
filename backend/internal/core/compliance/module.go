@@ -237,6 +237,11 @@ func (m *Module) Collections() []module.CollectionSpec {
 			// running retention at once cannot both record and run one.
 			{OrderedKeys: []module.IndexKey{{Field: "userUuid", Direction: 1}}, Unique: true,
 				PartialFilter: models.ActiveRetentionErasurePartialFilter()},
+			// One pending admin-opened request per subject: two operators
+			// opening one at once cannot both insert (compound with source so
+			// the index name differs from the retention one).
+			{OrderedKeys: []module.IndexKey{{Field: "userUuid", Direction: 1}, {Field: "source", Direction: 1}}, Unique: true,
+				PartialFilter: models.PendingAdminErasurePartialFilter()},
 		}},
 		// Policy engine (compliance spec §1.1). Platform state managed by
 		// Tier-1 operators; the partial unique index enforces a single

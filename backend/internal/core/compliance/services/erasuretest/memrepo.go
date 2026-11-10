@@ -107,8 +107,20 @@ func (m *MemRepo) Insert(_ context.Context, req *models.ErasureRequest) error {
 			}
 		}
 	}
+	if pendingAdmin(*req) {
+		for _, r := range m.rows {
+			if r.UserUUID == req.UserUUID && pendingAdmin(r) {
+				return repository.ErrErasureOpenExists
+			}
+		}
+	}
 	m.rows[req.UUID] = clone(*req)
 	return nil
+}
+
+// pendingAdmin matches the partial unique (userUuid, source) index the module declares.
+func pendingAdmin(r models.ErasureRequest) bool {
+	return r.Status == models.ErasureRequestPending && r.Source == models.ErasureSourceAdmin
 }
 
 // sameProgress compares two progress lists field by field, times at BSON

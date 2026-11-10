@@ -71,7 +71,7 @@ func (h *ErasureRequestHandler) ListOpen(ctx context.Context, _ *struct{}) (*Lis
 type ExecuteErasureRequestInput struct {
 	ID   string `path:"id"`
 	Body struct {
-		Mode string `json:"mode,omitempty" enum:"hard_delete,anonymize" default:"hard_delete" doc:"Erasure mode"`
+		Mode string `json:"mode,omitempty" enum:"hard_delete,anonymize" doc:"Erasure mode. Omit to run in the mode the request locked (hard_delete when none); a different one is refused"`
 	}
 }
 type ExecuteErasureRequestOutput struct {
@@ -83,12 +83,11 @@ type ExecuteErasureRequestOutput struct {
 }
 
 func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureRequestInput) (*ExecuteErasureRequestOutput, error) {
-	actor, _ := ctxauth.GetUserUUID(ctx)
-	mode := iface.EraseHardDelete
-	if in.Body.Mode == "anonymize" {
-		mode = iface.EraseAnonymize
+	actor, ok := ctxauth.GetUserUUID(ctx)
+	if !ok || actor == "" {
+		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	out0, err := h.svc.Execute(ctx, in.ID, mode, actor)
+	out0, err := h.svc.ExecuteInMode(ctx, in.ID, in.Body.Mode, actor)
 	if gateErr := erasureGateError(err, "the subject"); gateErr != nil {
 		return nil, gateErr
 	}
@@ -281,7 +280,7 @@ func RegisterErasureRequestAdminWriteRoutes(api huma.API, h *ErasureRequestHandl
 		Method:      http.MethodPost,
 		Path:        "/v1/admin/compliance/erasure-requests/{id}/execute",
 		Summary:     "Execute a right-to-erasure request (runs the DSR erase)",
-		Description: "Runs the erasure of a pending request. An incomplete request is retried with its stored mode and the body's mode is ignored.",
+		Description: "Runs the erasure of a pending request in the body's mode, or in the mode its approvals locked when the body has none (hard_delete if neither); a different mode is refused. The executor counts as an approver. An incomplete request is retried with its stored mode and the body's mode is ignored.",
 		Tags:        []string{"Compliance"},
 	}, h.Execute)
 	huma.Register(api, huma.Operation{

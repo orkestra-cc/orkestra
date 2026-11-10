@@ -32,6 +32,11 @@ var ErrErasureRequestActive = errors.New("compliance: the subject already has an
 // one an earlier approval locked. The caller re-reads the row to tell which.
 var ErrErasureApprovalConflict = errors.New("compliance: the approval conflicts with the request's state")
 
+// ErrErasureOpenExists is returned by Insert of a pending admin-opened request
+// when the subject already has one (the partial unique index of
+// models.PendingAdminErasurePartialFilter).
+var ErrErasureOpenExists = errors.New("compliance: the subject already has a pending admin-opened erasure request")
+
 // ErasureSettlement is the outcome of one leased run.
 type ErasureSettlement struct {
 	Status        string // models.ErasureRequestCompleted or models.ErasureRequestIncomplete
@@ -53,11 +58,15 @@ func NewErasureRequestRepo(db *mongo.Database) *ErasureRequestRepository {
 }
 
 // Insert appends a new request. An incomplete retention request for a subject
-// that already has one is refused with ErrErasureRequestActive.
+// that already has one is refused with ErrErasureRequestActive, a pending
+// admin-opened one with ErrErasureOpenExists.
 func (r *ErasureRequestRepository) Insert(ctx context.Context, req *models.ErasureRequest) error {
 	_, err := r.coll.InsertOne(ctx, req)
 	if mongo.IsDuplicateKeyError(err) && req.Status == models.ErasureRequestIncomplete && req.Source == models.ErasureSourceRetention {
 		return ErrErasureRequestActive
+	}
+	if mongo.IsDuplicateKeyError(err) && req.Status == models.ErasureRequestPending && req.Source == models.ErasureSourceAdmin {
+		return ErrErasureOpenExists
 	}
 	return err
 }

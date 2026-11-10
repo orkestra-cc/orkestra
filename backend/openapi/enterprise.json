@@ -2950,8 +2950,7 @@
             "type": "string"
           },
           "mode": {
-            "default": "hard_delete",
-            "description": "Erasure mode",
+            "description": "Erasure mode. Omit to run in the mode the request locked (hard_delete when none); a different one is refused",
             "enum": [
               "hard_delete",
               "anonymize"
@@ -13732,7 +13731,7 @@
     },
     "/v1/admin/compliance/erasure-requests/{id}/execute": {
       "post": {
-        "description": "Runs the erasure of a pending request. An incomplete request is retried with its stored mode and the body's mode is ignored.",
+        "description": "Runs the erasure of a pending request in the body's mode, or in the mode its approvals locked when the body has none (hard_delete if neither); a different mode is refused. The executor counts as an approver. An incomplete request is retried with its stored mode and the body's mode is ignored.",
         "operationId": "compliance-erasure-request-execute",
         "parameters": [
           {

@@ -41,6 +41,18 @@ func ActiveRetentionErasurePartialFilter() map[string]any {
 	}}
 }
 
+// PendingAdminErasurePartialFilter scopes a unique (userUuid, source) index to
+// pending admin-opened requests: a subject has at most one, so two operators
+// opening a request for them at once cannot both succeed. Ordered $and of
+// single-key maps, like ActiveRetentionErasurePartialFilter. Returned fresh
+// per call (a map).
+func PendingAdminErasurePartialFilter() map[string]any {
+	return map[string]any{"$and": []any{
+		map[string]any{"source": ErasureSourceAdmin},
+		map[string]any{"status": ErasureRequestPending},
+	}}
+}
+
 // Per-producer erasure outcomes.
 const (
 	ProducerOutcomeDone    = "done"

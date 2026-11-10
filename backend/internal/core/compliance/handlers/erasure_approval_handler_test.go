@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
+	"github.com/orkestra/backend/internal/core/compliance/repository"
 	"github.com/orkestra/backend/internal/core/compliance/services"
 	"github.com/orkestra/backend/internal/core/compliance/services/erasuretest"
 	"github.com/orkestra/backend/internal/shared/errcode"
@@ -128,13 +129,14 @@ func TestApproveAndExecuteErrors(t *testing.T) {
 	_, err = appr("op-b", "hard_delete", "other")
 	assertCoded(t, err, 409, errcode.ComplianceErasureModeMismatch)
 
-	in := &ExecuteErasureRequestInput{ID: "r-1"} // default body mode: hard_delete
+	in := &ExecuteErasureRequestInput{ID: "r-1"}
+	in.Body.Mode = "hard_delete"
 	_, err = h.Execute(authedCtx("op-b"), in)
 	assertCoded(t, err, 409, errcode.ComplianceErasureModeMismatch)
-	_, err = h.Execute(authedCtx("u-1"), in)
+	_, err = h.Execute(authedCtx("u-1"), &ExecuteErasureRequestInput{ID: "r-1"})
 	assertCoded(t, err, 409, errcode.ComplianceErasureSelfApproval)
 
-	in.Body.Mode = "anonymize"
+	in.Body.Mode = "" // omitted: the locked mode
 	if _, err := h.Execute(authedCtx("op-b"), in); err != nil {
 		t.Fatalf("Execute by B: %v", err)
 	}
@@ -147,4 +149,50 @@ func TestApproveUnknownIs404(t *testing.T) {
 	in.Body.Mode, in.Body.Note = "anonymize", "ok"
 	_, err := h.Approve(authedCtx("op-a"), in)
 	assertStatus(t, err, 404)
+}
+
+func TestExecuteWithoutModeRunsTheLockedModeInsideRetention(t *testing.T) {
+	t.Parallel()
+	until := time.Now().UTC().AddDate(3, 0, 0)
+	repo := seeded(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, Mode: "anonymize"})
+	h := approvalHandler(repo, gatedDSR(&retainingProducer{fakeProducer: fakeProducer{subject: "billing"}, until: until}), 1)
+
+	in := &ExecuteErasureRequestInput{ID: "r-1"}
+	in.Body.Mode = "hard_delete"
+	_, err := h.Execute(authedCtx("op-b"), in)
+	assertCoded(t, err, 409, errcode.ComplianceErasureModeMismatch)
+	if repo.Row("r-1").Status != models.ErasureRequestPending {
+		t.Fatal("request must stay pending")
+	}
+
+	out, err := h.Execute(authedCtx("op-b"), &ExecuteErasureRequestInput{ID: "r-1"})
+	if err != nil || out.Body.Status != models.ErasureRequestCompleted {
+		t.Fatalf("Execute without mode = %+v, %v; want the locked anonymize to run", out, err)
+	}
+	if repo.Row("r-1").Mode != "anonymize" {
+		t.Fatalf("mode = %q", repo.Row("r-1").Mode)
+	}
+}
+
+func TestExecuteRequiresAnActor(t *testing.T) {
+	t.Parallel()
+	h := approvalHandler(seeded(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending}), newDSR(), 1)
+	_, err := h.Execute(context.Background(), &ExecuteErasureRequestInput{ID: "r-1"})
+	assertStatus(t, err, 401)
+}
+
+type conflictRepo struct{ *erasuretest.MemRepo }
+
+func (conflictRepo) AddApproval(context.Context, string, string, models.ErasureApproval) (*models.ErasureRequest, error) {
+	return nil, repository.ErrErasureApprovalConflict
+}
+
+func TestApproveCASConflictWithoutReasonIsBusy(t *testing.T) {
+	t.Parallel()
+	repo := conflictRepo{seeded(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending})}
+	svc := services.NewErasureRequestService(repo, newDSR(), nil, nil)
+	in := &ApproveErasureRequestInput{ID: "r-1"}
+	in.Body.Mode, in.Body.Note = "anonymize", "ok"
+	_, err := NewErasureRequestHandler(svc).Approve(authedCtx("op-a"), in)
+	assertCoded(t, err, 409, errcode.ComplianceErasureRequestBusy)
 }

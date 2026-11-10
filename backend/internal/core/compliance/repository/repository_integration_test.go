@@ -784,3 +784,48 @@ func TestErasureHasOpen(t *testing.T) {
 		t.Fatalf("incomplete = %q, %v, %v; want r-inc", id, ok, err)
 	}
 }
+
+func TestErasureConcurrentAdminInsertOnePendingPerSubject(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	r := NewErasureRequestRepo(db)
+	if _, err := db.Collection(models.ErasureRequestsCollection).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "userUuid", Value: 1}, {Key: "source", Value: 1}},
+		Options: options.Index().SetUnique(true).SetPartialFilterExpression(models.PendingAdminErasurePartialFilter()),
+	}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	now := time.Now().UTC()
+	start := make(chan struct{})
+	errs := make(chan error, 4)
+	for i := range 4 {
+		go func() {
+			<-start
+			errs <- r.Insert(ctx, &models.ErasureRequest{UUID: "r-" + string(rune('a'+i)), UserUUID: "u-1", Status: models.ErasureRequestPending,
+				Source: models.ErasureSourceAdmin, RequestedAt: now})
+		}()
+	}
+	close(start)
+	won, lost := 0, 0
+	for range 4 {
+		switch err := <-errs; {
+		case err == nil:
+			won++
+		case errors.Is(err, ErrErasureOpenExists):
+			lost++
+		default:
+			t.Fatalf("Insert: %v", err)
+		}
+	}
+	if won != 1 || lost != 3 {
+		t.Fatalf("won = %d, lost = %d; want 1 and 3", won, lost)
+	}
+	// A lodged request or a started (incomplete) admin one is not constrained.
+	if err := r.Insert(ctx, &models.ErasureRequest{UUID: "r-lodged", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now}); err != nil {
+		t.Fatalf("lodged insert: %v", err)
+	}
+	if id, ok, err := r.HasOpen(ctx, "u-1"); err != nil || !ok || id == "" {
+		t.Fatalf("HasOpen = %q, %v, %v", id, ok, err)
+	}
+}

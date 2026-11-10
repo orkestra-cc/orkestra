@@ -121,7 +121,10 @@ func TestRetentionRefusalWireBodyCarriesDateAndReasons(t *testing.T) {
 	repo := seeded(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending})
 	h := newErasureHandler(repo, gatedDSR(&retainingProducer{fakeProducer: fakeProducer{subject: "billing"}, until: until}))
 	_, api := humatest.New(t)
-	huma.Register(api, huma.Operation{OperationID: "exec", Method: http.MethodPost, Path: "/x/{id}"}, h.Execute)
+	huma.Register(api, huma.Operation{OperationID: "exec", Method: http.MethodPost, Path: "/x/{id}"},
+		func(_ context.Context, in *ExecuteErasureRequestInput) (*ExecuteErasureRequestOutput, error) {
+			return h.Execute(authedCtx("admin-1"), in)
+		})
 
 	resp := api.Post("/x/r-1", map[string]any{"mode": "hard_delete"})
 	if resp.Code != 409 {
