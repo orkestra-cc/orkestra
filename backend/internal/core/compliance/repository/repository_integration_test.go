@@ -266,12 +266,12 @@ func TestLegalHoldUpdateAndNotes(t *testing.T) {
 		ExpiresAt: tp(now.Add(time.Hour))}); err != nil {
 		t.Fatal(err)
 	}
-	h, err := r.Update(ctx, "h", bson.M{"reviewAt": now.Add(time.Minute), "updatedAt": now}, []string{"expiresAt"})
+	h, err := r.Update(ctx, "h", bson.M{"reviewAt": now.Add(time.Minute), "updatedAt": now}, []string{"expiresAt"}, now)
 	if err != nil || h.ReviewAt == nil || h.ExpiresAt != nil || h.UpdatedAt == nil {
 		t.Fatalf("Update = %+v, %v", h, err)
 	}
 	for _, txt := range []string{"one", "two"} {
-		if _, err := r.AddNote(ctx, "h", models.LegalHoldNote{ID: uuid.NewString(), By: "op", At: now, Text: txt}); err != nil {
+		if _, err := r.AddNote(ctx, "h", models.LegalHoldNote{ID: uuid.NewString(), By: "op", At: now, Text: txt}, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -282,10 +282,10 @@ func TestLegalHoldUpdateAndNotes(t *testing.T) {
 	if err := r.Release(ctx, "h", "op", "done", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AddNote(ctx, "h", models.LegalHoldNote{ID: "x", Text: "late"}); err != ErrLegalHoldNotFound {
+	if _, err := r.AddNote(ctx, "h", models.LegalHoldNote{ID: "x", Text: "late"}, now); err != ErrLegalHoldNotFound {
 		t.Fatalf("note on released = %v", err)
 	}
-	if _, err := r.Update(ctx, "h", bson.M{"updatedAt": now}, nil); err != ErrLegalHoldNotFound {
+	if _, err := r.Update(ctx, "h", bson.M{"updatedAt": now}, nil, now); err != ErrLegalHoldNotFound {
 		t.Fatalf("update on released = %v", err)
 	}
 }
@@ -1022,5 +1022,33 @@ func TestErasureListFiltersAndCursorAcrossEqualRequestedAt(t *testing.T) {
 	}
 	if _, _, err := r.List(ctx, ErasureListFilter{After: "%%"}); !errors.Is(err, ErrErasureCursorInvalid) {
 		t.Fatalf("bad cursor err = %v", err)
+	}
+}
+
+func TestLegalHoldLapsedCannotBeRevived(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewLegalHoldRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	if err := r.Insert(ctx, &models.LegalHold{UUID: "lapsed", UserUUID: "u", Reason: "r", Active: true,
+		PlacedAt: now.Add(-time.Hour), ExpiresAt: tp(now.Add(-time.Minute))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Update(ctx, "lapsed", bson.M{"expiresAt": now.Add(time.Hour), "updatedAt": now}, nil, now); err != ErrLegalHoldNotFound {
+		t.Fatalf("extend lapsed = %v; want ErrLegalHoldNotFound", err)
+	}
+	if _, err := r.Update(ctx, "lapsed", bson.M{"updatedAt": now}, []string{"expiresAt"}, now); err != ErrLegalHoldNotFound {
+		t.Fatalf("clear expiry on lapsed = %v; want ErrLegalHoldNotFound", err)
+	}
+	if _, err := r.AddNote(ctx, "lapsed", models.LegalHoldNote{ID: "n", Text: "x"}, now); err != ErrLegalHoldNotFound {
+		t.Fatalf("note on lapsed = %v; want ErrLegalHoldNotFound", err)
+	}
+	if held, _ := r.IsHeld(ctx, "u", now); held {
+		t.Fatal("lapsed hold must stay unheld")
+	}
+	// An operator can still release it.
+	if err := r.Release(ctx, "lapsed", "op", "done", now); err != nil {
+		t.Fatalf("release lapsed: %v", err)
 	}
 }

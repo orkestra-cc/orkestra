@@ -49,7 +49,7 @@ func (f *fakeLegalHoldRepo) Get(_ context.Context, _ string) (*models.LegalHold,
 	}
 	return f.getResult, nil
 }
-func (f *fakeLegalHoldRepo) Update(_ context.Context, _ string, set bson.M, unset []string) (*models.LegalHold, error) {
+func (f *fakeLegalHoldRepo) Update(_ context.Context, _ string, set bson.M, unset []string, _ time.Time) (*models.LegalHold, error) {
 	f.lastSet, f.lastUnset = set, unset
 	if f.updErr != nil {
 		return nil, f.updErr
@@ -59,7 +59,7 @@ func (f *fakeLegalHoldRepo) Update(_ context.Context, _ string, set bson.M, unse
 	}
 	return &models.LegalHold{UUID: "h-1", UserUUID: "u-1", Active: true}, nil
 }
-func (f *fakeLegalHoldRepo) AddNote(_ context.Context, _ string, n models.LegalHoldNote) (*models.LegalHold, error) {
+func (f *fakeLegalHoldRepo) AddNote(_ context.Context, _ string, n models.LegalHoldNote, _ time.Time) (*models.LegalHold, error) {
 	f.lastNote = n
 	return &models.LegalHold{UUID: "h-1", UserUUID: "u-1", Active: true, Notes: []models.LegalHoldNote{n}}, f.updErr
 }
@@ -300,7 +300,7 @@ func TestAddNoteMasksAndNeverAuditsText(t *testing.T) {
 	svc, sink := fixedHoldSvc(repo, holdNow)
 	ctx := context.Background()
 	for _, bad := range []string{"", "   ", strings.Repeat("n", 1001)} {
-		if _, err := svc.AddNote(ctx, "h-1", "op", bad); !errors.Is(err, ErrReasonRequired) {
+		if _, err := svc.AddNote(ctx, "h-1", "op", bad); !errors.Is(err, ErrNoteRequired) {
 			t.Fatalf("note %d chars err = %v", len(bad), err)
 		}
 	}
@@ -378,5 +378,16 @@ func TestRunLegalHoldExpiryRecordsReleased(t *testing.T) {
 	repo.expireErr = errors.New("db down")
 	if err := RunLegalHoldExpiry(svc)(context.Background(), run); err == nil {
 		t.Fatal("a repo error must fail the run")
+	}
+}
+
+func TestExpiredFlagOnLapsedHold(t *testing.T) {
+	t.Parallel()
+	repo := &fakeLegalHoldRepo{listResult: []models.LegalHold{{UUID: "h", Active: true,
+		ExpiresAt: ptrTime(holdNow.Add(-time.Minute)), ReviewAt: ptrTime(holdNow.Add(-time.Hour))}}}
+	svc, _ := fixedHoldSvc(repo, holdNow)
+	got, err := svc.List(context.Background(), "", true)
+	if err != nil || !got[0].Expired || got[0].ReviewDue {
+		t.Fatalf("lapsed hold flags = %+v, %v", got, err)
 	}
 }

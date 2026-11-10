@@ -32,6 +32,9 @@ type LegalHold struct {
 	UpdatedAt *time.Time      `bson:"updatedAt,omitempty" json:"updatedAt,omitempty"`
 	// ReviewDue is computed on read: an active hold whose ReviewAt has passed.
 	ReviewDue bool `bson:"-" json:"reviewDue"`
+	// Expired is computed on read: still active in the row but past its
+	// expiry, so no longer blocking; the expiry job has not released it yet.
+	Expired bool `bson:"-" json:"expired"`
 }
 
 // LegalHoldExpiryActor is the ReleasedBy value of a hold the expiry job released.

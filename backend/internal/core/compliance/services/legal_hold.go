@@ -19,6 +19,8 @@ var (
 	// ErrLegalHoldUpdateInvalid is returned for an update that changes nothing
 	// or both sets and clears the same date.
 	ErrLegalHoldUpdateInvalid = errors.New("compliance: legal hold update needs a date to set or clear, not both")
+	// ErrNoteRequired is returned for a note outside 1 to 1000 characters.
+	ErrNoteRequired = errors.New("compliance: a legal hold note of 1 to 1000 characters is required")
 )
 
 const (
@@ -37,8 +39,8 @@ type legalHoldRepo interface {
 	List(ctx context.Context, userUUID string, includeReleased bool, now time.Time) ([]models.LegalHold, error)
 	IsHeld(ctx context.Context, userUUID string, now time.Time) (bool, error)
 	Get(ctx context.Context, uuid string) (*models.LegalHold, error)
-	Update(ctx context.Context, uuid string, set bson.M, unset []string) (*models.LegalHold, error)
-	AddNote(ctx context.Context, uuid string, note models.LegalHoldNote) (*models.LegalHold, error)
+	Update(ctx context.Context, uuid string, set bson.M, unset []string, now time.Time) (*models.LegalHold, error)
+	AddNote(ctx context.Context, uuid string, note models.LegalHoldNote, now time.Time) (*models.LegalHold, error)
 	ExpireDue(ctx context.Context, now time.Time, limit int) ([]models.LegalHold, error)
 }
 
@@ -94,7 +96,8 @@ func (s *LegalHoldService) audit(ctx context.Context, actor, action string, h *m
 }
 
 func (s *LegalHoldService) mark(h *models.LegalHold, now time.Time) *models.LegalHold {
-	h.ReviewDue = h.Active && h.ReviewAt != nil && !h.ReviewAt.After(now)
+	h.Expired = h.Active && h.ExpiresAt != nil && !h.ExpiresAt.After(now)
+	h.ReviewDue = h.Active && !h.Expired && h.ReviewAt != nil && !h.ReviewAt.After(now)
 	return h
 }
 
@@ -195,7 +198,7 @@ func (s *LegalHoldService) Update(ctx context.Context, uuid, actor string, revie
 		unset = append(unset, "expiresAt")
 		changed = append(changed, "expiresAt")
 	}
-	h, err := s.repo.Update(ctx, uuid, set, unset)
+	h, err := s.repo.Update(ctx, uuid, set, unset, now)
 	if err != nil {
 		return nil, err
 	}
@@ -208,11 +211,11 @@ func (s *LegalHoldService) Update(ctx context.Context, uuid, actor string, revie
 func (s *LegalHoldService) AddNote(ctx context.Context, uuid, actor, text string) (*models.LegalHold, error) {
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > maxLegalHoldNoteLen {
-		return nil, ErrReasonRequired
+		return nil, ErrNoteRequired
 	}
 	now := s.now()
 	note := models.LegalHoldNote{ID: uuidNew(), By: actor, At: now, Text: maskReason(text)}
-	h, err := s.repo.AddNote(ctx, uuid, note)
+	h, err := s.repo.AddNote(ctx, uuid, note, now)
 	if err != nil {
 		return nil, err
 	}

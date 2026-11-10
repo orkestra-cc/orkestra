@@ -96,9 +96,9 @@ func (r *LegalHoldRepository) find(ctx context.Context, filter bson.M) ([]models
 	return out, nil
 }
 
-// Update applies set/unset to an active hold and returns the updated row;
+// Update applies set/unset to a hold in force and returns the updated row;
 // ErrLegalHoldNotFound when no active hold has that UUID.
-func (r *LegalHoldRepository) Update(ctx context.Context, uuid string, set bson.M, unset []string) (*models.LegalHold, error) {
+func (r *LegalHoldRepository) Update(ctx context.Context, uuid string, set bson.M, unset []string, now time.Time) (*models.LegalHold, error) {
 	upd := bson.M{"$set": set}
 	if len(unset) > 0 {
 		u := bson.M{}
@@ -107,21 +107,26 @@ func (r *LegalHoldRepository) Update(ctx context.Context, uuid string, set bson.
 		}
 		upd["$unset"] = u
 	}
-	return r.updateActive(ctx, uuid, upd)
+	return r.updateActive(ctx, uuid, upd, now)
 }
 
 // AddNote appends a note to an active hold and returns the updated row.
-func (r *LegalHoldRepository) AddNote(ctx context.Context, uuid string, note models.LegalHoldNote) (*models.LegalHold, error) {
+func (r *LegalHoldRepository) AddNote(ctx context.Context, uuid string, note models.LegalHoldNote, now time.Time) (*models.LegalHold, error) {
 	return r.updateActive(ctx, uuid, bson.M{
 		"$push": bson.M{"notes": note},
 		"$set":  bson.M{"updatedAt": note.At},
-	})
+	}, now)
 }
 
-func (r *LegalHoldRepository) updateActive(ctx context.Context, uuid string, upd bson.M) (*models.LegalHold, error) {
+// updateActive only touches a hold in force at now: a lapsed one (active in
+// the row, past its expiry) cannot be revived by an edit or a note; it can
+// still be released.
+func (r *LegalHoldRepository) updateActive(ctx context.Context, uuid string, upd bson.M, now time.Time) (*models.LegalHold, error) {
+	filter := heldFilter(now)
+	filter["uuid"] = uuid
 	var out models.LegalHold
 	//tenantscope:allow updates a specific legal hold by its own UUID — cross-tenant by design.
-	err := r.coll.FindOneAndUpdate(ctx, bson.M{"uuid": uuid, "active": true}, upd,
+	err := r.coll.FindOneAndUpdate(ctx, filter, upd,
 		options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&out)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrLegalHoldNotFound

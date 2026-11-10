@@ -106,7 +106,9 @@ func mapLegalHoldError(err error, op string) error {
 	case errors.Is(err, repository.ErrLegalHoldNotFound):
 		return huma.Error404NotFound("legal hold not found or already released")
 	case errors.Is(err, services.ErrReasonRequired):
-		return errcode.UnprocessableEntity(errcode.ComplianceReasonRequired, "A reason or note of 1 to 500 characters is required (notes up to 1000).")
+		return errcode.UnprocessableEntity(errcode.ComplianceReasonRequired, "A reason of 1 to 500 characters is required.")
+	case errors.Is(err, services.ErrNoteRequired):
+		return errcode.UnprocessableEntity(errcode.ComplianceReasonRequired, "A note of 1 to 1000 characters is required.")
 	case errors.Is(err, services.ErrLegalHoldExpiryPast):
 		return errcode.UnprocessableEntity(errcode.ComplianceLegalHoldExpiryPast, "The expiry must be in the future.")
 	case errors.Is(err, services.ErrLegalHoldUpdateInvalid):

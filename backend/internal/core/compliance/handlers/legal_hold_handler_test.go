@@ -35,13 +35,13 @@ func (f *fakeHoldRepo) IsHeld(_ context.Context, _ string, _ time.Time) (bool, e
 func (f *fakeHoldRepo) Get(_ context.Context, _ string) (*models.LegalHold, error) {
 	return &models.LegalHold{UUID: "h-1"}, nil
 }
-func (f *fakeHoldRepo) Update(_ context.Context, id string, _ bson.M, _ []string) (*models.LegalHold, error) {
+func (f *fakeHoldRepo) Update(_ context.Context, id string, _ bson.M, _ []string, _ time.Time) (*models.LegalHold, error) {
 	if f.releaseErr != nil {
 		return nil, f.releaseErr
 	}
 	return &models.LegalHold{UUID: id, Active: true}, nil
 }
-func (f *fakeHoldRepo) AddNote(_ context.Context, id string, n models.LegalHoldNote) (*models.LegalHold, error) {
+func (f *fakeHoldRepo) AddNote(_ context.Context, id string, n models.LegalHoldNote, _ time.Time) (*models.LegalHold, error) {
 	if f.releaseErr != nil {
 		return nil, f.releaseErr
 	}
@@ -176,4 +176,19 @@ func TestLegalHoldAddNote(t *testing.T) {
 	if err != nil || len(out.Body.Notes) != 1 || out.Body.Notes[0].By != "admin-1" {
 		t.Fatalf("AddNote = %+v, %v", out, err)
 	}
+}
+
+// A lapsed hold (repo reports not found for Update/AddNote) surfaces as 404.
+func TestLegalHoldLapsedUpdateAndNoteAre404(t *testing.T) {
+	t.Parallel()
+	h := newLegalHoldHandler(&fakeHoldRepo{releaseErr: repository.ErrLegalHoldNotFound})
+	ctx := adminTenantCtx("admin-1", "t-1")
+	in := &UpdateLegalHoldInput{ID: "h-1"}
+	in.Body.ClearExpiresAt = true
+	_, err := h.Update(ctx, in)
+	assertStatus(t, err, 404)
+	n := &AddLegalHoldNoteInput{ID: "h-1"}
+	n.Body.Text = "late"
+	_, err = h.AddNote(ctx, n)
+	assertStatus(t, err, 404)
 }

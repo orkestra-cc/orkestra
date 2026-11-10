@@ -220,6 +220,11 @@ func (m *Module) Collections() []module.CollectionSpec {
 				{Field: "userUuid", Direction: 1},
 				{Field: "active", Direction: 1},
 			}},
+			// ExpireDue finds due holds by (active, expiresAt).
+			{OrderedKeys: []module.IndexKey{
+				{Field: "active", Direction: 1},
+				{Field: "expiresAt", Direction: 1},
+			}},
 		}},
 		{Name: models.ErasureRequestsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
@@ -438,10 +443,6 @@ func publishAuditSink(registry *module.ServiceRegistry, sink iface.AuditSink) {
 	}
 }
 
-// Start launches the background loops: the policy snapshot refresh (every
-// 5 s), the change-request expiry (hourly) and the retention auto-cleanup
-// ticker (which re-reads its enable flag every run), plus the erasure retry
-// worker (every minute) that finishes incomplete erasure requests.
 // Jobs declares the background jobs of the jobs framework: the hourly legal
 // hold expiry (key compliance.legal_hold_expiry). Collected after Init, so the
 // closures see the services Init built.
@@ -461,6 +462,10 @@ func (m *Module) Jobs() []jobs.Definition {
 	}}
 }
 
+// Start launches the background loops: the policy snapshot refresh (every
+// 5 s), the change-request expiry (hourly) and the retention auto-cleanup
+// ticker (which re-reads its enable flag every run), plus the erasure retry
+// worker (every minute) that finishes incomplete erasure requests.
 func (m *Module) Start(ctx context.Context) error {
 	m.stopCh = make(chan struct{})
 	if m.policySvc != nil {
