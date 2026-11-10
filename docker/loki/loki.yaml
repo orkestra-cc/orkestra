@@ -8,7 +8,7 @@
 #
 # Multi-tenancy: disabled here. Loki's "tenant" concept is unrelated to
 # Orkestra's two-tier model — Loki tenants are storage partitions and
-# our Promtail ships everything as "fake" (the default). Per-Orkestra-
+# our Alloy ships everything as "fake" (the default). Per-Orkestra-
 # tenant filtering happens at query time via LogQL `| json | tenant_id="..."`
 # (ADR-0005 §1.1).
 
@@ -48,7 +48,7 @@ schema_config:
 # the compactor's retention rules. Anything that doesn't match a
 # specific rule falls back to retention_period (14d).
 #
-# The warn+ rule keys on the `level` label that Promtail extracts from
+# The warn+ rule keys on the `level` label that Alloy extracts from
 # the JSON log line. If the level label is somehow missing (a
 # malformed line, or a log emitted by a non-orkestra container) the
 # default 14d applies — safe failure mode.
@@ -56,7 +56,7 @@ limits_config:
   retention_period: 336h  # 14 days for the info+ default stream
   # Per-stream retention overrides. Loki's compactor walks these in
   # priority order; the first match wins. warn-level and error-level
-  # streams (identified by the `level` label Promtail extracts from
+  # streams (identified by the `level` label Alloy extracts from
   # the JSON log line) are kept twice as long as info.
   retention_stream:
     - selector: '{level=~"warn|error"}'

@@ -5,16 +5,13 @@
 # Format: one OSV ID per line. Lines starting with `#` are comments.
 # Consumed by `make backend-vulncheck` and the Backend CI workflow.
 
-# Moby AuthZ plugin bypass on oversized request bodies. Affects Docker
-# daemon-side authz plugin enforcement, not SDK consumers like us.
-GO-2026-4887
+# (GO-2026-4887 and GO-2026-4883, the daemon-side Moby AuthZ/plugin entries,
+# were dropped in the 2026-11 security audit: govulncheck no longer reports
+# them at any level against github.com/docker/docker v28.5.2.)
 
-# Moby off-by-one in plugin privilege validation. Same daemon-side scope.
-GO-2026-4883
-
-# x/crypto/openpgp — unmaintained, unsafe-by-design, no upstream fix (the
-# advisory lists no fixed version, so govulncheck reports it at module level
-# on every x/crypto release, v0.56.0 included). Pulled in transitively; not
-# imported by our code directly. Re-evaluate (and drop the offending dep) if
-# a maintained fork becomes reachable instead.
+# x/crypto/openpgp — unmaintained, unsafe-by-design. Reported at module level
+# only (govulncheck counts that as a finding here); our code imports
+# x/crypto/argon2, never openpgp. Since 2026-10 the advisory names a fix that
+# is only an untagged pseudo-version (v0.58.1-0.20261009181718-2f1f834330b2):
+# drop this entry once x/crypto tags a release past it and go.mod moves there.
 GO-2026-5932

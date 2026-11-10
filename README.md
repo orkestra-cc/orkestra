@@ -116,7 +116,7 @@ multi-stack setups, and deployment configuration, see the
 
 | Layer | Technology |
 | --- | --- |
-| Backend | Go 1.26, Huma v2, modular monolith, single Go module |
+| Backend | Go 1.27, Huma v2, modular monolith, single Go module |
 | Operator console | React 19, TypeScript 5.9, Vite 8, Redux Toolkit |
 | Client application | React 19, TypeScript 5.9, Vite 7 |
 | Mobile | Flutter 3.44+, Riverpod |

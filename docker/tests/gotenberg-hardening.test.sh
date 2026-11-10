@@ -17,7 +17,10 @@ PDF_RENDERER_PASSWORD=x
 EOF
 infra=$(docker compose --env-file "$env_file" -f docker-compose.infra.yml config)
 need() { grep -qF -- "$1" <<<"$infra" || { echo "FAIL: infra compose lacks: $1"; fail=1; }; }
-need "gotenberg/gotenberg:8@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769"
+# The image stays on the 8.x line, pinned by digest (the exact version moves
+# with Dependabot's docker-compose updates, so it is not asserted here).
+grep -qE 'image: gotenberg/gotenberg:8\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' <<<"$infra" \
+  || { echo "FAIL: infra compose lacks a gotenberg/gotenberg:8.x.y@sha256 pin"; fail=1; }
 need "--chromium-disable-javascript=true"
 need "--chromium-deny-list=^(?!file:///tmp/).*"
 need "--chromium-deny-private-ips=true"

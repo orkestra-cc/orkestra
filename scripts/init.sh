@@ -177,6 +177,8 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
   # sit on an internal network, but a shipped literal is still a public secret.
   qdrant_key=$(openssl rand -hex 32)
   inference_key=$(openssl rand -hex 32)
+  # Observability overlay: Grafana admin password (no default since 2026-11).
+  grafana_pw=$(openssl rand -hex 16)
 
   tmp_env="${ENV_FILE}.tmp.$$"
   # sed delimiter `|` so the hex secrets don't collide with `/`.
@@ -191,6 +193,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
     -e "s|REPLACE_WITH_RANDOM_HEX_32_PDF_RENDERER_SECRET|${pdf_secret}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_64_QDRANT_API_KEY|${qdrant_key}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_64_RETRIEVAL_INFERENCE_KEY|${inference_key}|" \
+    -e "s|REPLACE_WITH_RANDOM_HEX_32_GRAFANA_ADMIN|${grafana_pw}|" \
     "$ENV_FILE" > "$tmp_env"
 
   # Sanity: every placeholder got replaced (otherwise the backend boot will
@@ -204,7 +207,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
 
   mv "$tmp_env" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / LLM_SECRET_ENCRYPTION_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY / PDF_RENDERER_PASSWORD / QDRANT_API_KEY / RETRIEVAL_INFERENCE_API_KEY"
+  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / LLM_SECRET_ENCRYPTION_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY / PDF_RENDERER_PASSWORD / QDRANT_API_KEY / RETRIEVAL_INFERENCE_API_KEY / GRAFANA_ADMIN_PASSWORD"
   muted "chmod 600 applied — .env now contains live secrets"
 
   # Seed a non-colliding port block so a second Orkestra stack on this host

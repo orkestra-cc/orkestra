@@ -222,7 +222,7 @@ To rotate `QDRANT_API_KEY` or `RETRIEVAL_INFERENCE_API_KEY`, or after pulling a 
 
 ### Logs and the API key
 
-TEI prints its parsed arguments, `api_key` included, at INFO on its router's root target. The overlay therefore pins `LOG_LEVEL` on every TEI service to a literal filter, `info,text_embeddings_router=warn,text_embeddings_router::http=info`, which drops that line and keeps `Ready`, the per-request lines (timings only, never the text) and every warning and error. Do not override `LOG_LEVEL` on the TEI services: the backend's own `LOG_LEVEL` in `docker/.env` would bring the line back, and with the observability overlay running, Promtail would ship the key to Loki. `RUST_LOG` has no effect on TEI 1.9.x. The hardening test fails if the filter changes.
+TEI prints its parsed arguments, `api_key` included, at INFO on its router's root target. The overlay therefore pins `LOG_LEVEL` on every TEI service to a literal filter, `info,text_embeddings_router=warn,text_embeddings_router::http=info`, which drops that line and keeps `Ready`, the per-request lines (timings only, never the text) and every warning and error. Do not override `LOG_LEVEL` on the TEI services: the backend's own `LOG_LEVEL` in `docker/.env` would bring the line back, and with the observability overlay running, Alloy would ship the key to Loki. `RUST_LOG` has no effect on TEI 1.9.x. The hardening test fails if the filter changes.
 
 The reranker's logs look alarming on every start and are harmless. The model repository ships no ONNX files, so offline TEI probes the Hub for optional files and fails, logs two errors and falls back to its candle backend. Shortened, the lines are:
 

@@ -683,7 +683,8 @@ func main() {
 			log.Fatalf("openapi marshal: %v", err)
 		}
 		b = append(b, '\n')
-		if err := os.WriteFile(path, b, 0o600); err != nil {
+		// OPENAPI_DUMP_PATH comes from whoever runs `make openapi-dump`, never from a request.
+		if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // G703: operator-set dump path
 			log.Fatalf("openapi write: %v", err)
 		}
 		logger.Info("openapi dump",

@@ -10,7 +10,7 @@
 # ============================================
 # Stage 1: Build
 # ============================================
-FROM node:24-alpine AS builder
+FROM node:24.22.2-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS builder
 
 WORKDIR /app
 
@@ -29,7 +29,7 @@ RUN npm run build
 # ============================================
 # Stage 2: Serve
 # ============================================
-FROM nginx:alpine AS production
+FROM nginx:1.31.8-alpine@sha256:713fc2ebfd92e8217db451477182ee91944b123d2b1ee9fd5a8c6e91ca6c3a11 AS production
 
 # curl for healthcheck; gettext for envsubst in the entrypoint.
 RUN apk add --no-cache curl gettext
