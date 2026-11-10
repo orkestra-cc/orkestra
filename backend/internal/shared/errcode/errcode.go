@@ -15,6 +15,7 @@
 package errcode
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 )
@@ -88,31 +89,49 @@ func (e *Error) WithExtension(k string, v any) *Error {
 	return e
 }
 
-// MarshalJSON writes the envelope, plus Extensions when there are any.
+// envelopeMembers are the body members an extension may never take, whether
+// or not the envelope currently writes them (omitempty members included).
+var envelopeMembers = map[string]bool{
+	"status": true, "title": true, "detail": true, "code": true,
+	"errors": true, "instance": true, "type": true,
+}
+
+// encodeNoEscape marshals v like huma's default format: HTML characters
+// (& < >) are not escaped. The encoder's trailing newline is dropped.
+func encodeNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// MarshalJSON writes the envelope, plus Extensions when there are any. HTML
+// characters are left unescaped, as huma's own encoder does, so bodies without
+// extensions are byte-identical to the plain struct encoding.
 func (e *Error) MarshalJSON() ([]byte, error) {
 	type envelope Error // no methods: avoids recursing into MarshalJSON
-	if len(e.Extensions) == 0 {
-		return json.Marshal((*envelope)(e))
-	}
-	base, err := json.Marshal((*envelope)(e))
-	if err != nil {
-		return nil, err
+	base, err := encodeNoEscape((*envelope)(e))
+	if err != nil || len(e.Extensions) == 0 {
+		return base, err
 	}
 	m := map[string]json.RawMessage{}
 	if err := json.Unmarshal(base, &m); err != nil {
 		return nil, err
 	}
 	for k, v := range e.Extensions {
-		if _, taken := m[k]; taken {
+		if envelopeMembers[k] {
 			continue
 		}
-		raw, err := json.Marshal(v)
+		raw, err := encodeNoEscape(v)
 		if err != nil {
 			return nil, err
 		}
 		m[k] = raw
 	}
-	return json.Marshal(m)
+	return encodeNoEscape(m)
 }
 
 // New constructs an Error with an arbitrary status. Prefer the named

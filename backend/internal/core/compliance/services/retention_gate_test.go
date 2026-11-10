@@ -1,8 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,5 +242,63 @@ func TestExecuteIncompleteUsesStoredModeForTheGate(t *testing.T) {
 	// The caller asks for hard_delete, but the stored mode anonymize applies.
 	if _, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "a"); err != nil {
 		t.Fatalf("stored anonymize must not be gated: %v", err)
+	}
+}
+
+type panickingReporter struct{ *stubProducer }
+
+func (panickingReporter) RetainUntil(context.Context, string) (*iface.RetentionObligation, error) {
+	panic("kaboom")
+}
+
+func TestPanickingReporterFailsClosedAndIsLogged(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	g := gateAt(0, nil, panickingReporter{&stubProducer{subject: "billing"}})
+	g.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+	dsr, _ := newDSRService()
+	dsr.SetRetentionGate(g)
+
+	err := dsr.CheckRetention(context.Background(), "u-1", iface.EraseHardDelete)
+	if !errors.Is(err, ErrRetentionCheckUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"level=ERROR", "key=billing", "userUuid=u-1", "kaboom", "stack="} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("log lacks %q: %s", want, out)
+		}
+	}
+}
+
+type hangingReporter struct{ *stubProducer }
+
+func (hangingReporter) RetainUntil(ctx context.Context, _ string) (*iface.RetentionObligation, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestReporterTimeoutFailsClosed(t *testing.T) {
+	t.Parallel()
+	g := gateAt(0, nil, hangingReporter{&stubProducer{subject: "slow"}})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := g.Evaluate(ctx, "u"); err == nil {
+		t.Fatal("a reporter that does not answer must fail the evaluation")
+	}
+}
+
+func TestRetentionFloorLeapDay(t *testing.T) {
+	t.Parallel()
+	created := time.Date(2024, 2, 29, 10, 0, 0, 0, time.UTC)
+	g := gateAt(1, &created)
+	g.now = func() time.Time { return time.Date(2025, 2, 28, 0, 0, 0, 0, time.UTC) }
+	got, err := g.Evaluate(context.Background(), "u")
+	if err != nil || got == nil {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	// Go normalises 2025-02-29 to 2025-03-01: the floor never ends before a full year.
+	if want := time.Date(2025, 3, 1, 10, 0, 0, 0, time.UTC); !got.RetainUntil.Equal(want) {
+		t.Fatalf("RetainUntil = %v; want %v", got.RetainUntil, want)
 	}
 }

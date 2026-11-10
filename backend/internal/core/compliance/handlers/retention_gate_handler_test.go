@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/humatest"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -110,4 +113,30 @@ func TestMeEraseLegalHoldCarriesItsCode(t *testing.T) {
 	dsr.SetLegalHoldChecker(&fakeHoldChecker{held: true})
 	_, err := newMe(dsr).Erase(authedCtx("u-1"), &struct{}{})
 	assertCoded(t, err, 409, errcode.ComplianceLegalHoldActive)
+}
+
+func TestRetentionRefusalWireBodyCarriesDateAndReasons(t *testing.T) {
+	t.Parallel()
+	until := time.Now().UTC().AddDate(2, 0, 0).Truncate(time.Second)
+	repo := seeded(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending})
+	h := newErasureHandler(repo, gatedDSR(&retainingProducer{fakeProducer: fakeProducer{subject: "billing"}, until: until}))
+	_, api := humatest.New(t)
+	huma.Register(api, huma.Operation{OperationID: "exec", Method: http.MethodPost, Path: "/x/{id}"}, h.Execute)
+
+	resp := api.Post("/x/r-1", map[string]any{"mode": "hard_delete"})
+	if resp.Code != 409 {
+		t.Fatalf("status = %d: %s", resp.Code, resp.Body.String())
+	}
+	var body struct {
+		Code        string   `json:"code"`
+		RetainUntil string   `json:"retainUntil"`
+		Reasons     []string `json:"reasons"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != errcode.ComplianceRetentionMinimumNotMet || body.RetainUntil != until.Format(time.RFC3339) ||
+		len(body.Reasons) != 1 || body.Reasons[0] != "fiscal_records" {
+		t.Fatalf("wire body = %s", resp.Body.String())
+	}
 }

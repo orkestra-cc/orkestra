@@ -334,9 +334,11 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		// Minimum-retention gate on hard delete: a platform floor from the
 		// account's creation (min_retention_years, read fresh) plus the
 		// obligations producers report. Anonymize is not gated.
-		dsrSvc.SetRetentionGate(services.NewRetentionGate(deps.DB, reg, func() int {
+		retentionGate := services.NewRetentionGate(deps.DB, reg, func() int {
 			return deps.GetConfigInt("compliance", "min_retention_years", 0)
-		}))
+		})
+		retentionGate.SetLogger(deps.Logger)
+		dsrSvc.SetRetentionGate(retentionGate)
 
 		// Mediated right-to-erasure workflow — subjects lodge a request, an
 		// operator reviews and executes (running the DSR erase) or rejects it.

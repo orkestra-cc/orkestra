@@ -4,13 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sort"
 	"time"
 
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// retentionReporterTimeout bounds one producer's RetainUntil; a timeout fails
+// the gate closed like an error.
+const retentionReporterTimeout = 5 * time.Second
 
 // Reason reported for the platform floor. Reporter reasons are the producers'
 // own labels.
@@ -44,6 +51,7 @@ func (e *RetentionGateError) Unwrap() error { return ErrRetentionMinimum }
 type RetentionGate struct {
 	registry *iface.PIIProducerRegistry
 	years    func() int
+	logger   *slog.Logger
 	now      func() time.Time
 	// createdAt returns the creation time of the subject's user row; found is
 	// false when the subject has none.
@@ -56,6 +64,7 @@ func NewRetentionGate(db *mongo.Database, registry *iface.PIIProducerRegistry, y
 	return &RetentionGate{
 		registry: registry,
 		years:    years,
+		logger:   slog.Default(),
 		now:      func() time.Time { return time.Now().UTC() },
 		createdAt: func(ctx context.Context, userUUID string) (time.Time, bool, error) {
 			for _, coll := range userTombstoneCollections {
@@ -63,13 +72,16 @@ func NewRetentionGate(db *mongo.Database, registry *iface.PIIProducerRegistry, y
 					CreatedAt time.Time `bson:"createdAt"`
 				}
 				//tenantscope:allow platform retention floor looks the subject up by UUID across tenants.
-				err := db.Collection(coll).FindOne(ctx, bson.M{"uuid": userUUID}).Decode(&row)
+				err := db.Collection(coll).FindOne(ctx, bson.M{"uuid": userUUID},
+					options.FindOne().SetProjection(bson.M{"createdAt": 1})).Decode(&row)
 				if errors.Is(err, mongo.ErrNoDocuments) {
 					continue
 				}
 				if err != nil {
 					return time.Time{}, false, err
 				}
+				// A row without createdAt has no platform floor by design:
+				// the floor runs from creation and cannot be guessed.
 				if row.CreatedAt.IsZero() {
 					return time.Time{}, false, nil
 				}
@@ -77,6 +89,13 @@ func NewRetentionGate(db *mongo.Database, registry *iface.PIIProducerRegistry, y
 			}
 			return time.Time{}, false, nil
 		},
+	}
+}
+
+// SetLogger sets the logger for reporter panics (default slog.Default()).
+func (g *RetentionGate) SetLogger(l *slog.Logger) {
+	if l != nil {
+		g.logger = l
 	}
 }
 
@@ -103,7 +122,7 @@ func (g *RetentionGate) Evaluate(ctx context.Context, userUUID string) (*Retenti
 			if !ok {
 				continue
 			}
-			ob, err := reportRetention(ctx, rep, userUUID)
+			ob, err := g.report(ctx, rep, baseProducerKey(p), userUUID)
 			if err != nil {
 				return nil, fmt.Errorf("retention reporter %q: %w", baseProducerKey(p), err)
 			}
@@ -135,11 +154,20 @@ func (g *RetentionGate) Evaluate(ctx context.Context, userUUID string) (*Retenti
 	return out, nil
 }
 
-// reportRetention calls a reporter, turning a panic into an error so the gate
-// fails closed instead of crashing the replica.
-func reportRetention(ctx context.Context, rep iface.PIIRetentionReporter, userUUID string) (ob *iface.RetentionObligation, err error) {
+// report calls a reporter under retentionReporterTimeout, turning a panic into
+// an error (logged at ERROR) so the gate fails closed instead of crashing the
+// replica.
+func (g *RetentionGate) report(ctx context.Context, rep iface.PIIRetentionReporter, key, userUUID string) (ob *iface.RetentionObligation, err error) {
+	ctx, cancel := context.WithTimeout(ctx, retentionReporterTimeout)
+	defer cancel()
 	defer func() {
 		if r := recover(); r != nil {
+			g.logger.Error("DSR: retention reporter panicked",
+				slog.String("key", key),
+				slog.String("userUuid", userUUID),
+				slog.String("panic", fmt.Sprint(r)),
+				slog.String("stack", string(debug.Stack())),
+			)
 			ob, err = nil, errProducerPanicked
 		}
 	}()
@@ -160,6 +188,10 @@ func (s *DSRService) CheckRetention(ctx context.Context, userUUID string, mode i
 	}
 	gerr, err := s.retentionGate.Evaluate(ctx, userUUID)
 	if err != nil {
+		s.logger.Warn("DSR: retention check failed; the hard delete is refused",
+			slog.String("userUuid", userUUID),
+			slog.String("error", err.Error()),
+		)
 		return fmt.Errorf("%w: %w", ErrRetentionCheckUnavailable, err)
 	}
 	if gerr != nil {
