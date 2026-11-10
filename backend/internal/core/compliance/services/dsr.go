@@ -130,7 +130,7 @@ func (s *DSRService) keysFor(ps []iface.PIIProducer) []string {
 func (s *DSRService) exportOne(ctx context.Context, p iface.PIIProducer, key, userUUID string) (data any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.logProducerPanic("export", p, key, userUUID, r)
+			s.logProducerPanic("export", p.Subject(), key, userUUID, r)
 			data, err = nil, errProducerPanicked
 		}
 	}()
@@ -142,16 +142,17 @@ func (s *DSRService) exportOne(ctx context.Context, p iface.PIIProducer, key, us
 func (s *DSRService) purgeOne(ctx context.Context, p iface.PIIProducer, key, userUUID string, mode iface.EraseMode) (res iface.PurgeResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.logProducerPanic("purge", p, key, userUUID, r)
+			s.logProducerPanic("purge", p.Subject(), key, userUUID, r)
 			res, err = iface.PurgeResult{}, errProducerPanicked
 		}
 	}()
 	return p.PurgePersonalData(ctx, userUUID, mode)
 }
 
-func (s *DSRService) logProducerPanic(op string, p iface.PIIProducer, key, userUUID string, r any) {
+// logProducerPanic logs a recovered producer panic (export, purge or count).
+func (s *DSRService) logProducerPanic(op, subject, key, userUUID string, r any) {
 	s.logger.Error("DSR: "+op+" producer panicked",
-		slog.String("subject", p.Subject()),
+		slog.String("subject", subject),
 		slog.String("key", key),
 		slog.String("userUuid", userUUID),
 		slog.String("panic", fmt.Sprint(r)),

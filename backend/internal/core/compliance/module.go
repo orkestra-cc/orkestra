@@ -408,7 +408,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		erasureReqSvc.SetRequiredApprovals(func(context.Context) int {
 			return deps.GetConfigInt("compliance", "erasure_required_approvals", 1)
 		})
-		m.dsrPreview = handlers.NewDSRPreviewHandler(services.NewDSRPreviewService(dsrSvc, legalHoldSvc, erasureReqSvc, deps.Logger))
+		m.dsrPreview = handlers.NewDSRPreviewHandler(services.NewDSRPreviewService(dsrSvc, legalHoldSvc, erasureReqSvc, sink, deps.Logger))
 		m.me = handlers.NewMeHandler(dsrSvc, erasureReqSvc)
 		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
 		m.erasureRetry = services.NewErasureRetryWorker(erasureReqSvc, deps.Logger)

@@ -43,7 +43,7 @@ func newPreviewHandler() *DSRPreviewHandler {
 	reg := iface.NewPIIProducerRegistry()
 	reg.Register(previewCounter{})
 	dsr := services.NewDSRService(reg, nil, slog.Default())
-	return NewDSRPreviewHandler(services.NewDSRPreviewService(dsr, noHolds{}, noRequests{}, slog.Default()))
+	return NewDSRPreviewHandler(services.NewDSRPreviewService(dsr, noHolds{}, noRequests{}, nil, slog.Default()))
 }
 
 func TestDSRPreviewHandler(t *testing.T) {

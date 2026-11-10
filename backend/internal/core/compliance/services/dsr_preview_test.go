@@ -11,6 +11,7 @@ import (
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/repository"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -114,7 +115,7 @@ func previewSvc(t *testing.T, holds fakeHolds, reqs *fakeRequests, gate *Retenti
 	t.Helper()
 	dsr, _ := newDSRService(producers...)
 	dsr.SetRetentionGate(gate)
-	return NewDSRPreviewService(dsr, holds, reqs, slog.Default())
+	return NewDSRPreviewService(dsr, holds, reqs, nil, slog.Default())
 }
 
 func TestPreviewFlags(t *testing.T) {
@@ -166,5 +167,32 @@ func TestPreviewListsOpenRequestsOfTheSubject(t *testing.T) {
 	}
 	if reqs.got.UserUUID != "u" || len(reqs.got.Statuses) != 2 {
 		t.Fatalf("filter = %+v", reqs.got)
+	}
+}
+
+func TestPreviewIsAudited(t *testing.T) {
+	t.Parallel()
+	dsr, _ := newDSRService(
+		countStub{stubProducer: &stubProducer{subject: "user"}, count: iface.PersonalDataCount{Rows: 9}},
+		&stubProducer{subject: "plain"},
+	)
+	sink := &holdSink{}
+	svc := NewDSRPreviewService(dsr,
+		fakeHolds{holds: []models.LegalHold{{UUID: "h"}}},
+		&fakeRequests{rows: []models.ErasureRequest{{UUID: "r1"}, {UUID: "r2"}}},
+		sink, slog.Default())
+	ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "op-1")
+	if _, err := svc.Preview(ctx, "subj-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %+v", sink.events)
+	}
+	e := sink.events[0]
+	if e.Action != "gdpr.dsr.previewed" || e.ActorUserID != "op-1" || e.ResourceType != "user" || e.ResourceID != "subj-1" {
+		t.Fatalf("event = %+v", e)
+	}
+	if len(e.Metadata) != 3 || e.Metadata["producers"] != 2 || e.Metadata["legalHolds"] != 1 || e.Metadata["openRequests"] != 2 {
+		t.Fatalf("metadata = %+v", e.Metadata)
 	}
 }

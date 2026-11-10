@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/repository"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -57,10 +57,10 @@ func (s *DSRService) CountAll(ctx context.Context, userUUID string) []ProducerCo
 			continue
 		}
 		wg.Add(1)
-		go func(i int, key string) {
+		go func(i int, subject, key string) {
 			defer wg.Done()
-			out[i] = s.countOne(ctx, counter, key, userUUID, timeout)
-		}(i, keys[i])
+			out[i] = s.countOne(ctx, counter, subject, key, userUUID, timeout)
+		}(i, p.Subject(), keys[i])
 	}
 	wg.Wait()
 	return out
@@ -68,7 +68,7 @@ func (s *DSRService) CountAll(ctx context.Context, userUUID string) []ProducerCo
 
 // countOne runs one counter in its own goroutine so a counter that ignores its
 // context still releases the caller at the timeout.
-func (s *DSRService) countOne(ctx context.Context, c iface.PIIProducerCounter, key, userUUID string, timeout time.Duration) ProducerCount {
+func (s *DSRService) countOne(ctx context.Context, c iface.PIIProducerCounter, subject, key, userUUID string, timeout time.Duration) ProducerCount {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	type result struct {
@@ -79,12 +79,7 @@ func (s *DSRService) countOne(ctx context.Context, c iface.PIIProducerCounter, k
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.logger.Error("DSR: count producer panicked",
-					slog.String("key", key),
-					slog.String("userUuid", userUUID),
-					slog.String("panic", fmt.Sprint(r)),
-					slog.String("stack", string(debug.Stack())),
-				)
+				s.logProducerPanic("count", subject, key, userUUID, r)
 				ch <- result{err: errProducerPanicked}
 			}
 		}()
@@ -154,15 +149,16 @@ type DSRPreviewService struct {
 	dsr      previewDSR
 	holds    previewHolds
 	requests previewRequests
+	sink     iface.AuditSink
 	logger   *slog.Logger
 }
 
-// NewDSRPreviewService builds the preview service.
-func NewDSRPreviewService(dsr previewDSR, holds previewHolds, requests previewRequests, logger *slog.Logger) *DSRPreviewService {
+// NewDSRPreviewService builds the preview service. sink may be nil.
+func NewDSRPreviewService(dsr previewDSR, holds previewHolds, requests previewRequests, sink iface.AuditSink, logger *slog.Logger) *DSRPreviewService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &DSRPreviewService{dsr: dsr, holds: holds, requests: requests, logger: logger}
+	return &DSRPreviewService{dsr: dsr, holds: holds, requests: requests, sink: sink, logger: logger}
 }
 
 // Preview gathers the legal holds, the retention gate, the open requests and
@@ -197,5 +193,28 @@ func (s *DSRPreviewService) Preview(ctx context.Context, userUUID string) (*DSRP
 	out.Producers = s.dsr.CountAll(ctx, userUUID)
 	out.AnonymizeAllowed = len(holds) == 0
 	out.HardDeleteAllowed = len(holds) == 0 && gerr == nil && rerr == nil
+	s.audit(ctx, out)
 	return out, nil
+}
+
+// audit records that an operator looked at a subject's erasure preview. The
+// metadata is counts only, never personal data.
+func (s *DSRPreviewService) audit(ctx context.Context, p *DSRPreview) {
+	if s.sink == nil {
+		return
+	}
+	actor, _ := ctxauth.GetUserUUID(ctx)
+	s.sink.Emit(ctx, iface.AuditEvent{
+		ActorUserID:  actor,
+		ActorType:    "user",
+		Action:       "gdpr.dsr.previewed",
+		ResourceType: "user",
+		ResourceID:   p.UserUUID,
+		Outcome:      "success",
+		Metadata: map[string]any{
+			"producers":    len(p.Producers),
+			"legalHolds":   len(p.LegalHolds),
+			"openRequests": len(p.OpenRequests),
+		},
+	})
 }
