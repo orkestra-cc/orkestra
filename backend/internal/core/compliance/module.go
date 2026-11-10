@@ -42,6 +42,8 @@ type Module struct {
 	soc2          *handlers.SOC2Handler
 	legalHold     *handlers.LegalHoldHandler
 	legalHoldSvc  *services.LegalHoldService
+	dsrExport     *handlers.DSRExportHandler
+	dsrExportSvc  *services.DSRExportService
 	retention     *handlers.RetentionHandler
 	retentionSvc  *services.RetentionService
 	erasureRetry  *services.ErasureRetryWorker
@@ -84,9 +86,10 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 		// reaper reads the two together), so hide it until then.
 		{Key: "retention_years", Label: "Retention years", Group: "retention", Description: "Years an anonymized tombstone is kept before auto-cleanup may hard-delete it.", Type: module.FieldInt, Default: "5", EnvVar: "COMPLIANCE_RETENTION_YEARS",
 			DependsOn: []module.FieldCondition{{Key: "auto_cleanup_enabled", In: []string{"true"}}}},
-		// NOT gated: export_retention_days governs the download lifetime of a
-		// DSR export (always-on right-of-access pipeline), independent of the
-		// cleanup job — it must stay visible whether or not auto-cleanup is on.
+		// NOT gated: export_retention_days governs how long a stored DSR export
+		// stays downloadable. It stays ungated because that TTL is independent
+		// of the cleanup job — it must stay visible whether or not auto-cleanup
+		// is on.
 		{Key: "export_retention_days", Label: "Export retention (days)", Group: "retention", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
 		{Key: "min_retention_years", Label: "Minimum retention (years)", Group: "retention", Description: "Years after an account was created before it can be hard-deleted. A hard delete earlier is refused with the date it becomes possible; anonymize is not affected, and producers can require longer. 0 turns the platform floor off.", Type: module.FieldInt, Default: "0", Min: &minRetentionYearsMin, Max: &minRetentionYearsMax, EnvVar: "COMPLIANCE_MIN_RETENTION_YEARS"},
 		{Key: "erasure_required_approvals", Label: "Erasure approvals", Group: "retention", Description: "Distinct operators that must approve an erasure request before it runs; the operator who executes it counts as one and the data subject never counts. Read when a request is created. 1 keeps a single operator enough.", Type: module.FieldInt, Default: "1", Min: &erasureRequiredApprovalsMin, Max: &erasureRequiredApprovalsMax, EnvVar: "COMPLIANCE_ERASURE_REQUIRED_APPROVALS"},
@@ -226,6 +229,11 @@ func (m *Module) Collections() []module.CollectionSpec {
 				{Field: "expiresAt", Direction: 1},
 			}},
 		}},
+		{Name: models.DSRExportsCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{Keys: map[string]int{"userUuid": 1}},
+			{Keys: map[string]int{"expiresAt": 1}},
+		}},
 		{Name: models.ErasureRequestsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{OrderedKeys: []module.IndexKey{
@@ -355,6 +363,22 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
 		dsrSvc := services.NewDSRService(reg, sink, deps.Logger)
 		dsrSvc.SetLegalHoldChecker(legalHoldSvc)
+		// Stored exports: operator-generated exports kept as expiring blobs.
+		// Without object storage the store is nil and creating one answers 503.
+		var exportStore iface.ObjectStore
+		if provider, ok := module.GetTyped[iface.ObjectStoreProvider](deps.Services, module.ServiceObjectStoreProvider); ok {
+			if st, err := provider.Bucket(services.DSRExportBucket); err == nil {
+				exportStore = st
+			} else {
+				deps.Logger.Warn("compliance: DSR export bucket unavailable", slog.String("error", err.Error()))
+			}
+		}
+		m.dsrExportSvc = services.NewDSRExportService(repository.NewDSRExportRepo(deps.DB), dsrSvc, exportStore, sink, func() int {
+			return deps.GetConfigInt("compliance", "export_retention_days", 30)
+		}, deps.Logger)
+		m.dsrExport = handlers.NewDSRExportHandler(m.dsrExportSvc)
+		reg.Register(services.NewDSRExportProducer(m.dsrExportSvc))
+
 		// Minimum-retention gate on hard delete: a platform floor from the
 		// account's creation (min_retention_years, read fresh) plus the
 		// obligations producers report. Anonymize is not gated.
@@ -444,7 +468,8 @@ func publishAuditSink(registry *module.ServiceRegistry, sink iface.AuditSink) {
 }
 
 // Jobs declares the background jobs of the jobs framework: the hourly legal
-// hold expiry (key compliance.legal_hold_expiry). Collected after Init, so the
+// hold expiry (key compliance.legal_hold_expiry) and the hourly cleanup of
+// expired stored DSR exports (compliance.dsr_exports_cleanup). Collected after Init, so the
 // closures see the services Init built.
 func (m *Module) Jobs() []jobs.Definition {
 	return []jobs.Definition{{
@@ -458,6 +483,18 @@ func (m *Module) Jobs() []jobs.Definition {
 				return nil
 			}
 			return services.RunLegalHoldExpiry(m.legalHoldSvc)(ctx, run)
+		},
+	}, {
+		Name:        "dsr_exports_cleanup",
+		Title:       "DSR export cleanup",
+		Description: "Deletes stored DSR exports past their expiry, object and record. An expired export is refused for download even before this job runs.",
+		Schedule:    jobs.Every(time.Hour),
+		Timeout:     10 * time.Minute,
+		Run: func(ctx context.Context, run *jobs.Run) error {
+			if m.dsrExportSvc == nil {
+				return nil
+			}
+			return services.RunDSRExportsCleanup(m.dsrExportSvc)(ctx, run)
 		},
 	}}
 }
@@ -500,7 +537,7 @@ func (m *Module) Stop(_ context.Context) error {
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// Admin reads — audit events, SOC2 (when enabled), legal-hold list —
 	// gated by the audit read permission.
-	if m.admin != nil || m.soc2 != nil || m.legalHold != nil || m.retention != nil || m.erasureReq != nil {
+	if m.admin != nil || m.soc2 != nil || m.legalHold != nil || m.retention != nil || m.erasureReq != nil || m.dsrExport != nil {
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.compliance.audit.read"))
 			api := humachi.New(r, ri.APIConfig)
@@ -518,6 +555,9 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 			}
 			if m.erasureReq != nil {
 				handlers.RegisterErasureRequestAdminReadRoutes(api, m.erasureReq)
+			}
+			if m.dsrExport != nil {
+				handlers.RegisterDSRExportReadRoutes(api, m.dsrExport)
 			}
 		})
 	}
@@ -539,6 +579,16 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 			r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
 			api := humachi.New(r, ri.APIConfig)
 			handlers.RegisterErasureRequestAdminWriteRoutes(api, m.erasureReq)
+		})
+	}
+	// Generating and downloading a subject's export hands out personal data —
+	// dsr.manage + a fresh step-up.
+	if m.dsrExport != nil {
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.compliance.dsr.manage"))
+			r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterDSRExportWriteRoutes(api, m.dsrExport)
 		})
 	}
 	// Policy engine (compliance spec §7) — Tier-1 operator. Reads (and the

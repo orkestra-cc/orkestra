@@ -1052,3 +1052,50 @@ func TestLegalHoldLapsedCannotBeRevived(t *testing.T) {
 		t.Fatalf("release lapsed: %v", err)
 	}
 }
+
+// --- DSR exports -----------------------------------------------------------
+
+func TestDSRExportRepoLifecycle(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	repo := NewDSRExportRepo(db)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	mk := func(id, user string, created, expires time.Time) *models.DSRExport {
+		return &models.DSRExport{UUID: id, UserUUID: user, Format: "json", RequestedBy: "op", Reason: "r",
+			CreatedAt: created, ExpiresAt: expires, SizeBytes: 5, Producers: []string{"user"}, ObjectKey: id + ".json"}
+	}
+	for _, e := range []*models.DSRExport{
+		mk("e1", "u1", now.Add(-3*time.Hour), now.Add(-time.Hour)),
+		mk("e2", "u1", now.Add(-2*time.Hour), now.Add(time.Hour)),
+		mk("e3", "u2", now.Add(-time.Hour), now.Add(-time.Minute)),
+	} {
+		if err := repo.Insert(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.Get(ctx, "e2")
+	if err != nil || got.ObjectKey != "e2.json" || got.UserUUID != "u1" {
+		t.Fatalf("get = %+v, %v", got, err)
+	}
+	if _, err := repo.Get(ctx, "nope"); !errors.Is(err, ErrDSRExportNotFound) {
+		t.Fatalf("missing err = %v", err)
+	}
+	mine, _ := repo.ListByUser(ctx, "u1")
+	if len(mine) != 2 || mine[0].UUID != "e2" {
+		t.Fatalf("list by user (newest first) = %+v", mine)
+	}
+	exp, _ := repo.ListExpired(ctx, now, 10)
+	if len(exp) != 2 || exp[0].UUID != "e1" {
+		t.Fatalf("expired = %+v", exp)
+	}
+	if one, _ := repo.ListExpired(ctx, now, 1); len(one) != 1 {
+		t.Fatalf("limit ignored: %+v", one)
+	}
+	if err := repo.Delete(ctx, "e1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Delete(ctx, "e1"); err != nil {
+		t.Fatalf("delete must be idempotent: %v", err)
+	}
+}

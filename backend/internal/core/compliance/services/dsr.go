@@ -206,6 +206,13 @@ func (s *DSRService) PlanProgress(prior []models.ErasureProducerProgress) (plan 
 // present; producer keys are added only when the producer returned
 // non-nil data. An audit row is emitted on completion.
 func (s *DSRService) Export(ctx context.Context, userUUID string) (*ExportResult, error) {
+	return s.ExportAs(ctx, userUUID, userUUID)
+}
+
+// ExportAs is Export performed by actor on behalf of the subject (an operator
+// answering a right-of-access request). The audit row names actor; the
+// resource stays the subject.
+func (s *DSRService) ExportAs(ctx context.Context, userUUID, actor string) (*ExportResult, error) {
 	result := &ExportResult{
 		Bundle: iface.PersonalDataBundle{
 			"metadata": map[string]any{
@@ -238,7 +245,7 @@ func (s *DSRService) Export(ctx context.Context, userUUID string) (*ExportResult
 		}
 	}
 
-	s.emitAudit(ctx, userUUID, "gdpr.dsr.exported", map[string]any{
+	s.emitAuditAs(ctx, actor, userUUID, "gdpr.dsr.exported", map[string]any{
 		"producers": result.Producers,
 		"errors":    len(result.Errors),
 	})
@@ -375,11 +382,15 @@ func parseEraseMode(label string) iface.EraseMode {
 }
 
 func (s *DSRService) emitAudit(ctx context.Context, userUUID, action string, metadata map[string]any) {
+	s.emitAuditAs(ctx, userUUID, userUUID, action, metadata)
+}
+
+func (s *DSRService) emitAuditAs(ctx context.Context, actor, userUUID, action string, metadata map[string]any) {
 	if s.sink == nil {
 		return
 	}
 	s.sink.Emit(ctx, iface.AuditEvent{
-		ActorUserID:  userUUID,
+		ActorUserID:  actor,
 		ActorType:    "user",
 		Action:       action,
 		ResourceType: "user",

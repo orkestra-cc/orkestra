@@ -873,3 +873,13 @@ const ComplianceReasonRequired = "compliance.reason_required"
 // ComplianceLegalHoldExpiryPast signals a legal-hold expiry that is not in the
 // future. 422.
 const ComplianceLegalHoldExpiryPast = "compliance.legal_hold_expiry_past"
+
+// ComplianceExportStorageUnavailable signals a DSR export that needs object
+// storage when none is configured. 503.
+const ComplianceExportStorageUnavailable = "compliance.export_storage_unavailable"
+
+// ComplianceExportExpired signals a download of a DSR export past its expiry. 410.
+const ComplianceExportExpired = "compliance.export_expired"
+
+// ComplianceExportNotFound signals a DSR export that does not exist. 404.
+const ComplianceExportNotFound = "compliance.export_not_found"
