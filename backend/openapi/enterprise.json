@@ -227,6 +227,28 @@
         ],
         "type": "object"
       },
+      "AddLegalHoldNoteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AddLegalHoldNoteInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "text": {
+            "description": "Note text, 1 to 1000 characters",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
       "AdminClientUserItem": {
         "additionalProperties": false,
         "properties": {
@@ -1075,6 +1097,39 @@
         ],
         "type": "object"
       },
+      "ApproveErasureRequestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ApproveErasureRequestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "mode": {
+            "description": "Erasure mode; the first approval locks it",
+            "enum": [
+              "hard_delete",
+              "anonymize"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "description": "Why the operator approves",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "note"
+        ],
+        "type": "object"
+      },
       "AssignPolicyInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1693,6 +1748,243 @@
         ],
         "type": "object"
       },
+      "ComplianceDSRExportDownload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ComplianceDSRExportDownload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "expiresIn": {
+            "description": "Seconds the URL works",
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "description": "Open this URL to download the export",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "expiresIn"
+        ],
+        "type": "object"
+      },
+      "ComplianceDSRExportRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ComplianceDSRExportRecord.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "errorKeys": {
+            "description": "Producers whose export failed",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "csv"
+            ],
+            "type": "string"
+          },
+          "producers": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "userUuid": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "userUuid",
+          "format",
+          "requestedBy",
+          "reason",
+          "createdAt",
+          "expiresAt",
+          "sizeBytes"
+        ],
+        "type": "object"
+      },
+      "ComplianceDSRPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ComplianceDSRPreview.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "anonymizeAllowed": {
+            "description": "No active hold",
+            "type": "boolean"
+          },
+          "hardDeleteAllowed": {
+            "description": "No active hold, no retention obligation and the gate evaluated",
+            "type": "boolean"
+          },
+          "legalHolds": {
+            "description": "Holds that block erasure now",
+            "items": {
+              "$ref": "#/components/schemas/LegalHold"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "openRequests": {
+            "description": "Pending and incomplete erasure requests of the subject",
+            "items": {
+              "$ref": "#/components/schemas/ErasureRequest"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "producers": {
+            "description": "Per-producer counts in registry order. They are not summed on purpose",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceDSRPreviewProducer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "retention": {
+            "$ref": "#/components/schemas/ComplianceDSRPreviewRetention",
+            "description": "Obligation that blocks a hard delete; absent when none"
+          },
+          "retentionError": {
+            "description": "Set when the retention gate could not be evaluated; a hard delete is then not allowed",
+            "type": "string"
+          },
+          "userUuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userUuid",
+          "legalHolds",
+          "openRequests",
+          "producers",
+          "hardDeleteAllowed",
+          "anonymizeAllowed"
+        ],
+        "type": "object"
+      },
+      "ComplianceDSRPreviewProducer": {
+        "additionalProperties": false,
+        "properties": {
+          "collections": {
+            "description": "Collections the count covers",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "countable": {
+            "description": "False when the producer cannot count without deleting",
+            "type": "boolean"
+          },
+          "error": {
+            "description": "Fixed text when counting failed or timed out; detail is only in the server log",
+            "type": "string"
+          },
+          "key": {
+            "description": "Producer key, the same one erasure progress and export bundles use",
+            "type": "string"
+          },
+          "rows": {
+            "description": "Rows this producer would touch. Not additive across producers: two producers can report the same stored rows (the two auth instances share device-trust and security-event rows), so a sum of rows is an upper bound, never an exact count",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "countable",
+          "rows",
+          "collections"
+        ],
+        "type": "object"
+      },
+      "ComplianceDSRPreviewRetention": {
+        "additionalProperties": false,
+        "properties": {
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "retainUntil": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "retainUntil",
+          "reasons"
+        ],
+        "type": "object"
+      },
       "ConfigField": {
         "additionalProperties": false,
         "properties": {
@@ -2044,6 +2336,43 @@
           "fullName",
           "role",
           "password"
+        ],
+        "type": "object"
+      },
+      "CreateDSRExportInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CreateDSRExportInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "format": {
+            "description": "Export format",
+            "enum": [
+              "json",
+              "csv"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the operator generates the export (1 to 500 characters)",
+            "type": "string"
+          },
+          "userUuid": {
+            "description": "Data subject; lower-cased server-side",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userUuid",
+          "format",
+          "reason"
         ],
         "type": "object"
       },
@@ -2688,6 +3017,26 @@
         ],
         "type": "object"
       },
+      "ErasureApproval": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "by": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "at"
+        ],
+        "type": "object"
+      },
       "ErasureProducerProgress": {
         "additionalProperties": false,
         "properties": {
@@ -2733,6 +3082,118 @@
         ],
         "type": "object"
       },
+      "ErasureReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ErasureReceipt.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "abandoned": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ErasureApproval"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "attempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "closeNote": {
+            "description": "closed_partial: the operator's masked note",
+            "type": "string"
+          },
+          "completedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "executedBy": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "producers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptProducer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "requestUuid": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "retriedBy": {
+            "description": "The operator who last restarted the incomplete request by hand, when one did",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "closed_partial"
+            ],
+            "type": "string"
+          },
+          "subjectUserUuid": {
+            "type": "string"
+          },
+          "totalRowsAnonymized": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "totalRowsDeleted": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requestUuid",
+          "subjectUserUuid",
+          "status",
+          "requestedAt",
+          "attempts",
+          "approvals",
+          "producers",
+          "abandoned",
+          "totalRowsDeleted",
+          "totalRowsAnonymized",
+          "generatedAt"
+        ],
+        "type": "object"
+      },
       "ErasureRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2754,6 +3215,15 @@
               "null"
             ]
           },
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ErasureApproval"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "attempts": {
             "format": "int64",
             "type": "integer"
@@ -2762,6 +3232,9 @@
             "type": "boolean"
           },
           "lastError": {
+            "type": "string"
+          },
+          "lastRunBy": {
             "type": "string"
           },
           "mode": {
@@ -2786,6 +3259,13 @@
           "requestedAt": {
             "format": "date-time",
             "type": "string"
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "format": "int64",
+            "type": "integer"
           },
           "resolutionNote": {
             "type": "string"
@@ -5473,6 +5953,22 @@
           "caseRef": {
             "type": "string"
           },
+          "expired": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/LegalHoldNote"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "placedAt": {
             "format": "date-time",
             "type": "string"
@@ -5493,7 +5989,18 @@
           "releasedBy": {
             "type": "string"
           },
+          "reviewAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reviewDue": {
+            "type": "boolean"
+          },
           "tenantId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
             "type": "string"
           },
           "userUuid": {
@@ -5509,7 +6016,34 @@
           "reason",
           "placedBy",
           "placedAt",
-          "active"
+          "active",
+          "reviewDue",
+          "expired"
+        ],
+        "type": "object"
+      },
+      "LegalHoldNote": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "by": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "by",
+          "at",
+          "text"
         ],
         "type": "object"
       },
@@ -5609,6 +6143,33 @@
         ],
         "type": "object"
       },
+      "ListDSRExportsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListDSRExportsOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ComplianceDSRExportRecord"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ListEnvironmentsOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5660,6 +6221,10 @@
               "array",
               "null"
             ]
+          },
+          "next": {
+            "description": "Cursor of the next page; absent on the last",
+            "type": "string"
           }
         },
         "required": [
@@ -7665,6 +8230,45 @@
         ],
         "type": "object"
       },
+      "OpenErasureRequestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/OpenErasureRequestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "mode": {
+            "description": "Erasure mode; the request is locked to it",
+            "enum": [
+              "hard_delete",
+              "anonymize"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the subject is erased; also the opener's approval note",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "userUuid": {
+            "description": "UUID of the data subject to erase; lower-cased server-side",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userUuid",
+          "reason",
+          "mode"
+        ],
+        "type": "object"
+      },
       "PINDeviceDoc": {
         "additionalProperties": false,
         "properties": {
@@ -8178,8 +8782,18 @@
             "description": "Optional external case reference",
             "type": "string"
           },
+          "expiresAt": {
+            "description": "Optional expiry; the hold releases itself then",
+            "format": "date-time",
+            "type": "string"
+          },
           "reason": {
             "description": "Why the hold is placed (litigation, investigation, ...)",
+            "type": "string"
+          },
+          "reviewAt": {
+            "description": "Optional review date",
+            "format": "date-time",
             "type": "string"
           },
           "userUuid": {
@@ -8924,6 +9538,37 @@
         ],
         "type": "object"
       },
+      "ReceiptProducer": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "done",
+              "pending",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "rowsAnonymized": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowsDeleted": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "outcome",
+          "rowsDeleted",
+          "rowsAnonymized"
+        ],
+        "type": "object"
+      },
       "RecordListMutationDTO": {
         "additionalProperties": false,
         "properties": {
@@ -9036,10 +9681,15 @@
             "type": "string"
           },
           "note": {
-            "description": "Why the request is rejected",
+            "description": "Why the request is rejected (masked before it is stored)",
+            "maxLength": 500,
+            "minLength": 1,
             "type": "string"
           }
         },
+        "required": [
+          "note"
+        ],
         "type": "object"
       },
       "ReleaseLegalHoldInputBody": {
@@ -11325,6 +11975,39 @@
             },
             "description": "Secret config values (will be encrypted)",
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateLegalHoldInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdateLegalHoldInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "clearExpiresAt": {
+            "description": "Remove the expiry (the hold no longer expires)",
+            "type": "boolean"
+          },
+          "clearReviewAt": {
+            "description": "Remove the review date",
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "description": "New expiry; must be in the future",
+            "format": "date-time",
+            "type": "string"
+          },
+          "reviewAt": {
+            "description": "New review date",
+            "format": "date-time",
+            "type": "string"
           }
         },
         "type": "object"
@@ -13646,9 +14329,234 @@
         ]
       }
     },
+    "/v1/admin/compliance/dsr/exports": {
+      "get": {
+        "operationId": "compliance-dsr-export-list",
+        "parameters": [
+          {
+            "description": "Data subject",
+            "explode": false,
+            "in": "query",
+            "name": "userUuid",
+            "required": true,
+            "schema": {
+              "description": "Data subject",
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDSRExportsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List the stored DSR exports of a data subject",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "post": {
+        "operationId": "compliance-dsr-export-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDSRExportInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceDSRExportRecord"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Generate a data export on behalf of a data subject and store it until it expires",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/dsr/exports/{id}/download": {
+      "get": {
+        "operationId": "compliance-dsr-export-download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceDSRExportDownload"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a short-lived download URL for a stored export",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/dsr/preview": {
+      "get": {
+        "operationId": "compliance-dsr-preview",
+        "parameters": [
+          {
+            "description": "Data subject",
+            "explode": false,
+            "in": "query",
+            "name": "userUuid",
+            "required": true,
+            "schema": {
+              "description": "Data subject",
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceDSRPreview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Dry-run of a data subject's erasure: holds, retention, open requests and per-producer counts",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
     "/v1/admin/compliance/erasure-requests": {
       "get": {
+        "description": "Newest first, filtered by status (default open: pending and incomplete, with closable) and subject, paged by the opaque cursor in next.",
         "operationId": "compliance-erasure-requests-list",
+        "parameters": [
+          {
+            "description": "open (pending and incomplete, the default), completed, rejected, closed_partial or all",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "default": "open",
+              "description": "open (pending and incomplete, the default), completed, rejected, closed_partial or all",
+              "enum": [
+                "open",
+                "completed",
+                "rejected",
+                "closed_partial",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only the requests of this data subject",
+            "explode": false,
+            "in": "query",
+            "name": "userUuid",
+            "schema": {
+              "description": "Only the requests of this data subject",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (1-200). Omitted: 50, except for status open, which lists every open request",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size (1-200). Omitted: 50, except for status open, which lists every open request",
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor: the next of the previous page",
+            "explode": false,
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "description": "Opaque cursor: the next of the previous page",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13671,7 +14579,99 @@
             "description": "Error"
           }
         },
-        "summary": "List open (pending or incomplete) right-to-erasure requests",
+        "summary": "List right-to-erasure requests",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "post": {
+        "description": "Records a pending request on behalf of a subject, with the opener's approval and the mode locked. Refused when the subject is under a legal hold, already has an open request, or (hard delete) is inside a minimum retention. The reason is mandatory.",
+        "operationId": "compliance-erasure-request-open",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenErasureRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureRequest"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Open a right-to-erasure request for a subject",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/erasure-requests/{id}/approve": {
+      "post": {
+        "description": "Adds the calling operator's approval; the first approval locks the mode. The data subject cannot approve and an operator approves once. Execute needs the configured number of distinct approvals, the executor counting as one.",
+        "operationId": "compliance-erasure-request-approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveErasureRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Approve a pending right-to-erasure request",
         "tags": [
           "Compliance"
         ]
@@ -13781,6 +14781,48 @@
         ]
       }
     },
+    "/v1/admin/compliance/erasure-requests/{id}/receipt": {
+      "get": {
+        "description": "Built from the request row: subject and operators by UUID, approvals, per-producer outcomes and totals, abandoned keys and the close note. 409 for a request that is pending, incomplete or rejected.",
+        "operationId": "compliance-erasure-request-receipt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Receipt of a completed or closed erasure request",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
     "/v1/admin/compliance/erasure-requests/{id}/reject": {
       "post": {
         "operationId": "compliance-erasure-request-reject",
@@ -13838,6 +14880,16 @@
               "description": "Filter to one subject",
               "type": "string"
             }
+          },
+          {
+            "description": "Include released and expired holds",
+            "explode": false,
+            "in": "query",
+            "name": "includeReleased",
+            "schema": {
+              "description": "Include released and expired holds",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -13862,7 +14914,7 @@
             "description": "Error"
           }
         },
-        "summary": "List active legal holds",
+        "summary": "List legal holds",
         "tags": [
           "Compliance"
         ]
@@ -13946,6 +14998,106 @@
           }
         },
         "summary": "Release a legal hold",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "patch": {
+        "operationId": "compliance-legal-hold-update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLegalHoldInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalHold"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Change the review date or expiry of a legal hold",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/legal-holds/{id}/notes": {
+      "post": {
+        "operationId": "compliance-legal-hold-add-note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLegalHoldNoteInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalHold"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add a note to a legal hold",
         "tags": [
           "Compliance"
         ]
