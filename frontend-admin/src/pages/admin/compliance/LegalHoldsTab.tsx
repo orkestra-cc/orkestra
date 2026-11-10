@@ -11,20 +11,37 @@ import {
   useListLegalHoldsQuery,
   usePlaceLegalHoldMutation,
   useReleaseLegalHoldMutation,
+  useUpdateLegalHoldMutation,
+  useAddLegalHoldNoteMutation,
   type LegalHold
 } from 'store/api/complianceApi';
 import EmptyState from 'components/common/EmptyState';
 import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
-import { formatDateTime } from './complianceFormat';
+import { formatDate, formatDateTime } from './complianceFormat';
+import { erasureErrorMessage } from './erasureErrors';
+import ReasonModal from './policies/ReasonModal';
+import LegalHoldEditModal, {
+  dayToInstant,
+  type LegalHoldPatch
+} from './LegalHoldEditModal';
+import LegalHoldNotesModal from './LegalHoldNotesModal';
 
 // LegalHoldsTab lets operators place a litigation hold on a subject (which
 // blocks erasure) and release it. Place + release are step-up-gated on the
 // backend; the global StepUpModal replays the request after re-auth.
 const LegalHoldsTab = () => {
   const { t } = useTranslation();
-  const { data, isLoading } = useListLegalHoldsQuery();
+  const [includeReleased, setIncludeReleased] = useState(false);
+  const { data, isLoading } = useListLegalHoldsQuery({ includeReleased });
   const [place, { isLoading: isPlacing }] = usePlaceLegalHoldMutation();
-  const [release] = useReleaseLegalHoldMutation();
+  const [release, { isLoading: releasing }] = useReleaseLegalHoldMutation();
+  const [update, { isLoading: updating }] = useUpdateLegalHoldMutation();
+  const [addNote, { isLoading: addingNote }] = useAddLegalHoldNoteMutation();
+  const [releaseTarget, setReleaseTarget] = useState<LegalHold | null>(null);
+  const [editTarget, setEditTarget] = useState<LegalHold | null>(null);
+  const [notesId, setNotesId] = useState<string | null>(null);
+  const [reviewAt, setReviewAt] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
   const [userUuid, setUserUuid] = useState('');
   const [reason, setReason] = useState('');
   const [caseRef, setCaseRef] = useState('');
@@ -33,24 +50,59 @@ const LegalHoldsTab = () => {
     e.preventDefault();
     if (!userUuid || !reason) return;
     try {
-      await place({ userUuid, reason, caseRef: caseRef || undefined }).unwrap();
+      await place({
+        userUuid,
+        reason,
+        caseRef: caseRef || undefined,
+        reviewAt: reviewAt ? dayToInstant(reviewAt) : undefined,
+        expiresAt: expiresAt ? dayToInstant(expiresAt) : undefined
+      }).unwrap();
       toast.success(t('adminCompliance.holds.placeSuccess'));
       setUserUuid('');
       setReason('');
       setCaseRef('');
-    } catch {
-      toast.error(t('adminCompliance.holds.placeError'));
+      setReviewAt('');
+      setExpiresAt('');
+    } catch (err) {
+      toast.error(
+        erasureErrorMessage(err, t, t('adminCompliance.holds.placeError'))
+      );
     }
   };
-  const onRelease = async (id: string) => {
+  const onRelease = async (releaseReason: string) => {
+    if (!releaseTarget) return;
     try {
-      await release({
-        id,
-        releaseReason: 'released via admin console'
-      }).unwrap();
+      await release({ id: releaseTarget.uuid, releaseReason }).unwrap();
       toast.success(t('adminCompliance.holds.releaseSuccess'));
-    } catch {
-      toast.error(t('adminCompliance.holds.releaseError'));
+      setReleaseTarget(null);
+    } catch (err) {
+      toast.error(
+        erasureErrorMessage(err, t, t('adminCompliance.holds.releaseError'))
+      );
+    }
+  };
+  const onEdit = async (patch: LegalHoldPatch) => {
+    if (!editTarget) return;
+    try {
+      await update({ id: editTarget.uuid, ...patch }).unwrap();
+      toast.success(t('adminCompliance.holds.edit.success'));
+      setEditTarget(null);
+    } catch (err) {
+      toast.error(
+        erasureErrorMessage(err, t, t('adminCompliance.holds.edit.error'))
+      );
+    }
+  };
+  const onAddNote = async (text: string) => {
+    if (!notesId) return false;
+    try {
+      await addNote({ id: notesId, text }).unwrap();
+      return true;
+    } catch (err) {
+      toast.error(
+        erasureErrorMessage(err, t, t('adminCompliance.holds.notes.error'))
+      );
+      return false;
     }
   };
 
@@ -80,11 +132,41 @@ const LegalHoldsTab = () => {
       header: t('adminCompliance.holds.columns.status'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<LegalHold, unknown>) => (
-        <SubtleBadge pill bg={original.active ? 'warning' : 'secondary'}>
-          {original.active
-            ? t('adminCompliance.status.active')
-            : t('adminCompliance.status.released')}
-        </SubtleBadge>
+        <>
+          <SubtleBadge pill bg={original.active ? 'warning' : 'secondary'}>
+            {original.active
+              ? t('adminCompliance.status.active')
+              : t('adminCompliance.status.released')}
+          </SubtleBadge>
+          {original.active && original.reviewDue && (
+            <SubtleBadge pill bg="danger" className="ms-1">
+              {t('adminCompliance.holds.reviewDue')}
+            </SubtleBadge>
+          )}
+          {original.expired && (
+            <SubtleBadge pill bg="secondary" className="ms-1">
+              {t('adminCompliance.holds.expired')}
+            </SubtleBadge>
+          )}
+        </>
+      )
+    },
+    {
+      id: 'dates',
+      header: t('adminCompliance.holds.columns.dates'),
+      enableSorting: false,
+      meta: { headerProps: { className: 'text-900' } },
+      cell: ({ row: { original } }: CellContext<LegalHold, unknown>) => (
+        <div className="fs-11">
+          <div>
+            {t('adminCompliance.holds.reviewAt')}:{' '}
+            {original.reviewAt ? formatDate(original.reviewAt) : '—'}
+          </div>
+          <div>
+            {t('adminCompliance.holds.expiresAt')}:{' '}
+            {original.expiresAt ? formatDate(original.expiresAt) : '—'}
+          </div>
+        </div>
       )
     },
     {
@@ -105,19 +187,40 @@ const LegalHoldsTab = () => {
         headerProps: { className: 'text-end text-900' },
         cellProps: { className: 'text-end' }
       },
-      cell: ({ row: { original } }: CellContext<LegalHold, unknown>) =>
-        original.active ? (
+      cell: ({ row: { original } }: CellContext<LegalHold, unknown>) => (
+        <div className="d-flex gap-1 justify-content-end">
           <IconButton
             size="sm"
             variant="outline-secondary"
-            icon="unlock-alt"
-            onClick={() => onRelease(original.uuid)}
+            icon="comment"
+            onClick={() => setNotesId(original.uuid)}
           >
-            {t('adminCompliance.holds.release')}
+            {t('adminCompliance.holds.notes.open', {
+              count: original.notes?.length ?? 0
+            })}
           </IconButton>
-        ) : (
-          <span className="text-400">—</span>
-        )
+          {original.active && (
+            <>
+              <IconButton
+                size="sm"
+                variant="outline-secondary"
+                icon="edit"
+                onClick={() => setEditTarget(original)}
+              >
+                {t('adminCompliance.holds.edit.open')}
+              </IconButton>
+              <IconButton
+                size="sm"
+                variant="outline-secondary"
+                icon="unlock-alt"
+                onClick={() => setReleaseTarget(original)}
+              >
+                {t('adminCompliance.holds.release')}
+              </IconButton>
+            </>
+          )}
+        </div>
+      )
     }
   ];
 
@@ -129,7 +232,7 @@ const LegalHoldsTab = () => {
         <Card.Body className="py-3">
           <Form onSubmit={onPlace}>
             <Row className="g-2 align-items-end">
-              <Col md={4}>
+              <Col md={3}>
                 <Form.Label className="fs-11 text-700 mb-1">
                   {t('adminCompliance.holds.form.subjectLabel')}
                 </Form.Label>
@@ -142,7 +245,7 @@ const LegalHoldsTab = () => {
                   onChange={e => setUserUuid(e.target.value)}
                 />
               </Col>
-              <Col md={4}>
+              <Col md={3}>
                 <Form.Label className="fs-11 text-700 mb-1">
                   {t('adminCompliance.holds.form.reasonLabel')}
                 </Form.Label>
@@ -169,12 +272,42 @@ const LegalHoldsTab = () => {
                 />
               </Col>
               <Col md={2}>
+                <Form.Label
+                  className="fs-11 text-700 mb-1"
+                  htmlFor="hold-place-review"
+                >
+                  {t('adminCompliance.holds.reviewAt')}
+                </Form.Label>
+                <Form.Control
+                  id="hold-place-review"
+                  size="sm"
+                  type="date"
+                  value={reviewAt}
+                  onChange={e => setReviewAt(e.target.value)}
+                />
+              </Col>
+              <Col md={2}>
+                <Form.Label
+                  className="fs-11 text-700 mb-1"
+                  htmlFor="hold-place-expiry"
+                >
+                  {t('adminCompliance.holds.expiresAt')}
+                </Form.Label>
+                <Form.Control
+                  id="hold-place-expiry"
+                  size="sm"
+                  type="date"
+                  value={expiresAt}
+                  onChange={e => setExpiresAt(e.target.value)}
+                />
+              </Col>
+              <Col md={12}>
                 <IconButton
                   size="sm"
                   type="submit"
                   variant="primary"
                   icon={faGavel}
-                  className="w-100 text-nowrap"
+                  className="text-nowrap"
                   disabled={isPlacing || !userUuid || !reason}
                 >
                   {t('adminCompliance.holds.form.submit')}
@@ -184,6 +317,15 @@ const LegalHoldsTab = () => {
           </Form>
         </Card.Body>
       </Card>
+
+      <Form.Check
+        type="switch"
+        id="hold-show-released"
+        className="mb-3 fs-10"
+        label={t('adminCompliance.holds.showReleased')}
+        checked={includeReleased}
+        onChange={e => setIncludeReleased(e.target.checked)}
+      />
 
       {isLoading ? (
         <Spinner animation="border" size="sm" className="mt-2" />
@@ -200,6 +342,28 @@ const LegalHoldsTab = () => {
           searchPlaceholder={t('adminCompliance.holds.searchPlaceholder')}
         />
       )}
+
+      <ReasonModal
+        show={!!releaseTarget}
+        title={t('adminCompliance.holds.releaseModal.title')}
+        body={t('adminCompliance.holds.releaseModal.body')}
+        confirmLabel={t('adminCompliance.holds.release')}
+        busy={releasing}
+        onCancel={() => setReleaseTarget(null)}
+        onConfirm={onRelease}
+      />
+      <LegalHoldEditModal
+        hold={editTarget}
+        busy={updating}
+        onCancel={() => setEditTarget(null)}
+        onSave={onEdit}
+      />
+      <LegalHoldNotesModal
+        hold={items.find(h => h.uuid === notesId) ?? null}
+        busy={addingNote}
+        onClose={() => setNotesId(null)}
+        onAdd={onAddNote}
+      />
     </>
   );
 };

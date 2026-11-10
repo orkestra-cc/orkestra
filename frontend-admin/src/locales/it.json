@@ -2359,7 +2359,8 @@
         "toastUnlocked": "Account sbloccato con successo",
         "toastFailure": "Impossibile modificare lo stato dell'account",
         "errorGeneric": "Errore durante l'operazione"
-      }
+      },
+      "dataSubjectRequests": "Richieste dell'interessato (DSR)"
     }
   },
   "adminUsers": {
@@ -2519,7 +2520,8 @@
       "retention": "Conservazione",
       "auditEvents": "Eventi di audit",
       "policies": "Policy",
-      "changeRequests": "Richieste"
+      "changeRequests": "Richieste",
+      "subject": "Interessato"
     },
     "stats": {
       "pendingErasures": {
@@ -2656,7 +2658,12 @@
         "erasure_receipt_unavailable": "La ricevuta non è disponibile per questa richiesta",
         "erasure_request_started": "La richiesta è già avviata e non può più essere rifiutata",
         "erasure_request_not_closable": "Questa richiesta non può essere chiusa come parziale",
-        "erasure_close_note_required": "Serve una nota per chiudere la richiesta"
+        "erasure_close_note_required": "Serve una nota per chiudere la richiesta",
+        "legal_hold_expiry_past": "La data di scadenza deve essere futura",
+        "export_storage_unavailable": "L'archivio delle esportazioni non è disponibile; riprova più tardi",
+        "export_erasure_in_progress": "È in corso una cancellazione di questo interessato; le esportazioni sono bloccate",
+        "export_expired": "Questa esportazione è scaduta",
+        "export_not_found": "Esportazione non trovata"
       },
       "retentionReason": {
         "platform_minimum": "conservazione minima di piattaforma"
@@ -2680,7 +2687,8 @@
         "case": "Caso",
         "status": "Stato",
         "placed": "Data applicazione",
-        "actions": "Azioni"
+        "actions": "Azioni",
+        "dates": "Revisione / scadenza"
       },
       "form": {
         "subjectLabel": "userUuid del soggetto",
@@ -2698,7 +2706,36 @@
       "releaseError": "Revoca non riuscita",
       "emptyMessage": "Nessun vincolo legale attivo.",
       "emptyHint": "Applica un vincolo qui sopra per bloccare la cancellazione di un soggetto in contenzioso.",
-      "searchPlaceholder": "Cerca per soggetto, motivo o caso"
+      "searchPlaceholder": "Cerca per soggetto, motivo o caso",
+      "reviewAt": "Data di revisione",
+      "expiresAt": "Data di scadenza",
+      "reviewDue": "Revisione dovuta",
+      "expired": "Scaduto",
+      "showReleased": "Mostra rilasciati",
+      "releaseModal": {
+        "title": "Rilascia il blocco legale",
+        "body": "Rilasciare il blocco consente di procedere con la cancellazione dell'interessato. Indica il motivo del rilascio."
+      },
+      "edit": {
+        "open": "Modifica",
+        "title": "Modifica il blocco legale",
+        "reviewAt": "Data di revisione",
+        "expiresAt": "Data di scadenza",
+        "clearReviewAt": "Rimuovi la data di revisione",
+        "clearExpiresAt": "Rimuovi la data di scadenza (il blocco non scade mai)",
+        "expiryHint": "Il blocco viene rilasciato automaticamente in questa data.",
+        "submit": "Salva",
+        "success": "Blocco legale aggiornato",
+        "error": "Aggiornamento non riuscito"
+      },
+      "notes": {
+        "open": "Note ({{count}})",
+        "title": "Note del blocco",
+        "empty": "Nessuna nota.",
+        "label": "Aggiungi una nota",
+        "add": "Aggiungi nota",
+        "error": "Impossibile aggiungere la nota"
+      }
     },
     "retention": {
       "previewTitle": "Anteprima della pulizia di conservazione (simulazione)",
@@ -2999,6 +3036,57 @@
       "applied": "Policy del tenant aggiornata.",
       "sentForApproval": "Richiesta inviata per approvazione.",
       "error": "Non è stato possibile salvare l'assegnazione."
+    },
+    "subject": {
+      "userUuid": "userUuid dell'interessato",
+      "load": "Carica",
+      "emptyMessage": "Nessun interessato selezionato.",
+      "emptyHint": "Inserisci un UUID utente per vedere l'anteprima di una cancellazione, esportarne i dati o aprire una richiesta di cancellazione.",
+      "loadError": "Impossibile caricare l'anteprima",
+      "previewTitle": "Anteprima della cancellazione",
+      "hardDeleteAllowed": "Cancellazione definitiva consentita",
+      "hardDeleteBlocked": "Cancellazione definitiva bloccata",
+      "anonymizeAllowed": "Anonimizzazione consentita",
+      "anonymizeBlocked": "Anonimizzazione bloccata",
+      "holds": "Blocchi legali",
+      "noHolds": "nessuno",
+      "retention": "Conservazione",
+      "retentionUnavailable": "il controllo di conservazione non è disponibile",
+      "noRetention": "nessun periodo minimo di conservazione",
+      "retainUntil": "da conservare fino al {{date}} ({{reasons}})",
+      "openRequests": "Richieste di cancellazione aperte",
+      "producers": {
+        "title": "Dati personali per produttore",
+        "note": "I conteggi sono per produttore e possono sovrapporsi (alcuni produttori condividono le righe): non vengono sommati in un totale.",
+        "empty": "Nessun produttore segnalato.",
+        "key": "Produttore",
+        "rows": "Righe",
+        "collections": "Collezioni",
+        "notCountable": "non conteggiabile",
+        "search": "Cerca produttori"
+      },
+      "exportJson": "Esporta JSON",
+      "exportCsv": "Esporta CSV",
+      "openErasure": "Apri richiesta di cancellazione",
+      "exportModal": {
+        "title": "Esporta i dati dell'interessato ({{format}})",
+        "body": "L'esportazione resta disponibile per un tempo limitato e si scarica dall'elenco sotto. Indica il motivo.",
+        "submit": "Crea esportazione"
+      },
+      "exportSuccess": "Esportazione creata",
+      "exportError": "Impossibile creare l'esportazione",
+      "downloadError": "Impossibile scaricare l'esportazione",
+      "exports": {
+        "title": "Esportazioni",
+        "empty": "Nessuna esportazione per questo interessato.",
+        "search": "Cerca esportazioni",
+        "format": "Formato",
+        "reason": "Motivo",
+        "created": "Creata",
+        "expires": "Scade",
+        "expired": "Scaduta",
+        "download": "Scarica"
+      }
     }
   },
   "adminComplianceSoc2": {

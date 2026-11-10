@@ -19,7 +19,12 @@ const KNOWN = new Set([
   'compliance.retention_check_unavailable',
   'compliance.reason_required',
   'compliance.invalid_cursor',
-  'compliance.erasure_receipt_unavailable'
+  'compliance.erasure_receipt_unavailable',
+  'compliance.legal_hold_expiry_past',
+  'compliance.export_storage_unavailable',
+  'compliance.export_erasure_in_progress',
+  'compliance.export_expired',
+  'compliance.export_not_found'
 ]);
 
 interface ErrBody {

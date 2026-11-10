@@ -4,6 +4,7 @@ import {
   faClipboardList,
   faClockRotateLeft,
   faGavel,
+  faIdCard,
   faScaleBalanced,
   faUserCheck,
   faUserSlash
@@ -24,6 +25,7 @@ import ErasureRequestsTab from './ErasureRequestsTab';
 import LegalHoldsTab from './LegalHoldsTab';
 import PoliciesTab from './PoliciesTab';
 import RetentionTab from './RetentionTab';
+import SubjectTab from './SubjectTab';
 import { useOpenErasureRequests } from './useOpenErasureRequests';
 
 // CompliancePage is the operator-facing GDPR/compliance dashboard (ADR-0009):
@@ -40,6 +42,11 @@ const TABS = [
     key: 'requests',
     labelKey: 'adminCompliance.tabs.erasureRequests',
     icon: faUserSlash
+  },
+  {
+    key: 'subject',
+    labelKey: 'adminCompliance.tabs.subject',
+    icon: faIdCard
   },
   { key: 'holds', labelKey: 'adminCompliance.tabs.legalHolds', icon: faGavel },
   {
@@ -197,6 +204,9 @@ const CompliancePage = () => {
             <Tab.Content>
               <Tab.Pane eventKey="requests">
                 <ErasureRequestsTab />
+              </Tab.Pane>
+              <Tab.Pane eventKey="subject">
+                <SubjectTab />
               </Tab.Pane>
               <Tab.Pane eventKey="holds">
                 <LegalHoldsTab />

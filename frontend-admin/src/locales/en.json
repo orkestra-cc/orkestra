@@ -2359,7 +2359,8 @@
         "toastUnlocked": "Account unlocked successfully",
         "toastFailure": "Unable to modify account status",
         "errorGeneric": "Error during operation"
-      }
+      },
+      "dataSubjectRequests": "Data subject requests"
     }
   },
   "adminUsers": {
@@ -2519,7 +2520,8 @@
       "retention": "Retention",
       "auditEvents": "Audit Events",
       "policies": "Policies",
-      "changeRequests": "Requests"
+      "changeRequests": "Requests",
+      "subject": "Subject"
     },
     "stats": {
       "pendingErasures": {
@@ -2656,7 +2658,12 @@
         "erasure_receipt_unavailable": "The receipt is not available for this request",
         "erasure_request_started": "The request has already started and can no longer be rejected",
         "erasure_request_not_closable": "This request cannot be closed as partial",
-        "erasure_close_note_required": "A note is required to close the request"
+        "erasure_close_note_required": "A note is required to close the request",
+        "legal_hold_expiry_past": "The expiry date must be in the future",
+        "export_storage_unavailable": "Export storage is unavailable; try again later",
+        "export_erasure_in_progress": "An erasure of this subject is in progress; exports are blocked",
+        "export_expired": "This export has expired",
+        "export_not_found": "Export not found"
       },
       "retentionReason": {
         "platform_minimum": "platform minimum retention"
@@ -2680,7 +2687,8 @@
         "case": "Case",
         "status": "Status",
         "placed": "Placed",
-        "actions": "Actions"
+        "actions": "Actions",
+        "dates": "Review / expiry"
       },
       "form": {
         "subjectLabel": "Subject userUuid",
@@ -2698,7 +2706,36 @@
       "releaseError": "Release failed",
       "emptyMessage": "No active legal holds.",
       "emptyHint": "Place a hold above to block erasure of a subject under litigation.",
-      "searchPlaceholder": "Search by subject, reason or case"
+      "searchPlaceholder": "Search by subject, reason or case",
+      "reviewAt": "Review date",
+      "expiresAt": "Expiry date",
+      "reviewDue": "Review due",
+      "expired": "Expired",
+      "showReleased": "Show released",
+      "releaseModal": {
+        "title": "Release legal hold",
+        "body": "Releasing the hold lets the subject's erasure proceed. State why it is released."
+      },
+      "edit": {
+        "open": "Edit",
+        "title": "Edit legal hold",
+        "reviewAt": "Review date",
+        "expiresAt": "Expiry date",
+        "clearReviewAt": "Clear the review date",
+        "clearExpiresAt": "Clear the expiry date (the hold never expires)",
+        "expiryHint": "The hold is released automatically on this date.",
+        "submit": "Save",
+        "success": "Legal hold updated",
+        "error": "Update failed"
+      },
+      "notes": {
+        "open": "Notes ({{count}})",
+        "title": "Hold notes",
+        "empty": "No notes yet.",
+        "label": "Add a note",
+        "add": "Add note",
+        "error": "Could not add the note"
+      }
     },
     "retention": {
       "previewTitle": "Retention cleanup preview (dry run)",
@@ -2999,6 +3036,57 @@
       "applied": "Policy of the tenant updated.",
       "sentForApproval": "Request sent for approval.",
       "error": "The assignment could not be saved."
+    },
+    "subject": {
+      "userUuid": "Subject userUuid",
+      "load": "Load",
+      "emptyMessage": "No subject selected.",
+      "emptyHint": "Enter a user UUID to preview an erasure, export the subject's data or open an erasure request.",
+      "loadError": "Could not load the preview",
+      "previewTitle": "Erasure preview",
+      "hardDeleteAllowed": "Hard delete allowed",
+      "hardDeleteBlocked": "Hard delete blocked",
+      "anonymizeAllowed": "Anonymize allowed",
+      "anonymizeBlocked": "Anonymize blocked",
+      "holds": "Legal holds",
+      "noHolds": "none",
+      "retention": "Retention",
+      "retentionUnavailable": "the retention check is unavailable",
+      "noRetention": "no minimum retention applies",
+      "retainUntil": "keep until {{date}} ({{reasons}})",
+      "openRequests": "Open erasure requests",
+      "producers": {
+        "title": "Personal data by producer",
+        "note": "Counts are per producer and can overlap (some producers share rows): they are not added into a total.",
+        "empty": "No producers reported.",
+        "key": "Producer",
+        "rows": "Rows",
+        "collections": "Collections",
+        "notCountable": "not countable",
+        "search": "Search producers"
+      },
+      "exportJson": "Export JSON",
+      "exportCsv": "Export CSV",
+      "openErasure": "Open erasure request",
+      "exportModal": {
+        "title": "Export subject data ({{format}})",
+        "body": "The export is stored for a limited time and can be downloaded from the list below. State why it is needed.",
+        "submit": "Create export"
+      },
+      "exportSuccess": "Export created",
+      "exportError": "Could not create the export",
+      "downloadError": "Could not download the export",
+      "exports": {
+        "title": "Exports",
+        "empty": "No exports for this subject.",
+        "search": "Search exports",
+        "format": "Format",
+        "reason": "Reason",
+        "created": "Created",
+        "expires": "Expires",
+        "expired": "Expired",
+        "download": "Download"
+      }
     }
   },
   "adminComplianceSoc2": {

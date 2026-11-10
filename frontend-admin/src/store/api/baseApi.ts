@@ -864,6 +864,7 @@ export const baseApi = createApi({
     'AuditEvent',
     'ErasureRequest',
     'LegalHold',
+    'DSRExport',
     'CompliancePolicy',
     'CompliancePolicyAssignment',
     'ComplianceChangeRequest',

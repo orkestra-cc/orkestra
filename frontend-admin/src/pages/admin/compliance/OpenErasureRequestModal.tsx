@@ -15,12 +15,20 @@ export type OpenErasureForm = yup.InferType<typeof schema>;
 interface Props {
   show: boolean;
   busy: boolean;
+  // Pre-filled subject (e.g. from the Subject tab); editable.
+  defaultUserUuid?: string;
   onCancel: () => void;
   onSubmit: (v: OpenErasureForm) => void;
 }
 
 // OpenErasureRequestModal opens an erasure request on behalf of a subject.
-const OpenErasureRequestModal = ({ show, busy, onCancel, onSubmit }: Props) => {
+const OpenErasureRequestModal = ({
+  show,
+  busy,
+  defaultUserUuid = '',
+  onCancel,
+  onSubmit
+}: Props) => {
   const { t } = useTranslation();
   const {
     register,
@@ -29,11 +37,16 @@ const OpenErasureRequestModal = ({ show, busy, onCancel, onSubmit }: Props) => {
     formState: { errors }
   } = useForm<OpenErasureForm>({
     resolver: yupResolver(schema),
-    defaultValues: { userUuid: '', mode: 'hard_delete', reason: '' }
+    defaultValues: {
+      userUuid: defaultUserUuid,
+      mode: 'hard_delete',
+      reason: ''
+    }
   });
   useEffect(() => {
-    if (show) reset({ userUuid: '', mode: 'hard_delete', reason: '' });
-  }, [show, reset]);
+    if (show)
+      reset({ userUuid: defaultUserUuid, mode: 'hard_delete', reason: '' });
+  }, [show, defaultUserUuid, reset]);
   return (
     <Modal show={show} onHide={onCancel} centered>
       <Form
