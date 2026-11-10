@@ -80,3 +80,47 @@ func (r *DSRExportRepository) Delete(ctx context.Context, uuid string) error {
 	_, err := r.coll.DeleteOne(ctx, bson.M{"uuid": uuid})
 	return err
 }
+
+// DSRExportErasureRepository keeps the per-subject erasure markers.
+type DSRExportErasureRepository struct {
+	coll *mongo.Collection
+}
+
+// NewDSRExportErasureRepo returns a repository bound to the markers collection.
+func NewDSRExportErasureRepo(db *mongo.Database) *DSRExportErasureRepository {
+	return &DSRExportErasureRepository{coll: db.Collection(models.DSRExportErasuresCollection)}
+}
+
+// Mark records that an erasure of the subject's exports started at at; the
+// marker only moves forward.
+func (r *DSRExportErasureRepository) Mark(ctx context.Context, userUUID string, at time.Time) error {
+	//tenantscope:allow the marker is by data subject, not by tenant; the query pins userUuid.
+	_, err := r.coll.UpdateOne(ctx, bson.M{"userUuid": userUUID},
+		bson.M{"$max": bson.M{"erasedAt": at}, "$setOnInsert": bson.M{"userUuid": userUUID}},
+		options.Update().SetUpsert(true))
+	return err
+}
+
+// ErasedAt returns the marker time, ok=false when the subject has none.
+func (r *DSRExportErasureRepository) ErasedAt(ctx context.Context, userUUID string) (time.Time, bool, error) {
+	var m models.DSRExportErasure
+	//tenantscope:allow the marker is by data subject, not by tenant; the query pins userUuid.
+	err := r.coll.FindOne(ctx, bson.M{"userUuid": userUUID}).Decode(&m)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return m.ErasedAt, true, nil
+}
+
+// DeleteBefore removes the markers older than t and returns how many.
+func (r *DSRExportErasureRepository) DeleteBefore(ctx context.Context, t time.Time) (int, error) {
+	//tenantscope:allow the cleanup job walks every subject's markers.
+	res, err := r.coll.DeleteMany(ctx, bson.M{"erasedAt": bson.M{"$lt": t}})
+	if err != nil {
+		return 0, err
+	}
+	return int(res.DeletedCount), nil
+}

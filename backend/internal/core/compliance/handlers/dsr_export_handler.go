@@ -73,7 +73,7 @@ func (h *DSRExportHandler) Create(ctx context.Context, in *CreateDSRExportInput)
 }
 
 type ListDSRExportsInput struct {
-	UserUUID string `query:"userUuid" minLength:"1" doc:"Data subject"`
+	UserUUID string `query:"userUuid" required:"true" minLength:"1" doc:"Data subject"`
 }
 type ListDSRExportsOutput struct {
 	Body struct {
@@ -120,6 +120,8 @@ func mapDSRExportError(err error, op string) error {
 		return errcode.NotFound(errcode.ComplianceExportNotFound, "Export not found.")
 	case errors.Is(err, services.ErrReasonRequired):
 		return errcode.UnprocessableEntity(errcode.ComplianceReasonRequired, "A reason of 1 to 500 characters is required.")
+	case errors.Is(err, services.ErrExportErasureInProgress):
+		return errcode.Conflict(errcode.ComplianceExportErasureInProgress, "The data subject is being erased, so no export is stored.")
 	case errors.Is(err, services.ErrExportFormatInvalid):
 		return huma.Error422UnprocessableEntity("format must be json or csv")
 	}

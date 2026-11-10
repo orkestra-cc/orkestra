@@ -71,6 +71,7 @@ var goldenCodes = map[string]string{
 	"ComplianceLegalHoldExpiryPast":          "compliance.legal_hold_expiry_past",
 	"ComplianceExportStorageUnavailable":     "compliance.export_storage_unavailable",
 	"ComplianceExportExpired":                "compliance.export_expired",
+	"ComplianceExportErasureInProgress":      "compliance.export_erasure_in_progress",
 	"ComplianceExportNotFound":               "compliance.export_not_found",
 	"AuthEmailInUse":                         "auth.email_in_use",
 	"AuthJWTNotConfigured":                   "auth.jwt_not_configured",

@@ -881,5 +881,9 @@ const ComplianceExportStorageUnavailable = "compliance.export_storage_unavailabl
 // ComplianceExportExpired signals a download of a DSR export past its expiry. 410.
 const ComplianceExportExpired = "compliance.export_expired"
 
+// ComplianceExportErasureInProgress signals a DSR export refused or removed
+// because the subject is being erased. 409.
+const ComplianceExportErasureInProgress = "compliance.export_erasure_in_progress"
+
 // ComplianceExportNotFound signals a DSR export that does not exist. 404.
 const ComplianceExportNotFound = "compliance.export_not_found"

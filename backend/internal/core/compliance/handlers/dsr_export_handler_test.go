@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/services"
 	"github.com/orkestra/backend/internal/core/compliance/services/exporttest"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -95,5 +94,3 @@ func TestDSRExportDownloadUnknownIs404(t *testing.T) {
 	_, err := newExportHandler(true).h.Download(context.Background(), &DownloadDSRExportInput{ID: "nope"})
 	assertStatus(t, err, http.StatusNotFound)
 }
-
-var _ = models.DSRExport{}

@@ -146,3 +146,40 @@ var Err = errors.New("exporttest: storage failure")
 func (s *MemStore) PresignPut(_ context.Context, key, _ string, _ int64, _ time.Duration) (*iface.PresignedPut, error) {
 	return &iface.PresignedPut{URL: "https://store.test/put/" + key}, nil
 }
+
+// MemMarkers is an in-memory erasure-marker store.
+type MemMarkers struct {
+	mu sync.Mutex
+	M  map[string]time.Time
+}
+
+func NewMemMarkers() *MemMarkers { return &MemMarkers{M: map[string]time.Time{}} }
+
+func (m *MemMarkers) Mark(_ context.Context, userUUID string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if at.After(m.M[userUUID]) {
+		m.M[userUUID] = at
+	}
+	return nil
+}
+
+func (m *MemMarkers) ErasedAt(_ context.Context, userUUID string) (time.Time, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.M[userUUID]
+	return t, ok, nil
+}
+
+func (m *MemMarkers) DeleteBefore(_ context.Context, t time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for k, v := range m.M {
+		if v.Before(t) {
+			delete(m.M, k)
+			n++
+		}
+	}
+	return n, nil
+}

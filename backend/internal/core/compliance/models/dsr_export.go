@@ -28,3 +28,16 @@ type DSRExport struct {
 	// ObjectKey is the key in the exports bucket; never sent to a client.
 	ObjectKey string `bson:"objectKey" json:"-"`
 }
+
+// DSRExportErasuresCollection holds, per subject, the time the last erasure
+// started deleting that subject's stored exports. An export being created
+// checks it after it lands, so one that raced an erasure removes itself. The
+// row carries a UUID and a time only; the cleanup job drops it after
+// export_retention_days.
+const DSRExportErasuresCollection = "compliance_dsr_export_erasures"
+
+// DSRExportErasure is the marker row.
+type DSRExportErasure struct {
+	UserUUID string    `bson:"userUuid"`
+	ErasedAt time.Time `bson:"erasedAt"`
+}

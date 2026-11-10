@@ -70,6 +70,9 @@ var (
 	minRetentionYearsMin = 0
 	minRetentionYearsMax = 30
 
+	exportRetentionDaysMin = 1
+	exportRetentionDaysMax = 365
+
 	erasureRequiredApprovalsMin = 1
 	erasureRequiredApprovalsMax = 5
 )
@@ -90,7 +93,7 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 		// stays downloadable. It stays ungated because that TTL is independent
 		// of the cleanup job — it must stay visible whether or not auto-cleanup
 		// is on.
-		{Key: "export_retention_days", Label: "Export retention (days)", Group: "retention", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
+		{Key: "export_retention_days", Label: "Export retention (days)", Group: "retention", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", Min: &exportRetentionDaysMin, Max: &exportRetentionDaysMax, EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
 		{Key: "min_retention_years", Label: "Minimum retention (years)", Group: "retention", Description: "Years after an account was created before it can be hard-deleted. A hard delete earlier is refused with the date it becomes possible; anonymize is not affected, and producers can require longer. 0 turns the platform floor off.", Type: module.FieldInt, Default: "0", Min: &minRetentionYearsMin, Max: &minRetentionYearsMax, EnvVar: "COMPLIANCE_MIN_RETENTION_YEARS"},
 		{Key: "erasure_required_approvals", Label: "Erasure approvals", Group: "retention", Description: "Distinct operators that must approve an erasure request before it runs; the operator who executes it counts as one and the data subject never counts. Read when a request is created. 1 keeps a single operator enough.", Type: module.FieldInt, Default: "1", Min: &erasureRequiredApprovalsMin, Max: &erasureRequiredApprovalsMax, EnvVar: "COMPLIANCE_ERASURE_REQUIRED_APPROVALS"},
 		// Four eyes (compliance spec §1.5): a policy change with warnings
@@ -234,6 +237,9 @@ func (m *Module) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"expiresAt": 1}},
 		}},
+		{Name: models.DSRExportErasuresCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"userUuid": 1}, Unique: true},
+		}},
 		{Name: models.ErasureRequestsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{OrderedKeys: []module.IndexKey{
@@ -361,6 +367,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// pre-created in main.go before InitAll, so by the time this core module
 	// inits (after user/auth/tenant) the producers are registered.
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
+		erasureRepoForExports := repository.NewErasureRequestRepo(deps.DB)
 		dsrSvc := services.NewDSRService(reg, sink, deps.Logger)
 		dsrSvc.SetLegalHoldChecker(legalHoldSvc)
 		// Stored exports: operator-generated exports kept as expiring blobs.
@@ -376,6 +383,9 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		m.dsrExportSvc = services.NewDSRExportService(repository.NewDSRExportRepo(deps.DB), dsrSvc, exportStore, sink, func() int {
 			return deps.GetConfigInt("compliance", "export_retention_days", 30)
 		}, deps.Logger)
+		m.dsrExportSvc.SetErasureGuard(repository.NewDSRExportErasureRepo(deps.DB), func(ctx context.Context, u string) (bool, error) {
+			return erasureRepoForExports.HasIncomplete(ctx, u)
+		})
 		m.dsrExport = handlers.NewDSRExportHandler(m.dsrExportSvc)
 		reg.Register(services.NewDSRExportProducer(m.dsrExportSvc))
 
@@ -393,7 +403,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		// Every erasure (operator, self-service, retention) is a durable
 		// request kept incomplete until every producer is done; the retry
 		// worker, launched by Start(), finishes the ones that are not.
-		erasureReqSvc := services.NewErasureRequestService(repository.NewErasureRequestRepo(deps.DB), dsrSvc, sink, deps.Logger)
+		erasureReqSvc := services.NewErasureRequestService(erasureRepoForExports, dsrSvc, sink, deps.Logger)
 		erasureReqSvc.SetRequiredApprovals(func(context.Context) int {
 			return deps.GetConfigInt("compliance", "erasure_required_approvals", 1)
 		})

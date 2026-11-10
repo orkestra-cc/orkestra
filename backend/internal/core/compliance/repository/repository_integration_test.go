@@ -1099,3 +1099,27 @@ func TestDSRExportRepoLifecycle(t *testing.T) {
 		t.Fatalf("delete must be idempotent: %v", err)
 	}
 }
+
+func TestDSRExportErasureMarkers(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	r := NewDSRExportErasureRepo(db)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	if _, ok, err := r.ErasedAt(ctx, "u1"); err != nil || ok {
+		t.Fatalf("empty = %v, %v", ok, err)
+	}
+	_ = r.Mark(ctx, "u1", now)
+	_ = r.Mark(ctx, "u1", now.Add(-time.Hour)) // never moves back
+	_ = r.Mark(ctx, "u2", now.Add(-48*time.Hour))
+	if at, ok, _ := r.ErasedAt(ctx, "u1"); !ok || !at.Equal(now) {
+		t.Fatalf("u1 = %v %v", at, ok)
+	}
+	n, err := r.DeleteBefore(ctx, now.Add(-time.Hour))
+	if err != nil || n != 1 {
+		t.Fatalf("deleted = %d, %v", n, err)
+	}
+	if _, ok, _ := r.ErasedAt(ctx, "u2"); ok {
+		t.Fatal("old marker kept")
+	}
+}

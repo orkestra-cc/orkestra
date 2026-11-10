@@ -30,6 +30,9 @@ var (
 	ErrExportStorageUnavailable = errors.New("compliance: object storage for DSR exports is not available")
 	// ErrExportExpired: the export is past its expiry and is no longer served.
 	ErrExportExpired = errors.New("compliance: the DSR export has expired")
+	// ErrExportErasureInProgress: the subject is being erased, or was erased
+	// while the export ran; no export is kept.
+	ErrExportErasureInProgress = errors.New("compliance: the data subject is being erased")
 	// ErrExportFormatInvalid: the format is neither json nor csv.
 	ErrExportFormatInvalid = errors.New("compliance: export format must be json or csv")
 )
@@ -43,6 +46,14 @@ type DSRExportRepo interface {
 	Delete(ctx context.Context, uuid string) error
 }
 
+// DSRExportMarkers records when an erasure started deleting a subject's
+// exports, so a Create that raced it can tell.
+type DSRExportMarkers interface {
+	Mark(ctx context.Context, userUUID string, at time.Time) error
+	ErasedAt(ctx context.Context, userUUID string) (time.Time, bool, error)
+	DeleteBefore(ctx context.Context, t time.Time) (int, error)
+}
+
 // DSRExportService generates a subject's export on behalf of an operator and
 // keeps it in object storage until it expires.
 type DSRExportService struct {
@@ -51,6 +62,8 @@ type DSRExportService struct {
 	store         iface.ObjectStore // nil = storage unavailable
 	sink          iface.AuditSink
 	retentionDays func() int
+	markers       DSRExportMarkers
+	hasIncomplete func(ctx context.Context, userUUID string) (bool, error)
 	now           func() time.Time
 	logger        *slog.Logger
 }
@@ -62,6 +75,12 @@ func NewDSRExportService(repo DSRExportRepo, dsr *DSRService, store iface.Object
 		logger = slog.Default()
 	}
 	return &DSRExportService{repo: repo, dsr: dsr, store: store, sink: sink, retentionDays: retentionDays, now: time.Now, logger: logger}
+}
+
+// SetErasureGuard wires the erasure markers and the incomplete-erasure check.
+// Either may be nil.
+func (s *DSRExportService) SetErasureGuard(m DSRExportMarkers, hasIncomplete func(ctx context.Context, userUUID string) (bool, error)) {
+	s.markers, s.hasIncomplete = m, hasIncomplete
 }
 
 // SetClock replaces the clock (tests).
@@ -97,6 +116,17 @@ func (s *DSRExportService) Create(ctx context.Context, userUUID, format, reason,
 		return nil, ErrExportStorageUnavailable
 	}
 
+	if s.hasIncomplete != nil {
+		busy, err := s.hasIncomplete(ctx, userUUID)
+		if err != nil {
+			return nil, fmt.Errorf("check erasure: %w", err)
+		}
+		if busy {
+			return nil, ErrExportErasureInProgress
+		}
+	}
+	started := s.now().UTC()
+
 	res, err := s.dsr.ExportAs(ctx, userUUID, actor)
 	if err != nil {
 		return nil, err
@@ -106,6 +136,7 @@ func (s *DSRExportService) Create(ctx context.Context, userUUID, format, reason,
 		err = FlattenBundleCSV(&buf, res.Bundle)
 	} else {
 		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
 		enc.SetIndent("", "  ")
 		err = enc.Encode(res.Bundle)
 	}
@@ -140,6 +171,32 @@ func (s *DSRExportService) Create(ctx context.Context, userUUID, format, reason,
 			s.logger.Warn("DSR export: orphan object after a failed insert", slog.String("exportUuid", id))
 		}
 		return nil, fmt.Errorf("record export: %w", err)
+	}
+	// An erasure that started after this export began may have listed the
+	// subject's exports before the row landed: remove it rather than let it
+	// outlive the erasure.
+	if s.markers != nil {
+		at, ok, merr := s.markers.ErasedAt(ctx, userUUID)
+		if merr != nil || (ok && !at.Before(started)) {
+			if derr := s.deleteOne(ctx, *row); derr != nil {
+				s.logger.Warn("DSR export: could not remove an export that raced an erasure", slog.String("exportUuid", id))
+			}
+			if merr != nil {
+				return nil, fmt.Errorf("check erasure marker: %w", merr)
+			}
+			return nil, ErrExportErasureInProgress
+		}
+	}
+	if s.sink != nil {
+		s.sink.Emit(ctx, iface.AuditEvent{
+			ActorUserID:  actor,
+			ActorType:    "user",
+			Action:       "gdpr.dsr.export_stored",
+			ResourceType: "user",
+			ResourceID:   userUUID,
+			Outcome:      "success",
+			Metadata:     map[string]any{"exportUuid": id, "format": format, "subjectUserUuid": userUUID},
+		})
 	}
 	return row, nil
 }
@@ -200,6 +257,12 @@ func short(id string) string {
 func (s *DSRExportService) CleanupExpired(ctx context.Context) (int, error) {
 	const batch = 200
 	deleted := 0
+	if s.markers != nil {
+		cutoff := s.now().Add(-time.Duration(s.days()) * 24 * time.Hour)
+		if _, err := s.markers.DeleteBefore(ctx, cutoff); err != nil {
+			s.logger.Warn("DSR export: could not drop old erasure markers", slog.String("error", err.Error()))
+		}
+	}
 	for {
 		rows, err := s.repo.ListExpired(ctx, s.now(), batch)
 		if err != nil {
@@ -242,6 +305,12 @@ func (s *DSRExportService) deleteOne(ctx context.Context, r models.DSRExport) er
 
 // PurgeUser deletes every stored export of the subject and returns the row count.
 func (s *DSRExportService) PurgeUser(ctx context.Context, userUUID string) (int, error) {
+	// Marker first: a Create still running re-reads it after its insert.
+	if s.markers != nil {
+		if err := s.markers.Mark(ctx, userUUID, s.now().UTC()); err != nil {
+			return 0, fmt.Errorf("mark export erasure: %w", err)
+		}
+	}
 	rows, err := s.repo.ListByUser(ctx, userUUID)
 	if err != nil {
 		return 0, err

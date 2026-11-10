@@ -66,7 +66,7 @@ func TestCreateJSONExportStoresBytesAndAudits(t *testing.T) {
 	if parsed["user"].(map[string]any)["email"] != "a@example.com" {
 		t.Fatalf("bundle = %v", parsed)
 	}
-	if len(f.audit.events) != 1 || f.audit.events[0].Action != "gdpr.dsr.exported" ||
+	if len(f.audit.events) < 1 || f.audit.events[0].Action != "gdpr.dsr.exported" ||
 		f.audit.events[0].ActorUserID != "op-1" || f.audit.events[0].ResourceID != "subj-12345678" {
 		t.Fatalf("audit = %+v", f.audit.events)
 	}
@@ -353,5 +353,118 @@ func TestExportAsAuditsTheActor(t *testing.T) {
 	}
 	if sink.events[1].ActorUserID != "subj" {
 		t.Fatalf("Export must audit the subject as actor: %+v", sink.events[1])
+	}
+}
+
+// blockingProducer holds its export until released, so a test can run an
+// erasure in the middle of a Create.
+type blockingProducer struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingProducer) Subject() string { return "slow" }
+func (b *blockingProducer) ExportPersonalData(context.Context, string) (any, error) {
+	close(b.started)
+	<-b.release
+	return "data", nil
+}
+func (b *blockingProducer) PurgePersonalData(context.Context, string, iface.EraseMode) (iface.PurgeResult, error) {
+	return iface.PurgeResult{}, nil
+}
+
+// An export that was read before the purge ran and stored after it must not
+// survive the erasure.
+func TestCreateRacingErasureLeavesNothing(t *testing.T) {
+	bp := &blockingProducer{started: make(chan struct{}), release: make(chan struct{})}
+	f := newExportFixture(t, true, bp)
+	f.svc.SetErasureGuard(exporttest.NewMemMarkers(), nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.svc.Create(context.Background(), "subj", "json", "r", "op")
+		done <- err
+	}()
+	<-bp.started
+	f.now = f.now.Add(time.Second)
+	if _, err := NewDSRExportProducer(f.svc).PurgePersonalData(context.Background(), "subj", iface.EraseHardDelete); err != nil {
+		t.Fatal(err)
+	}
+	close(bp.release)
+	if err := <-done; !errors.Is(err, ErrExportErasureInProgress) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.store.Objects) != 0 || len(f.repo.Rows) != 0 {
+		t.Fatalf("export survived: %d objects, %d rows", len(f.store.Objects), len(f.repo.Rows))
+	}
+}
+
+func TestCreateRefusedWhileErasureIncomplete(t *testing.T) {
+	p := &stubProducer{subject: "user", exportData: "x"}
+	f := newExportFixture(t, true, p)
+	f.svc.SetErasureGuard(nil, func(context.Context, string) (bool, error) { return true, nil })
+	if _, err := f.svc.Create(context.Background(), "subj", "json", "r", "op"); !errors.Is(err, ErrExportErasureInProgress) {
+		t.Fatalf("err = %v", err)
+	}
+	if p.exportCalls != 0 || len(f.store.Objects) != 0 {
+		t.Fatal("nothing may be exported")
+	}
+}
+
+func TestCreateAfterAnOlderErasureIsAllowed(t *testing.T) {
+	f := newExportFixture(t, true)
+	m := exporttest.NewMemMarkers()
+	_ = m.Mark(context.Background(), "subj", f.now.Add(-time.Hour))
+	f.svc.SetErasureGuard(m, func(context.Context, string) (bool, error) { return false, nil })
+	if _, err := f.svc.Create(context.Background(), "subj", "json", "r", "op"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCleanupDropsOldMarkers(t *testing.T) {
+	f := newExportFixture(t, true)
+	m := exporttest.NewMemMarkers()
+	_ = m.Mark(context.Background(), "old", f.now.Add(-11*24*time.Hour))
+	_ = m.Mark(context.Background(), "new", f.now.Add(-time.Hour))
+	f.svc.SetErasureGuard(m, nil)
+	if _, err := f.svc.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.M["old"]; ok || len(m.M) != 1 {
+		t.Fatalf("markers = %v", m.M)
+	}
+}
+
+func TestCreateEmitsExportStoredAudit(t *testing.T) {
+	f := newExportFixture(t, true)
+	row, _ := f.svc.Create(context.Background(), "subj", "csv", "r", "op-1")
+	last := f.audit.events[len(f.audit.events)-1]
+	if last.Action != "gdpr.dsr.export_stored" || last.ActorUserID != "op-1" ||
+		last.Metadata["exportUuid"] != row.UUID || last.Metadata["format"] != "csv" || last.Metadata["subjectUserUuid"] != "subj" {
+		t.Fatalf("audit = %+v", last)
+	}
+}
+
+func TestStoredJSONKeepsHTMLCharacters(t *testing.T) {
+	f := newExportFixture(t, true, &stubProducer{subject: "user", exportData: "a<b>&c"})
+	row, _ := f.svc.Create(context.Background(), "s", "json", "r", "op")
+	if !strings.Contains(string(f.store.Objects[row.ObjectKey]), "a<b>&c") {
+		t.Fatalf("html escaped: %s", f.store.Objects[row.ObjectKey])
+	}
+}
+
+func TestProducerAnonymizeModeDeletesOnlyTheSubjectsExports(t *testing.T) {
+	f := newExportFixture(t, true)
+	ctx := context.Background()
+	mine, _ := f.svc.Create(ctx, "anon-subj", "json", "r", "op")
+	other, _ := f.svc.Create(ctx, "anon-other", "csv", "r", "op")
+	res, err := NewDSRExportProducer(f.svc).PurgePersonalData(ctx, "anon-subj", iface.EraseAnonymize)
+	if err != nil || res.RowsDeleted != 1 {
+		t.Fatalf("res = %+v, %v", res, err)
+	}
+	if _, ok := f.repo.Rows[mine.UUID]; ok {
+		t.Fatal("subject row kept")
+	}
+	if _, ok := f.repo.Rows[other.UUID]; !ok {
+		t.Fatal("other row removed")
 	}
 }
