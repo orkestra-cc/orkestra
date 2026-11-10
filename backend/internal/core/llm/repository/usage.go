@@ -239,7 +239,7 @@ func (r *Usage) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, error
 // ListByUserAllTenants exports every ledger row of a data subject.
 func (r *Usage) ListByUserAllTenants(ctx context.Context, userUUID string) ([]models.UsageEvent, error) {
 	//tenantscope:allow dsr: right-of-access export of the subject's usage rows across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"userUuid": userUUID})
+	cur, err := r.coll.Find(ctx, userUUIDFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +259,7 @@ func (r *Usage) ListByUserAllTenants(ctx context.Context, userUUID string) ([]mo
 // bulk batches; a row whose userUuid changed meanwhile is skipped.
 func (r *Usage) AnonymizeByUser(ctx context.Context, userUUID string, newID func() string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure anonymization of the subject's usage rows across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"userUuid": userUUID}, options.Find().SetProjection(bson.M{"_id": 1}))
+	cur, err := r.coll.Find(ctx, userUUIDFilter(userUUID), options.Find().SetProjection(bson.M{"_id": 1}))
 	if err != nil {
 		return 0, err
 	}
@@ -316,6 +316,14 @@ func (r *Usage) DeleteByUser(ctx context.Context, userUUID string) (int64, error
 		return 0, err
 	}
 	return res.DeletedCount, nil
+}
+
+// CountByUser counts every ledger row of the subject: the finalized ones
+// DeleteByUser removes plus the pending ones AnonymizeByUser rewrites, so the
+// total is the same in both erase modes (DSR dry-run).
+func (r *Usage) CountByUser(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of the subject's usage rows across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, userUUIDFilter(userUUID))
 }
 
 // Monthly owns llm_usage_monthly, one rollup per org and UTC month.

@@ -170,3 +170,5 @@ Key method groups:
 - [`../tenant/AGENTS.md`](../tenant/AGENTS.md) — depends on `user` to verify that invited userUUIDs exist before creating memberships
 - [`../../../pkg/sdk/iface/interfaces.go:28-53`](../../../pkg/sdk/iface/interfaces.go) — `UserProvider` interface definition
 - [Authentication flow](../../../../docs/site/architecture/authentication-flow.mdx) — how `User.Role` threads through JWT claims and middleware
+
+- **DSR dry-run count.** `piiProducer` also implements `iface.PIIProducerCounter`: preference rows (`PreferenceRepository.CountByUser`) plus the identity row (`CountByID`, filter `rowByUUIDFilter`, shared with `HardDelete`). The identity counts 1 under both erase modes (a soft-deleted tombstone too, since a hard delete removes it). The count methods are optional interfaces next to the repositories (in `repository/user_count.go`), not part of `UserRepository`, so the tenantscope baseline line numbers stay put.

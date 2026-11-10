@@ -119,7 +119,7 @@ type authSessionRepository struct {
 // DeleteAllByUser removes every session row for userUUID. Hard delete,
 // distinct from TerminateAllUserSessions which sets isActive=false.
 func (r *authSessionRepository) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
-	res, err := r.collection.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.collection.DeleteMany(ctx, ByUserFilter(userUUID))
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete sessions by user: %w", err)
 	}

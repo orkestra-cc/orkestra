@@ -332,3 +332,5 @@ make backend-retrieval-hardening
 ```
 
 Throwaway server: `docker run -d --name qdrant-pr3-test -p 127.0.0.1:16333:6333 -e QDRANT__SERVICE__API_KEY=<key> qdrant/qdrant:v1.20.0` (CI pins the image by digest), then use `QDRANT_TEST_URL=http://127.0.0.1:16333`; remove the container afterwards. A green run without `QDRANT_TEST_URL` proves nothing about the driver.
+
+- **DSR dry-run count.** `PIIProducer` implements `iface.PIIProducerCounter` with one `CountDocuments` over the search log (`SearchLogDSR.CountByUserAllTenants`, same `userSearchFilter` as `DeleteByUserAllTenants`): exact, and equal to the `RowsDeleted` the purge reports. The user's points in the vector index are NOT counted: the engine has no cheap exact count by filter (the finalizer deletes by filter and checks `Count == 0`), so `Collections` lists the search log only and a zero count means no search-log rows, not an empty index.

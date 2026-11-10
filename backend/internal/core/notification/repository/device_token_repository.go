@@ -27,6 +27,8 @@ type DeviceTokenRepository interface {
 	DisableStale(ctx context.Context, seenBefore time.Time, now time.Time) (int64, error)
 	DeleteDisabledBefore(ctx context.Context, before time.Time) (int64, error)
 	DeleteForUser(ctx context.Context, tier, userUUID string) (int64, error)
+	// CountForUser counts what DeleteForUser would remove (DSR preview).
+	CountForUser(ctx context.Context, tier, userUUID string) (int64, error)
 }
 
 type deviceTokenRepo struct{ db *mongo.Database }
@@ -143,8 +145,13 @@ func (r *deviceTokenRepo) find(ctx context.Context, filter bson.D, opts ...*opti
 	return out, nil
 }
 
+// userTierFilter is the per-subject selector shared by list, delete and count.
+func userTierFilter(tier, userUUID string) bson.D {
+	return bson.D{{Key: "tier", Value: tier}, {Key: "userUuid", Value: userUUID}}
+}
+
 func (r *deviceTokenRepo) ListForUser(ctx context.Context, tier, userUUID string) ([]models.DeviceToken, error) {
-	return r.find(ctx, bson.D{{Key: "tier", Value: tier}, {Key: "userUuid", Value: userUUID}},
+	return r.find(ctx, userTierFilter(tier, userUUID),
 		options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}))
 }
 
@@ -193,9 +200,14 @@ func (r *deviceTokenRepo) DeleteDisabledBefore(ctx context.Context, before time.
 
 func (r *deviceTokenRepo) DeleteForUser(ctx context.Context, tier, userUUID string) (int64, error) {
 	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
-	res, err := r.col().DeleteMany(ctx, bson.D{{Key: "tier", Value: tier}, {Key: "userUuid", Value: userUUID}})
+	res, err := r.col().DeleteMany(ctx, userTierFilter(tier, userUUID))
 	if err != nil {
 		return 0, err
 	}
 	return res.DeletedCount, nil
+}
+
+func (r *deviceTokenRepo) CountForUser(ctx context.Context, tier, userUUID string) (int64, error) {
+	//tenantscope:allow system: device tokens are keyed by user, device and push token across tiers; the tier is an explicit filter field, not a tenant org scope
+	return r.col().CountDocuments(ctx, userTierFilter(tier, userUUID))
 }

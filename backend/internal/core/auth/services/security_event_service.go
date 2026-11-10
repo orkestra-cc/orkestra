@@ -96,7 +96,7 @@ func NewSecurityEventService(db *mongo.Database) (SecurityEventService, error) {
 }
 
 func (s *securityEventService) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
-	res, err := s.collection.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := s.collection.DeleteMany(ctx, subjectEventsFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

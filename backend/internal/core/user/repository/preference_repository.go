@@ -109,3 +109,8 @@ func (r *preferenceRepository) DeleteByUser(ctx context.Context, userUUID string
 	}
 	return res.DeletedCount, nil
 }
+
+func (r *preferenceRepository) CountByUser(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow system: user_preferences rows are keyed by the user's UUID, not by tenant — personal presentation choices that follow the user across tenants; every query here is bound to the caller's own UUID
+	return r.coll.CountDocuments(ctx, bson.M{"userUuid": userUUID})
+}

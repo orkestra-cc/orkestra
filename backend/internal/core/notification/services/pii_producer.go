@@ -32,18 +32,23 @@ func NewPIIProducer(db *mongo.Database) iface.PIIProducer {
 	return &piiProducer{db: db, devices: repository.NewDeviceTokenRepository(db)}
 }
 
+// messagesFilter and preferencesFilter are the per-subject selectors shared by
+// export, purge and count, so the three cannot drift apart.
+func messagesFilter(userUUID string) bson.M    { return bson.M{"recipientUserUuid": userUUID} }
+func preferencesFilter(userUUID string) bson.M { return bson.M{"userUuid": userUUID} }
+
 // Subject is the stable bundle-key identifier for this producer.
 func (p *piiProducer) Subject() string { return "notification" }
 
 // ExportPersonalData returns the subject's message history + preferences.
 func (p *piiProducer) ExportPersonalData(ctx context.Context, userUUID string) (any, error) {
 	//tenantscope:allow DSR export is by data-subject; filter pins recipientUserUuid explicitly.
-	msgs, err := findAll(ctx, p.db, models.NotificationMessagesCollection, bson.M{"recipientUserUuid": userUUID})
+	msgs, err := findAll(ctx, p.db, models.NotificationMessagesCollection, messagesFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
 	//tenantscope:allow DSR export is by data-subject; filter pins userUuid explicitly.
-	prefs, err := findAll(ctx, p.db, models.NotificationPreferencesCollection, bson.M{"userUuid": userUUID})
+	prefs, err := findAll(ctx, p.db, models.NotificationPreferencesCollection, preferencesFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +122,7 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 	cols := make([]string, 0, 3)
 
 	//tenantscope:allow DSR erase is by data-subject; filter pins recipientUserUuid explicitly.
-	mres, err := p.db.Collection(models.NotificationMessagesCollection).DeleteMany(ctx, bson.M{"recipientUserUuid": userUUID})
+	mres, err := p.db.Collection(models.NotificationMessagesCollection).DeleteMany(ctx, messagesFilter(userUUID))
 	if err != nil {
 		return iface.PurgeResult{}, err
 	}
@@ -127,7 +132,7 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 	}
 
 	//tenantscope:allow DSR erase is by data-subject; filter pins userUuid explicitly.
-	pres, err := p.db.Collection(models.NotificationPreferencesCollection).DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	pres, err := p.db.Collection(models.NotificationPreferencesCollection).DeleteMany(ctx, preferencesFilter(userUUID))
 	if err != nil {
 		return iface.PurgeResult{}, err
 	}
@@ -153,6 +158,46 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 
 	return iface.PurgeResult{RowsDeleted: int(deleted), Collections: cols}, nil
 }
+
+// CountPersonalData implements iface.PIIProducerCounter: the rows
+// PurgePersonalData would delete, counted with the same filters. Mode-agnostic,
+// like the purge.
+func (p *piiProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	var out iface.PersonalDataCount
+	add := func(coll string, n int64) {
+		if n > 0 {
+			out.Rows += int(n)
+			out.Collections = append(out.Collections, coll)
+		}
+	}
+
+	//tenantscope:allow DSR count is by data-subject; filter pins recipientUserUuid explicitly.
+	n, err := p.db.Collection(models.NotificationMessagesCollection).CountDocuments(ctx, messagesFilter(userUUID))
+	if err != nil {
+		return iface.PersonalDataCount{}, err
+	}
+	add(models.NotificationMessagesCollection, n)
+
+	//tenantscope:allow DSR count is by data-subject; filter pins userUuid explicitly.
+	n, err = p.db.Collection(models.NotificationPreferencesCollection).CountDocuments(ctx, preferencesFilter(userUUID))
+	if err != nil {
+		return iface.PersonalDataCount{}, err
+	}
+	add(models.NotificationPreferencesCollection, n)
+
+	var devices int64
+	for _, tier := range []string{iface.PushTierOperator, iface.PushTierClient} {
+		d, err := p.devices.CountForUser(ctx, tier, userUUID)
+		if err != nil {
+			return iface.PersonalDataCount{}, err
+		}
+		devices += d
+	}
+	add(models.DeviceTokensCollection, devices)
+	return out, nil
+}
+
+var _ iface.PIIProducerCounter = (*piiProducer)(nil)
 
 func findAll(ctx context.Context, db *mongo.Database, coll string, filter bson.M) ([]bson.M, error) {
 	//tenantscope:allow DSR export/erase is by data-subject; every caller pins the user field in the filter.

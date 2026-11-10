@@ -1816,3 +1816,5 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - [`../notification/AGENTS.md`](../notification/AGENTS.md) — optional dependency for verification + reset emails
 - [`../../shared/middleware/auth.go`](../../shared/middleware/auth.go) — JWT validation, `RequirePermission`, `RequireGlobal`
 - [`../../../../docs/site/architecture/authentication-flow.mdx`](../../../../docs/site/architecture/authentication-flow.mdx) — high-level walkthrough of the flows
+
+- **DSR dry-run count.** The auth `piiProducer` (both tier instances) implements `iface.PIIProducerCounter`: one `CountByUser` per repository and on the security-event service, all built on `repository.ByUserFilter`, the same filter `DeleteAllByUser` uses (`repository/count.go`). The methods are optional interfaces, not part of the repository contracts; a wired repository without one makes the count fail instead of under-report. Device-trust grants and security events are shared by the operator and client instances, so each instance reports them, as each purge deletes them.

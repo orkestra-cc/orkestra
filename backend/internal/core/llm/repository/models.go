@@ -156,7 +156,7 @@ func (r *Models) Delete(ctx context.Context, uuid string) error {
 // tenants.
 func (r *Models) ListByCreator(ctx context.Context, userUUID string) ([]models.Model, error) {
 	//tenantscope:allow dsr: right-of-access export of models created by the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"createdBy": userUUID})
+	cur, err := r.coll.Find(ctx, createdByFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
@@ -172,9 +172,15 @@ func (r *Models) ListByCreator(ctx context.Context, userUUID string) ([]models.M
 // org assets and stay.
 func (r *Models) PseudonymizeCreator(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure pseudonymization of the createdBy actor across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.UpdateMany(ctx, bson.M{"createdBy": userUUID}, bson.M{"$set": bson.M{"createdBy": models.ErasedActor}})
+	res, err := r.coll.UpdateMany(ctx, createdByFilter(userUUID), bson.M{"$set": bson.M{"createdBy": models.ErasedActor}})
 	if err != nil {
 		return 0, err
 	}
 	return res.ModifiedCount, nil
+}
+
+// CountByCreator counts what PseudonymizeCreator would rewrite (DSR dry-run).
+func (r *Models) CountByCreator(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of the models created by the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, createdByFilter(userUUID))
 }

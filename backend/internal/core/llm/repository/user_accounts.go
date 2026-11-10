@@ -296,7 +296,7 @@ func (r *UserAccounts) ListByUserAllTenants(ctx context.Context, userUUID string
 		return nil, ErrEmptySubject
 	}
 	//tenantscope:allow dsr: right-of-access export of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"userUuid": userUUID})
+	cur, err := r.coll.Find(ctx, userUUIDFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +322,7 @@ func (r *UserAccounts) DeleteByUser(ctx context.Context, userUUID string) ([]mod
 	for {
 		var a models.UserAccount
 		//tenantscope:allow dsr: right-to-erasure of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-		err := r.coll.FindOneAndDelete(ctx, bson.M{"userUuid": userUUID}).Decode(&a)
+		err := r.coll.FindOneAndDelete(ctx, userUUIDFilter(userUUID)).Decode(&a)
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return out, nil
 		}
@@ -331,4 +331,14 @@ func (r *UserAccounts) DeleteByUser(ctx context.Context, userUUID string) ([]mod
 		}
 		out = append(out, a)
 	}
+}
+
+// CountByUser counts what DeleteByUser would remove (DSR dry-run). It refuses
+// an empty subject like the other two.
+func (r *UserAccounts) CountByUser(ctx context.Context, userUUID string) (int64, error) {
+	if userUUID == "" {
+		return 0, ErrEmptySubject
+	}
+	//tenantscope:allow dsr: dry-run count of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, userUUIDFilter(userUUID))
 }

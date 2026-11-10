@@ -589,7 +589,7 @@ func (r *Repository) DeleteMembershipsByUser(ctx context.Context, userUUID strin
 		return 0, nil
 	}
 	//tenantscope:allow DSR erase is cross-tenant by data-subject; the filter pins userUUID explicitly (mirrors DeleteMembershipsByTenant).
-	res, err := r.db.Collection(CollMemberships).DeleteMany(ctx, bson.M{"userUUID": userUUID})
+	res, err := r.db.Collection(CollMemberships).DeleteMany(ctx, membershipsByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

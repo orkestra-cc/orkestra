@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
@@ -289,6 +290,54 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 	return iface.PurgeResult{RowsDeleted: int(rows), Collections: collections}, nil
 }
 
+// subjectRowCounter is what each repository (and the security-event service)
+// offers next to DeleteAllByUser: the count of rows that delete would remove,
+// built from the same filter (repository.ByUserFilter). It is a separate
+// optional interface so a repository fake that predates the dry-run still
+// satisfies the repository contracts.
+type subjectRowCounter interface {
+	CountByUser(ctx context.Context, userUUID string) (int64, error)
+}
+
+// CountPersonalData implements iface.PIIProducerCounter: the rows
+// PurgePersonalData would delete for the subject, per collection, counted with
+// the filters the purge uses. Mode-agnostic like the purge. The device-trust
+// grants and security events are shared by the two tier instances, as in the
+// purge, so each instance reports them.
+func (p *piiProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	var out iface.PersonalDataCount
+	sources := []struct {
+		repo       any
+		collection string
+	}{
+		{p.refresh, p.refreshCollection},
+		{p.sessions, p.sessionsCollection},
+		{p.emails, p.emailsCollection},
+		{p.mfa, p.mfaCollection},
+		{p.events, authModels.SecurityEventsCollection},
+		{p.deviceTrust, authModels.DeviceTrustCollection},
+		{p.pinDevices, p.pinDevicesCollection},
+	}
+	for _, src := range sources {
+		if src.repo == nil {
+			continue
+		}
+		c, ok := src.repo.(subjectRowCounter)
+		if !ok {
+			return iface.PersonalDataCount{}, fmt.Errorf("auth: %s cannot be counted", src.collection)
+		}
+		n, err := c.CountByUser(ctx, userUUID)
+		if err != nil {
+			return iface.PersonalDataCount{}, err
+		}
+		if n > 0 {
+			out.Rows += int(n)
+			out.Collections = append(out.Collections, src.collection)
+		}
+	}
+	return out, nil
+}
+
 // --- internal scrubbers ---
 
 func scrubRefreshTokens(tokens []*authModels.RefreshTokenDoc) []map[string]any {
@@ -355,4 +404,7 @@ func scrubDeviceTrust(grants []*authModels.DeviceTrustDoc) []map[string]any {
 }
 
 // compile-time assertion: iface.PIIProducer is satisfied by piiProducer.
-var _ iface.PIIProducer = (*piiProducer)(nil)
+var (
+	_ iface.PIIProducer        = (*piiProducer)(nil)
+	_ iface.PIIProducerCounter = (*piiProducer)(nil)
+)

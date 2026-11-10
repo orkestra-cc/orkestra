@@ -157,7 +157,7 @@ func (r *Outbox) PurgeSettledBefore(ctx context.Context, cutoff time.Time) (int6
 // delivered to the data subject (deliveredTo).
 func (r *Outbox) ListDeliveredTo(ctx context.Context, userUUID string) ([]models.OutboxEvent, error) {
 	//tenantscope:allow dsr: right-of-access export of the budget alerts delivered to the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"deliveredTo": userUUID})
+	cur, err := r.coll.Find(ctx, deliveredToFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
@@ -178,9 +178,15 @@ func (r *Outbox) ListDeliveredTo(ctx context.Context, userUUID string) ([]models
 // later erasure run removes it.
 func (r *Outbox) RemoveDelivered(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure removal of the subject from delivered budget alerts across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.UpdateMany(ctx, bson.M{"deliveredTo": userUUID}, bson.M{"$pull": bson.M{"deliveredTo": userUUID}})
+	res, err := r.coll.UpdateMany(ctx, deliveredToFilter(userUUID), bson.M{"$pull": bson.M{"deliveredTo": userUUID}})
 	if err != nil {
 		return 0, err
 	}
 	return res.ModifiedCount, nil
+}
+
+// CountDelivered counts what RemoveDelivered would modify (DSR dry-run).
+func (r *Outbox) CountDelivered(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of the budget alerts delivered to the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, deliveredToFilter(userUUID))
 }

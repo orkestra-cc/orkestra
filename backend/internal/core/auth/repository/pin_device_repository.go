@@ -128,7 +128,7 @@ func (r *pinDeviceRepository) DeleteIfSecret(ctx context.Context, userUUID, devi
 
 func (r *pinDeviceRepository) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
-	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.coll.DeleteMany(ctx, ByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

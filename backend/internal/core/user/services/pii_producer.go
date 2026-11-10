@@ -117,3 +117,53 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, mo
 	res.Collections = append(res.Collections, "users")
 	return res, nil
 }
+
+// The count views of the two repositories, optional next to UserRepository and
+// PreferenceRepository (their doubles need not implement them);
+// CountPersonalData fails rather than under-reports when one is missing.
+type (
+	userRowCounter interface {
+		CountByID(ctx context.Context, id string) (int64, error)
+	}
+	preferenceCounter interface {
+		CountByUser(ctx context.Context, userUUID string) (int64, error)
+	}
+)
+
+// CountPersonalData implements iface.PIIProducerCounter: the preference rows
+// plus the identity row, counted with the filters the purge uses. The identity
+// row counts as one in both modes (anonymize rewrites it, hard delete removes
+// it). A soft-deleted tombstone is counted too, because a hard delete would
+// remove it; an anonymize of a tombstone finds nothing to rewrite.
+func (p *piiProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	var out iface.PersonalDataCount
+	if p.prefRepo != nil {
+		pc, ok := p.prefRepo.(preferenceCounter)
+		if !ok {
+			return iface.PersonalDataCount{}, stderrors.New("user: preference repository cannot count")
+		}
+		n, err := pc.CountByUser(ctx, userUUID)
+		if err != nil {
+			return iface.PersonalDataCount{}, err
+		}
+		if n > 0 {
+			out.Rows += int(n)
+			out.Collections = append(out.Collections, repository.UserPreferencesCollection)
+		}
+	}
+	uc, ok := p.userRepo.(userRowCounter)
+	if !ok {
+		return iface.PersonalDataCount{}, stderrors.New("user: user repository cannot count")
+	}
+	n, err := uc.CountByID(ctx, userUUID)
+	if err != nil {
+		return iface.PersonalDataCount{}, err
+	}
+	if n > 0 {
+		out.Rows += int(n)
+		out.Collections = append(out.Collections, "users")
+	}
+	return out, nil
+}
+
+var _ iface.PIIProducerCounter = (*piiProducer)(nil)
