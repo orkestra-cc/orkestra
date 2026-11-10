@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -55,15 +54,5 @@ func (r *pinDeviceRepository) CountByUser(ctx context.Context, userUUID string) 
 // filter (DSR dry-run preview).
 func (r *refreshTokenRepository) CountByUser(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
-	return r.collection.CountDocuments(ctx, ByUserFilter(userUUID))
-}
-
-// CountByUser counts the rows DeleteAllByUser would remove, with the same
-// filter (DSR dry-run preview).
-func (r *securityEventRepository) CountByUser(ctx context.Context, userUUID string) (int64, error) {
-	if userUUID == "" {
-		return 0, errors.New("security event: userUUID is required")
-	}
-	//tenantscope:allow auth_security_events is a non-tier-split audit log keyed on userUUID alone — used by the GDPR DSR dry-run count, like the erasure it previews.
 	return r.collection.CountDocuments(ctx, ByUserFilter(userUUID))
 }

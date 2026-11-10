@@ -109,3 +109,27 @@ func TestPIIProducer_CountIncludesTombstoneRemovedByHardDelete(t *testing.T) {
 		t.Fatalf("count %d, purge %+v; want 3 and equal", got.Rows, res)
 	}
 }
+
+// Documented difference: the count follows the hard-delete purge. An
+// anonymize purge of the same tombstone finds no live row and reports no
+// identity row (only the two preference rows).
+func TestPIIProducer_CountOfTombstoneOverReportsAnonymizeByTheIdentityRow(t *testing.T) {
+	p, db := countFixture(t)
+	ctx := context.Background()
+	//tenantscope:allow Test marks one seeded user soft-deleted in an isolated test database.
+	if _, err := db.Collection(repository.OperatorUsersCollection).UpdateOne(ctx,
+		bson.M{"uuid": "u1"}, bson.M{"$set": bson.M{"deletedAt": time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.(iface.PIIProducerCounter).CountPersonalData(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := p.PurgePersonalData(ctx, "u1", iface.EraseAnonymize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Rows != 3 || res.RowsAnonymized != 0 || res.RowsDeleted != 2 {
+		t.Fatalf("count %+v, anonymize purge %+v; want count 3, purge 2 preferences and 0 identity", got, res)
+	}
+}

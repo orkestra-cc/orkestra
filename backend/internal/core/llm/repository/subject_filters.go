@@ -2,6 +2,8 @@ package repository
 
 import (
 	"go.mongodb.org/mongo-driver/bson"
+
+	"github.com/orkestra/backend/internal/core/llm/models"
 )
 
 // Per-subject selectors of the DSR pipeline. The export, the erasure and the
@@ -11,6 +13,13 @@ import (
 // userUUIDFilter: llm_grants, llm_usage and llm_user_accounts rows keyed on the
 // subject's userUuid.
 func userUUIDFilter(userUUID string) bson.M { return bson.M{"userUuid": userUUID} }
+
+// finalizedByUserFilter: the subject's usage rows a hard delete removes (the
+// pending ones, whose reservation is still in the rollup, are anonymized
+// instead). CountByUser counts userUUIDFilter, the union of both.
+func finalizedByUserFilter(userUUID string) bson.M {
+	return bson.M{"userUuid": userUUID, "outcome": bson.M{"$ne": models.OutcomePending}}
+}
 
 // createdByFilter: llm_credentials and llm_models created by the subject.
 func createdByFilter(userUUID string) bson.M { return bson.M{"createdBy": userUUID} }

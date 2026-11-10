@@ -311,7 +311,7 @@ const anonymizeBatch = 500
 // them.
 func (r *Usage) DeleteByUser(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure hard delete of the subject's usage rows across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID, "outcome": bson.M{"$ne": models.OutcomePending}})
+	res, err := r.coll.DeleteMany(ctx, finalizedByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

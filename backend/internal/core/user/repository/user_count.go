@@ -7,6 +7,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
+// preferencesByUserFilter selects the subject's user_preferences rows;
+// DeleteByUser and CountByUser share it.
+func preferencesByUserFilter(userUUID string) bson.M { return bson.M{"userUuid": userUUID} }
+
 // rowByUUIDFilter selects the user row whatever its state (live or
 // soft-deleted); HardDelete and CountByID share it.
 func rowByUUIDFilter(id string) bson.M { return bson.M{"uuid": id} }

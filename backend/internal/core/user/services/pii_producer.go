@@ -134,7 +134,9 @@ type (
 // plus the identity row, counted with the filters the purge uses. The identity
 // row counts as one in both modes (anonymize rewrites it, hard delete removes
 // it). A soft-deleted tombstone is counted too, because a hard delete would
-// remove it; an anonymize of a tombstone finds nothing to rewrite.
+// remove it. This is the larger, binding figure: an EraseAnonymize purge of
+// an existing tombstone rewrites nothing (its live-row filter finds no row) and
+// reports 0 identity rows, so for that case the preview over-reports by one.
 func (p *piiProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
 	var out iface.PersonalDataCount
 	if p.prefRepo != nil {
