@@ -210,3 +210,52 @@ func TestListCursorPagesAcrossEqualRequestedAt(t *testing.T) {
 		t.Fatalf("userUuid filter = %+v", rows)
 	}
 }
+
+// getFailsAfterClose fails Get once the request is closed_partial.
+type getFailsAfterClose struct{ *erasuretest.MemRepo }
+
+func (g getFailsAfterClose) Get(ctx context.Context, id string) (*models.ErasureRequest, error) {
+	row, err := g.MemRepo.Get(ctx, id)
+	if err == nil && row.Status == models.ErasureRequestClosedPartial {
+		return nil, errors.New("mongo blip")
+	}
+	return row, err
+}
+
+func TestClosePartialAuditsReceiptWhenTheRereadFails(t *testing.T) {
+	t.Parallel()
+	mem := erasuretest.NewMemRepo()
+	mem.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}, RequestedAt: erasureT0})
+	dsr, _ := newDSRService(&stubProducer{subject: "user"})
+	sink := &capturingAuditSink{}
+	svc := NewErasureRequestService(getFailsAfterClose{mem}, dsr, sink, nil)
+	svc.now = func() time.Time { return erasureT0 }
+	if _, err := svc.ClosePartial(context.Background(), "r-1", "op-1", "module removed"); err == nil {
+		t.Fatal("want the reread error")
+	}
+	evs := receiptEvents(sink)
+	if len(evs) != 1 || evs[0].Metadata["status"] != models.ErasureRequestClosedPartial || evs[0].Metadata["executedBy"] != "op-1" {
+		t.Fatalf("events = %+v", evs)
+	}
+	if ab, _ := evs[0].Metadata["abandoned"].([]string); len(ab) != 1 || ab[0] != "gone" {
+		t.Fatalf("abandoned = %v", evs[0].Metadata["abandoned"])
+	}
+}
+
+func TestWorkerCompletedRequestReceiptIsAuditedAsSystem(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	due := erasureT0.Add(-time.Minute)
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, ResolvedBy: "op-1",
+		Mode: "hard_delete", Attempts: 1, NextAttemptAt: &due, RequestedAt: erasureT0.Add(-time.Hour),
+		Progress: []models.ErasureProducerProgress{pendingProgress("user")}})
+	svc, sink := newCloseSvc(repo, &stubProducer{subject: "user"})
+	if ok, err := svc.RetryDue(context.Background()); err != nil || !ok {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	evs := receiptEvents(sink)
+	if len(evs) != 1 || evs[0].ActorType != "system" || evs[0].ActorUserID != erasureWorkerActor || evs[0].Metadata["executedBy"] != "op-1" {
+		t.Fatalf("events = %+v", evs)
+	}
+}

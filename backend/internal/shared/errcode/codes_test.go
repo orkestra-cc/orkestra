@@ -66,6 +66,7 @@ var goldenCodes = map[string]string{
 	"ComplianceErasureAlreadyApproved":       "compliance.erasure_already_approved",
 	"ComplianceErasureModeMismatch":          "compliance.erasure_mode_mismatch",
 	"ComplianceErasureReceiptUnavailable":    "compliance.erasure_receipt_unavailable",
+	"ComplianceInvalidCursor":                "compliance.invalid_cursor",
 	"ComplianceReasonRequired":               "compliance.reason_required",
 	"AuthEmailInUse":                         "auth.email_in_use",
 	"AuthJWTNotConfigured":                   "auth.jwt_not_configured",

@@ -125,7 +125,7 @@ func (s *ErasureRequestService) emitReceipt(ctx context.Context, row *models.Era
 		return
 	}
 	actorType := models.ActorTypeUser
-	if actor == "" {
+	if actor == "" || actor == erasureWorkerActor {
 		actorType = models.ActorTypeSystem
 	}
 	s.sink.Emit(ctx, iface.AuditEvent{

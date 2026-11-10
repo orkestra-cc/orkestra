@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -280,7 +283,7 @@ func TestErasureListStatusFilterAndPaging(t *testing.T) {
 		t.Fatalf("all = %+v, %v", all, err)
 	}
 	_, err = h.List(ctx, &ListErasureRequestsInput{After: "garbage!"})
-	assertStatus(t, err, 422)
+	assertCoded(t, err, 422, errcode.ComplianceInvalidCursor)
 }
 
 func TestErasureReceiptHandler(t *testing.T) {
@@ -313,5 +316,37 @@ func TestErasureReceiptRouteIsInTheReadGroup(t *testing.T) {
 	item := api.OpenAPI().Paths["/v1/admin/compliance/erasure-requests/{id}/receipt"]
 	if item == nil || item.Get == nil {
 		t.Fatal("receipt must be a GET in the audit.read group")
+	}
+}
+
+func TestErasureListRouteWithoutQueryParams(t *testing.T) {
+	t.Parallel()
+	repo := seeded(
+		models.ErasureRequest{UUID: "p", Status: models.ErasureRequestPending, RequestedAt: time.Now()},
+		models.ErasureRequest{UUID: "c", Status: models.ErasureRequestCompleted, RequestedAt: time.Now()},
+	)
+	r := chi.NewRouter()
+	api := humachi.New(r, huma.DefaultConfig("test", "1.0.0"))
+	RegisterErasureRequestAdminReadRoutes(api, newErasureHandler(repo, newDSR()))
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/compliance/erasure-requests", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Items []models.ErasureRequest `json:"items"`
+		Next  string                  `json:"next"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 || body.Items[0].UUID != "p" || body.Next != "" {
+		t.Fatalf("body = %s", rec.Body)
+	}
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/compliance/erasure-requests?status=completed&after=%25%25", nil))
+	if rec.Code != 422 || !strings.Contains(rec.Body.String(), errcode.ComplianceInvalidCursor) {
+		t.Fatalf("bad cursor: %d %s", rec.Code, rec.Body)
 	}
 }

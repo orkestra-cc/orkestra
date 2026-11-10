@@ -70,19 +70,22 @@ const defaultErasureListLimit = 50
 // List returns requests by status, newest first, paged by cursor.
 func (h *ErasureRequestHandler) List(ctx context.Context, in *ListErasureRequestsInput) (*ListErasureRequestsOutput, error) {
 	f := repository.ErasureListFilter{UserUUID: in.UserUUID, Limit: in.Limit, After: in.After}
-	switch in.Status {
-	case "", "open":
+	isOpen := in.Status == "" || in.Status == "open"
+	switch {
+	case isOpen:
 		f.Statuses = []string{models.ErasureRequestPending, models.ErasureRequestIncomplete}
-	case "all":
+	case in.Status == "all":
 	default:
 		f.Statuses = []string{in.Status}
 	}
-	if f.Limit == 0 && len(f.Statuses) != 2 {
+	// open lists every open request unless a limit is given (as before paging
+	// existed); the other statuses default to a page of 50.
+	if f.Limit == 0 && !isOpen {
 		f.Limit = defaultErasureListLimit
 	}
 	items, next, err := h.svc.List(ctx, f)
 	if errors.Is(err, repository.ErrErasureCursorInvalid) {
-		return nil, huma.Error422UnprocessableEntity("invalid cursor")
+		return nil, errcode.UnprocessableEntity(errcode.ComplianceInvalidCursor, "The cursor is not valid; restart the listing without it.")
 	}
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list erasure requests", err)

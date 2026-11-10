@@ -863,6 +863,9 @@ const ComplianceErasureModeMismatch = "compliance.erasure_mode_mismatch"
 // rejected). 409.
 const ComplianceErasureReceiptUnavailable = "compliance.erasure_receipt_unavailable"
 
+// ComplianceInvalidCursor signals a list cursor the server did not issue. 422.
+const ComplianceInvalidCursor = "compliance.invalid_cursor"
+
 // ComplianceReasonRequired signals a reason or note outside 1 to 500
 // characters. 422.
 const ComplianceReasonRequired = "compliance.reason_required"

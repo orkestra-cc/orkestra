@@ -60,6 +60,9 @@ var ErrErasureAlreadyApproved = errors.New("compliance: the operator already app
 // request locked.
 var ErrErasureModeMismatch = errors.New("compliance: the erasure mode differs from the one the request locked")
 
+// erasureWorkerActor is the audit actor of a request the retry worker completed.
+const erasureWorkerActor = "system:erasure-retry"
+
 const (
 	minRequiredApprovals = 1
 	maxRequiredApprovals = 5
@@ -422,6 +425,12 @@ func (s *ErasureRequestService) ClosePartial(ctx context.Context, requestUUID, c
 	}
 	closed, err := s.repo.Get(ctx, requestUUID)
 	if err != nil {
+		// The close is written; still audit the receipt from the row in hand.
+		at := s.now()
+		rowClosed := *row
+		rowClosed.Status, rowClosed.Abandoned, rowClosed.ResolutionNote = models.ErasureRequestClosedPartial, keys, note
+		rowClosed.ResolvedAt, rowClosed.ResolvedBy = &at, closedBy
+		s.emitReceipt(ctx, &rowClosed, closedBy)
 		return nil, err
 	}
 	s.emitReceipt(ctx, closed, closedBy)
@@ -507,7 +516,7 @@ func (s *ErasureRequestService) ExecuteInMode(ctx context.Context, requestUUID, 
 	if err != nil {
 		return nil, err
 	}
-	return s.run(ctx, row)
+	return s.run(ctx, row, false)
 }
 
 // distinctApprovers counts the distinct operators on the request plus actor.
@@ -559,7 +568,7 @@ func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID
 	if err := s.repo.Insert(ctx, row); err != nil {
 		return nil, err
 	}
-	return s.run(ctx, row)
+	return s.run(ctx, row, false)
 }
 
 // RetryDue claims the next incomplete request whose retry is due and runs its
@@ -574,7 +583,7 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 	if row == nil {
 		return false, nil
 	}
-	if _, err := s.run(ctx, row); err != nil {
+	if _, err := s.run(ctx, row, true); err != nil {
 		s.logger.Warn("compliance: erasure retry run failed",
 			slog.String("request", row.UUID), slog.String("error", err.Error()))
 	}
@@ -592,7 +601,7 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 // the lease was lost the outcome is not stored: the request is reported as it
 // is stored, incomplete, and the worker re-runs the remaining producers once
 // the lease expires (or the newer holder's state stands).
-func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest) (*ErasureOutcome, error) {
+func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest, byWorker bool) (*ErasureOutcome, error) {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), erasureRunLease/2)
 	defer cancel()
 	if plan, added := s.dsr.PlanProgress(row.Progress); added {
@@ -655,7 +664,11 @@ func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequ
 		}
 		if st.Status == models.ErasureRequestCompleted {
 			// Only a settle that landed is a transition to completed.
-			s.emitReceipt(context.WithoutCancel(ctx), &settled, settled.ResolvedBy)
+			actor := settled.ResolvedBy
+			if byWorker {
+				actor = erasureWorkerActor
+			}
+			s.emitReceipt(context.WithoutCancel(ctx), &settled, actor)
 		}
 	}
 	if runErr != nil {
