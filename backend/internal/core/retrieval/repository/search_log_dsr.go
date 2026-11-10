@@ -42,6 +42,13 @@ func (r *SearchLogDSR) DeleteByUserAllTenants(ctx context.Context, userUUID stri
 	return deleteInBatches(ctx, r.coll, userSearchFilter(userUUID), allowDSR)
 }
 
+// CountByUserAllTenants counts the rows DeleteByUserAllTenants would delete
+// (same filter): one CountDocuments, no scan.
+func (r *SearchLogDSR) CountByUserAllTenants(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of the subject's search-log rows across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, userSearchFilter(userUUID))
+}
+
 // DeleteBySubject deletes the tenant's rows that returned subject.
 func (r *SearchLogDSR) DeleteBySubject(ctx context.Context, tenantID, subject string) (int64, error) {
 	return deleteInBatches(ctx, r.coll, bson.M{"tenantId": tenantID, "subjects": subject}, allowDSR)

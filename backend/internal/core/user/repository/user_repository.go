@@ -348,7 +348,7 @@ func (r *mongoUserRepository) Delete(ctx context.Context, id string) error {
 // simply be soft-deleted. Idempotent: missing rows return ErrUserNotFound
 // so callers can tell a no-op from a hit.
 func (r *mongoUserRepository) HardDelete(ctx context.Context, id string) error {
-	result, err := r.collection.DeleteOne(ctx, bson.M{"uuid": id})
+	result, err := r.collection.DeleteOne(ctx, rowByUUIDFilter(id))
 	if err != nil {
 		return fmt.Errorf("failed to hard-delete user: %w", err)
 	}

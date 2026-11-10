@@ -2359,7 +2359,8 @@
         "toastUnlocked": "Account unlocked successfully",
         "toastFailure": "Unable to modify account status",
         "errorGeneric": "Error during operation"
-      }
+      },
+      "dataSubjectRequests": "Data subject requests"
     }
   },
   "adminUsers": {
@@ -2519,7 +2520,8 @@
       "retention": "Retention",
       "auditEvents": "Audit Events",
       "policies": "Policies",
-      "changeRequests": "Requests"
+      "changeRequests": "Requests",
+      "subject": "Subject"
     },
     "stats": {
       "pendingErasures": {
@@ -2562,7 +2564,8 @@
         "reason": "Reason",
         "status": "Status",
         "requested": "Requested",
-        "actions": "Actions"
+        "actions": "Actions",
+        "approvals": "Approvals"
       },
       "execute": "Execute",
       "reject": "Reject",
@@ -2570,6 +2573,8 @@
       "executeError": "Execute failed (or blocked by a legal hold)",
       "rejectSuccess": "Request rejected",
       "rejectError": "Reject failed",
+      "rejectTitle": "Reject this erasure request",
+      "rejectBody": "The request is closed without erasing anything. Give the reason (it is stored, with personal data masked).",
       "close": "Close",
       "closeTitle": "Close a partial erasure",
       "closeBody": "These producers are no longer installed and will never finish: {{keys}}. Closing records the erasure as partial; it cannot be undone.",
@@ -2582,16 +2587,101 @@
       "retriesExhausted": "Automatic retries exhausted",
       "lastError": {
         "legal_hold_active": "Blocked by a legal hold",
-        "run_failed": "Last run failed"
+        "run_failed": "Last run failed",
+        "retention_minimum": "Blocked by the minimum retention period"
       },
       "busy": "Another run is in progress; try again in a few minutes",
       "source": {
         "self_service": "Self-service",
-        "retention": "Retention"
+        "retention": "Retention",
+        "admin": "Admin"
       },
       "emptyMessage": "No open erasure requests.",
       "emptyHint": "Erasure requests awaiting review or retry will appear here.",
-      "searchPlaceholder": "Search by subject or reason"
+      "searchPlaceholder": "Search by subject or reason",
+      "approvalsNeeded": "Approvals {{have}}/{{need}}: more approvers needed before this can run",
+      "loadMore": "Load more",
+      "loadMoreError": "Could not load more requests",
+      "emptyFiltered": "No erasure requests with this status.",
+      "filter": {
+        "label": "Status filter",
+        "open": "Open",
+        "completed": "Completed",
+        "rejected": "Rejected",
+        "closed_partial": "Closed (partial)",
+        "all": "All"
+      },
+      "mode": {
+        "hard_delete": "Hard delete",
+        "anonymize": "Anonymize"
+      },
+      "open": {
+        "button": "New request",
+        "title": "Open an erasure request",
+        "subject": "Subject userUuid",
+        "mode": "Mode",
+        "reason": "Reason",
+        "required": "Required",
+        "submit": "Open request",
+        "success": "Erasure request opened",
+        "error": "Could not open the request"
+      },
+      "approve": {
+        "button": "Approve",
+        "title": "Approve erasure",
+        "note": "Note",
+        "submit": "Approve",
+        "success": "Approval recorded",
+        "error": "Approval failed"
+      },
+      "receipt": {
+        "open": "Receipt",
+        "title": "Erasure receipt",
+        "download": "Download JSON",
+        "close": "Close",
+        "completedAt": "Completed",
+        "totals": "Rows",
+        "totalsValue": "{{deleted}} deleted, {{anonymized}} anonymized",
+        "producer": "Producer",
+        "error": "Receipt unavailable"
+      },
+      "errors": {
+        "erasure_approvals_missing": "Not enough approvals: {{have}} of {{need}}",
+        "erasure_self_approval": "You cannot open, approve or execute the erasure of your own account",
+        "erasure_already_approved": "You have already approved this request",
+        "erasure_mode_mismatch": "The mode differs from the one already approved",
+        "erasure_request_exists": "An open request already exists for this subject ({{requestId}})",
+        "erasure_request_busy": "Another run is in progress; try again in a few minutes",
+        "legal_hold_active": "Blocked by a legal hold",
+        "retention_minimum_not_met": "Hard delete is not allowed before {{date}} ({{reasons}}); anonymize instead",
+        "retention_check_unavailable": "The retention check is unavailable; try again later",
+        "reason_required": "The reason or note must be 1 to 500 characters",
+        "invalid_cursor": "The page cursor is no longer valid; reload the list",
+        "erasure_receipt_unavailable": "The receipt is not available for this request",
+        "erasure_request_started": "The request has already started and can no longer be rejected",
+        "erasure_request_not_closable": "This request cannot be closed as partial",
+        "erasure_close_note_required": "A note is required to close the request",
+        "legal_hold_expiry_past": "The expiry date must be in the future",
+        "export_storage_unavailable": "Export storage is unavailable; try again later",
+        "export_erasure_in_progress": "An erasure of this subject is in progress; exports are blocked",
+        "export_expired": "This export has expired",
+        "export_not_found": "Export not found",
+        "subject_not_found": "No user matches this subject UUID."
+      },
+      "retentionReason": {
+        "platform_minimum": "platform minimum retention"
+      },
+      "outcome": {
+        "done": "Done",
+        "pending": "Pending",
+        "failed": "Failed"
+      },
+      "execute_modal": {
+        "title": "Execute erasure",
+        "mode": "Mode",
+        "locked": "Mode locked by the request",
+        "submit": "Execute"
+      }
     },
     "holds": {
       "columns": {
@@ -2600,7 +2690,8 @@
         "case": "Case",
         "status": "Status",
         "placed": "Placed",
-        "actions": "Actions"
+        "actions": "Actions",
+        "dates": "Review / expiry"
       },
       "form": {
         "subjectLabel": "Subject userUuid",
@@ -2618,7 +2709,37 @@
       "releaseError": "Release failed",
       "emptyMessage": "No active legal holds.",
       "emptyHint": "Place a hold above to block erasure of a subject under litigation.",
-      "searchPlaceholder": "Search by subject, reason or case"
+      "searchPlaceholder": "Search by subject, reason or case",
+      "reviewAt": "Review date",
+      "expiresAt": "Expiry date",
+      "reviewDue": "Review due",
+      "expired": "Expired",
+      "showReleased": "Show released",
+      "releaseModal": {
+        "title": "Release legal hold",
+        "body": "Releasing the hold lets the subject's erasure proceed. State why it is released."
+      },
+      "edit": {
+        "open": "Edit",
+        "title": "Edit legal hold",
+        "reviewAt": "Review date",
+        "expiresAt": "Expiry date",
+        "clearReviewAt": "Clear the review date",
+        "clearExpiresAt": "Clear the expiry date",
+        "expiryHint": "The hold is released automatically on this date.",
+        "submit": "Save",
+        "success": "Legal hold updated",
+        "error": "Update failed"
+      },
+      "notes": {
+        "readOnly": "This hold has ended, so notes can no longer be added.",
+        "open": "Notes ({{count}})",
+        "title": "Hold notes",
+        "empty": "No notes yet.",
+        "label": "Add a note",
+        "add": "Add note",
+        "error": "Could not add the note"
+      }
     },
     "retention": {
       "previewTitle": "Retention cleanup preview (dry run)",
@@ -2919,6 +3040,60 @@
       "applied": "Policy of the tenant updated.",
       "sentForApproval": "Request sent for approval.",
       "error": "The assignment could not be saved."
+    },
+    "subject": {
+      "userUuid": "Subject userUuid",
+      "load": "Load",
+      "emptyMessage": "No subject selected.",
+      "emptyHint": "Enter a user UUID to preview an erasure, export the subject's data or open an erasure request.",
+      "loadError": "Could not load the preview",
+      "previewTitle": "Erasure preview",
+      "hardDeleteAllowed": "Hard delete allowed",
+      "hardDeleteBlocked": "Hard delete blocked",
+      "anonymizeAllowed": "Anonymize allowed",
+      "anonymizeBlocked": "Anonymize blocked",
+      "holds": "Legal holds",
+      "noHolds": "none",
+      "retention": "Retention",
+      "retentionUnavailable": "the retention check is unavailable",
+      "noRetention": "no minimum retention applies",
+      "retainUntil": "keep until {{date}} ({{reasons}})",
+      "openRequests": "Open erasure requests",
+      "producers": {
+        "title": "Personal data by producer",
+        "note": "Counts are per producer and can overlap (some producers share rows): they are not added into a total.",
+        "empty": "No producers reported.",
+        "key": "Producer",
+        "rows": "Rows",
+        "collections": "Collections",
+        "notCountable": "not countable",
+        "search": "Search producers"
+      },
+      "exportJson": "Export JSON",
+      "exportCsv": "Export CSV",
+      "openErasure": "Open erasure request",
+      "exportModal": {
+        "title": "Export subject data ({{format}})",
+        "body": "The export is stored for a limited time and can be downloaded from the list below. State why it is needed.",
+        "submit": "Create export"
+      },
+      "exportSuccess": "Export created",
+      "exportError": "Could not create the export",
+      "downloadError": "Could not download the export",
+      "exports": {
+        "title": "Exports",
+        "empty": "No exports for this subject.",
+        "search": "Search exports",
+        "format": "Format",
+        "reason": "Reason",
+        "created": "Created",
+        "expires": "Expires",
+        "expired": "Expired",
+        "download": "Download",
+        "actions": "Actions"
+      },
+      "invalidUuid": "Enter a valid user UUID",
+      "holdExpired": "No longer blocking (expired)"
     }
   },
   "adminComplianceSoc2": {

@@ -770,3 +770,5 @@ module compose and preview notification templates without importing this module'
 - [ADR-0024](../../../../docs/adr/0024-core-jobs-module.md) — jobs framework that runs `push_tokens_cleanup`
 - [ADR-0021](../../../../docs/adr/0021-explicit-sender-selection.md) — explicit sender selection under operator policy
 - [`docs/site/architecture/authentication-flow.mdx`](../../../../docs/site/architecture/authentication-flow.mdx) — how auth consumes this module
+
+- **DSR dry-run count.** `piiProducer` implements `iface.PIIProducerCounter`: messages and preferences with the filters (`messagesFilter`, `preferencesFilter`) its export and purge use, push registrations through `DeviceTokenRepository.CountForUser` (`userTierFilter`, both tiers).

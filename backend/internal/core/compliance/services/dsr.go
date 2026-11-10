@@ -42,11 +42,14 @@ type LegalHoldChecker interface {
 // can add a job table and run DSRs asynchronously if the round-trip
 // becomes a UX issue.
 type DSRService struct {
-	registry    *iface.PIIProducerRegistry
-	sink        iface.AuditSink
-	logger      *slog.Logger
-	holdChecker LegalHoldChecker
-	warnedKeys  sync.Map // suffixed producer keys already warned about
+	registry      *iface.PIIProducerRegistry
+	sink          iface.AuditSink
+	logger        *slog.Logger
+	holdChecker   LegalHoldChecker
+	retentionGate *RetentionGate
+	subjectLookup SubjectLookup
+	warnedKeys    sync.Map      // suffixed producer keys already warned about
+	countTimeout  time.Duration // per-producer count timeout; 0 = producerCountTimeout
 }
 
 // SetLegalHoldChecker wires the legal-hold gate. When set, Erase refuses to
@@ -128,7 +131,7 @@ func (s *DSRService) keysFor(ps []iface.PIIProducer) []string {
 func (s *DSRService) exportOne(ctx context.Context, p iface.PIIProducer, key, userUUID string) (data any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.logProducerPanic("export", p, key, userUUID, r)
+			s.logProducerPanic("export", p.Subject(), key, userUUID, r)
 			data, err = nil, errProducerPanicked
 		}
 	}()
@@ -140,16 +143,17 @@ func (s *DSRService) exportOne(ctx context.Context, p iface.PIIProducer, key, us
 func (s *DSRService) purgeOne(ctx context.Context, p iface.PIIProducer, key, userUUID string, mode iface.EraseMode) (res iface.PurgeResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.logProducerPanic("purge", p, key, userUUID, r)
+			s.logProducerPanic("purge", p.Subject(), key, userUUID, r)
 			res, err = iface.PurgeResult{}, errProducerPanicked
 		}
 	}()
 	return p.PurgePersonalData(ctx, userUUID, mode)
 }
 
-func (s *DSRService) logProducerPanic(op string, p iface.PIIProducer, key, userUUID string, r any) {
+// logProducerPanic logs a recovered producer panic (export, purge or count).
+func (s *DSRService) logProducerPanic(op, subject, key, userUUID string, r any) {
 	s.logger.Error("DSR: "+op+" producer panicked",
-		slog.String("subject", p.Subject()),
+		slog.String("subject", subject),
 		slog.String("key", key),
 		slog.String("userUuid", userUUID),
 		slog.String("panic", fmt.Sprint(r)),
@@ -205,6 +209,13 @@ func (s *DSRService) PlanProgress(prior []models.ErasureProducerProgress) (plan 
 // present; producer keys are added only when the producer returned
 // non-nil data. An audit row is emitted on completion.
 func (s *DSRService) Export(ctx context.Context, userUUID string) (*ExportResult, error) {
+	return s.ExportAs(ctx, userUUID, userUUID)
+}
+
+// ExportAs is Export performed by actor on behalf of the subject (an operator
+// answering a right-of-access request). The audit row names actor; the
+// resource stays the subject.
+func (s *DSRService) ExportAs(ctx context.Context, userUUID, actor string) (*ExportResult, error) {
 	result := &ExportResult{
 		Bundle: iface.PersonalDataBundle{
 			"metadata": map[string]any{
@@ -237,7 +248,7 @@ func (s *DSRService) Export(ctx context.Context, userUUID string) (*ExportResult
 		}
 	}
 
-	s.emitAudit(ctx, userUUID, "gdpr.dsr.exported", map[string]any{
+	s.emitAuditAs(ctx, actor, userUUID, "gdpr.dsr.exported", map[string]any{
 		"producers": result.Producers,
 		"errors":    len(result.Errors),
 	})
@@ -292,6 +303,9 @@ func (s *DSRService) Erase(ctx context.Context, userUUID string, mode iface.Eras
 // erasure still reduces personal data and the audit row makes it auditable.
 func (s *DSRService) EraseRemaining(ctx context.Context, userUUID string, mode iface.EraseMode, prior []models.ErasureProducerProgress) (*EraseResult, error) {
 	if err := s.CheckLegalHold(ctx, userUUID); err != nil {
+		return nil, err
+	}
+	if err := s.CheckRetention(ctx, userUUID, mode); err != nil {
 		return nil, err
 	}
 
@@ -371,11 +385,15 @@ func parseEraseMode(label string) iface.EraseMode {
 }
 
 func (s *DSRService) emitAudit(ctx context.Context, userUUID, action string, metadata map[string]any) {
+	s.emitAuditAs(ctx, userUUID, userUUID, action, metadata)
+}
+
+func (s *DSRService) emitAuditAs(ctx context.Context, actor, userUUID, action string, metadata map[string]any) {
 	if s.sink == nil {
 		return
 	}
 	s.sink.Emit(ctx, iface.AuditEvent{
-		ActorUserID:  userUUID,
+		ActorUserID:  actor,
 		ActorType:    "user",
 		Action:       action,
 		ResourceType: "user",

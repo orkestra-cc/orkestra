@@ -90,6 +90,13 @@ func (s *RetentionService) RunOnce(ctx context.Context) (int, error) {
 				slog.String("userUuid", id))
 			continue
 		}
+		if errors.Is(err, ErrLegalHoldActive) || errors.Is(err, ErrRetentionMinimum) {
+			// Held, or still inside a retention obligation: nothing is
+			// recorded; a later run reconsiders the subject.
+			s.logger.Debug("retention: subject is held or inside a retention obligation; skipped",
+				slog.String("userUuid", id))
+			continue
+		}
 		if err != nil {
 			s.logger.Warn("retention: skip subject",
 				slog.String("userUuid", id),

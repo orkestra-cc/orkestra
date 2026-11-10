@@ -14,7 +14,11 @@
 // rename.
 package errcode
 
-import "net/http"
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+)
 
 // Error is the response envelope for code-bearing handler failures.
 // JSON tags are the wire format consumed by the SPA — do not rename
@@ -31,6 +35,12 @@ type Error struct {
 	// body — the {status,title,detail,code} envelope is a frozen wire
 	// contract. Retry-After on a 429 is the motivating case.
 	Headers http.Header `json:"-"`
+
+	// Extensions are additional top-level members of the response body (for
+	// example the date a refusal lifts). They are added next to, never over,
+	// the frozen {status,title,detail,code} members; empty means the body is
+	// exactly the envelope.
+	Extensions map[string]any `json:"-"`
 
 	// expectedUnavailable marks a 503 the handler returns on purpose because
 	// an optional feature is not configured on this installation — see
@@ -67,6 +77,61 @@ func (e *Error) WithHeader(k, v string) *Error {
 	}
 	e.Headers.Set(k, v)
 	return e
+}
+
+// WithExtension adds one top-level member to the response body and returns
+// the receiver. The envelope members cannot be overridden.
+func (e *Error) WithExtension(k string, v any) *Error {
+	if e.Extensions == nil {
+		e.Extensions = map[string]any{}
+	}
+	e.Extensions[k] = v
+	return e
+}
+
+// envelopeMembers are the body members an extension may never take, whether
+// or not the envelope currently writes them (omitempty members included).
+var envelopeMembers = map[string]bool{
+	"status": true, "title": true, "detail": true, "code": true,
+	"errors": true, "instance": true, "type": true,
+}
+
+// encodeNoEscape marshals v like huma's default format: HTML characters
+// (& < >) are not escaped. The encoder's trailing newline is dropped.
+func encodeNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// MarshalJSON writes the envelope, plus Extensions when there are any. HTML
+// characters are left unescaped, as huma's own encoder does, so bodies without
+// extensions are byte-identical to the plain struct encoding.
+func (e *Error) MarshalJSON() ([]byte, error) {
+	type envelope Error // no methods: avoids recursing into MarshalJSON
+	base, err := encodeNoEscape((*envelope)(e))
+	if err != nil || len(e.Extensions) == 0 {
+		return base, err
+	}
+	m := map[string]json.RawMessage{}
+	if err := json.Unmarshal(base, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range e.Extensions {
+		if envelopeMembers[k] {
+			continue
+		}
+		raw, err := encodeNoEscape(v)
+		if err != nil {
+			return nil, err
+		}
+		m[k] = raw
+	}
+	return encodeNoEscape(m)
 }
 
 // New constructs an Error with an arbitrary status. Prefer the named

@@ -45,5 +45,17 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 	if err != nil {
 		return iface.PurgeResult{}, err
 	}
-	return iface.PurgeResult{RowsDeleted: int(n), Collections: []string{"tenant_memberships"}}, nil
+	return iface.PurgeResult{RowsDeleted: int(n), Collections: []string{repository.CollMemberships}}, nil
 }
+
+// CountPersonalData implements iface.PIIProducerCounter with the purge's
+// filter (every membership row, expired ones included).
+func (p *piiProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	n, err := p.repo.CountMembershipsByUser(ctx, userUUID)
+	if err != nil || n == 0 {
+		return iface.PersonalDataCount{}, err
+	}
+	return iface.PersonalDataCount{Rows: int(n), Collections: []string{repository.CollMemberships}}, nil
+}
+
+var _ iface.PIIProducerCounter = (*piiProducer)(nil)

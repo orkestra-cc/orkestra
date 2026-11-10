@@ -95,3 +95,25 @@ func TestCollections_OneActiveRetentionErasurePerSubject(t *testing.T) {
 	}
 	t.Fatalf("%s: missing unique userUuid index partial on {status: incomplete, source: retention}", models.ErasureRequestsCollection)
 }
+
+func TestCollections_DSRExports(t *testing.T) {
+	var idx []module.IndexSpec
+	for _, c := range NewModule().Collections() {
+		if c.Name == models.DSRExportsCollection {
+			idx = c.Indexes
+		}
+	}
+	got := map[string]bool{}
+	for _, i := range idx {
+		got[indexKeys(i)] = i.Unique
+	}
+	if len(idx) != 3 || !got["uuid"] || got["userUuid"] || got["expiresAt"] {
+		t.Fatalf("indexes = %+v", idx)
+	}
+	if _, ok := got["userUuid"]; !ok {
+		t.Fatal("userUuid index missing")
+	}
+	if _, ok := got["expiresAt"]; !ok {
+		t.Fatal("expiresAt index missing")
+	}
+}

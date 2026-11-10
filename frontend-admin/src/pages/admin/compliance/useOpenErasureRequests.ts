@@ -1,7 +1,8 @@
 import {
   complianceApi,
   useListErasureRequestsQuery,
-  type ErasureRequest
+  type ErasureRequest,
+  type ListErasureRequestsArgs
 } from 'store/api/complianceApi';
 
 // The backend retry worker ticks every minute and changes incomplete requests
@@ -21,9 +22,12 @@ export const erasureRefreshInterval = (items?: ErasureRequest[]): number =>
 // on the compliance page (KPI card and tab). It reads the cached list without
 // subscribing to derive the interval, then subscribes with it, so RTK Query
 // owns the polling lifecycle and stops it once nothing is scheduled.
-export const useOpenErasureRequests = () => {
+// The tab passes its status filter: `open` (the default) uses the argument-less
+// cache entry the KPI card shares; other statuses are plain, unpolled queries.
+export const useOpenErasureRequests = (args?: ListErasureRequestsArgs) => {
+  const isOpen = !args?.status || args.status === 'open';
   const { data } = complianceApi.endpoints.listErasureRequests.useQueryState();
-  return useListErasureRequestsQuery(undefined, {
-    pollingInterval: erasureRefreshInterval(data?.items)
+  return useListErasureRequestsQuery(isOpen ? undefined : args, {
+    pollingInterval: isOpen ? erasureRefreshInterval(data?.items) : 0
   });
 };

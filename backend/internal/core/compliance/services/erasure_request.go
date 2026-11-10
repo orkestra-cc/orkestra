@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,51 @@ var ErrErasureRequestNotClosable = errors.New("compliance: the erasure request s
 
 // ErrErasureCloseNoteRequired is returned by ClosePartial without a valid note.
 var ErrErasureCloseNoteRequired = errors.New("compliance: a note of 1 to 500 characters is required to close an erasure request")
+
+// ErrErasureRequestExists is returned by Open when the subject already has a
+// pending or incomplete request; the concrete error is *ErasureRequestExistsError.
+var ErrErasureRequestExists = errors.New("compliance: the subject already has an open erasure request")
+
+// ErasureRequestExistsError carries the UUID of the subject's open request.
+type ErasureRequestExistsError struct{ UUID string }
+
+func (e *ErasureRequestExistsError) Error() string { return ErrErasureRequestExists.Error() }
+func (e *ErasureRequestExistsError) Is(target error) bool {
+	return target == ErrErasureRequestExists
+}
+
+// ErrErasureApprovalsMissing is returned by Execute of a pending request with
+// fewer distinct approvals than it requires; the concrete error is
+// *ErasureApprovalsMissingError.
+var ErrErasureApprovalsMissing = errors.New("compliance: the erasure request lacks the required approvals")
+
+// ErasureApprovalsMissingError reports the distinct approvals the request would
+// have with the executor counted (Have) and the number it requires (Need).
+type ErasureApprovalsMissingError struct{ Have, Need int }
+
+func (e *ErasureApprovalsMissingError) Error() string { return ErrErasureApprovalsMissing.Error() }
+func (e *ErasureApprovalsMissingError) Is(target error) bool {
+	return target == ErrErasureApprovalsMissing
+}
+
+// ErrErasureSelfApproval is returned when the data subject is the operator who
+// opens, approves or executes their own erasure request.
+var ErrErasureSelfApproval = errors.New("compliance: an operator cannot act on their own erasure request")
+
+// ErrErasureAlreadyApproved is returned when the operator already approved.
+var ErrErasureAlreadyApproved = errors.New("compliance: the operator already approved this erasure request")
+
+// ErrErasureModeMismatch is returned when the mode differs from the one the
+// request locked.
+var ErrErasureModeMismatch = errors.New("compliance: the erasure mode differs from the one the request locked")
+
+// erasureWorkerActor is the audit actor of a request the retry worker completed.
+const erasureWorkerActor = "system:erasure-retry"
+
+const (
+	minRequiredApprovals = 1
+	maxRequiredApprovals = 5
+)
 
 const (
 	// ErasureRetryMaxAttempts bounds the automatic retries of one request;
@@ -60,8 +106,11 @@ type erasureRequestRepo interface {
 	Insert(ctx context.Context, req *models.ErasureRequest) error
 	Get(ctx context.Context, uuid string) (*models.ErasureRequest, error)
 	ListByStatus(ctx context.Context, statuses ...string) ([]models.ErasureRequest, error)
+	List(ctx context.Context, f repository.ErasureListFilter) ([]models.ErasureRequest, string, error)
 	Resolve(ctx context.Context, uuid, status, resolvedBy, mode, note string) error
-	Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time) (*models.ErasureRequest, error)
+	Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time, approval *models.ErasureApproval) (*models.ErasureRequest, error)
+	AddApproval(ctx context.Context, uuid, mode string, a models.ErasureApproval) (*models.ErasureRequest, error)
+	HasOpen(ctx context.Context, userUUID string) (string, bool, error)
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, maxAttempts int) (*models.ErasureRequest, error)
 	RecordProgress(ctx context.Context, uuid string, leaseUntil time.Time, progress []models.ErasureProducerProgress) error
 	Settle(ctx context.Context, uuid string, leaseUntil time.Time, s repository.ErasureSettlement) error
@@ -87,6 +136,23 @@ type ErasureRequestService struct {
 	now    func() time.Time
 
 	settleFloor time.Duration // erasureSettleFloor; shortened by tests
+
+	requiredApprovals func(context.Context) int // nil: 1
+}
+
+// SetRequiredApprovals installs the source of erasure_required_approvals, read
+// when a request is created (Lodge, Open) and snapshotted on the row.
+func (s *ErasureRequestService) SetRequiredApprovals(f func(context.Context) int) {
+	s.requiredApprovals = f
+}
+
+// snapshotApprovals is the configured number of distinct approvals, clamped to 1-5.
+func (s *ErasureRequestService) snapshotApprovals(ctx context.Context) int {
+	n := minRequiredApprovals
+	if s.requiredApprovals != nil {
+		n = s.requiredApprovals(ctx)
+	}
+	return min(max(n, minRequiredApprovals), maxRequiredApprovals)
 }
 
 // NewErasureRequestService wires the workflow service to its repo + the DSR
@@ -111,6 +177,8 @@ func (s *ErasureRequestService) Lodge(ctx context.Context, userUUID, tenantID, r
 		Reason:      reason,
 		Status:      models.ErasureRequestPending,
 		RequestedAt: s.now(),
+
+		RequiredApprovals: s.snapshotApprovals(ctx),
 	}
 	if err := s.repo.Insert(ctx, req); err != nil {
 		return nil, err
@@ -118,18 +186,176 @@ func (s *ErasureRequestService) Lodge(ctx context.Context, userUUID, tenantID, r
 	return req, nil
 }
 
-// ListOpen returns requests awaiting operator action or further erasure work.
-func (s *ErasureRequestService) ListOpen(ctx context.Context) ([]models.ErasureRequest, error) {
-	rows, err := s.repo.ListByStatus(ctx, models.ErasureRequestPending, models.ErasureRequestIncomplete)
+// OpenInput is an operator's request to erase a subject.
+type OpenInput struct {
+	UserUUID, Reason, RequestedBy string
+	Mode                          iface.EraseMode
+}
+
+// Open records a pending erasure request an operator opens for a subject
+// (source admin). The reason is mandatory and masked; the requester's approval
+// (note: the reason) is already on the row and locks the mode. A held subject,
+// a hard delete the retention gate refuses, and a subject with an open request
+// are refused and nothing is written. The subject cannot open their own.
+func (s *ErasureRequestService) Open(ctx context.Context, in OpenInput) (*models.ErasureRequest, error) {
+	reason, valid := NormalizeReason(in.Reason)
+	if !valid {
+		return nil, ErrReasonRequired
+	}
+	reason = maskReason(reason)
+	in.UserUUID = NormalizeSubjectUUID(in.UserUUID)
+	if strings.EqualFold(in.RequestedBy, in.UserUUID) {
+		return nil, ErrErasureSelfApproval
+	}
+	if err := s.dsr.requireSubject(ctx, in.UserUUID); err != nil {
+		return nil, err
+	}
+	if err := s.dsr.CheckLegalHold(ctx, in.UserUUID); err != nil {
+		return nil, err
+	}
+	if err := s.dsr.CheckRetention(ctx, in.UserUUID, in.Mode); err != nil {
+		return nil, err
+	}
+	if id, open, err := s.repo.HasOpen(ctx, in.UserUUID); err != nil {
+		return nil, err
+	} else if open {
+		return nil, &ErasureRequestExistsError{UUID: id}
+	}
+	now := s.now()
+	req := &models.ErasureRequest{
+		UUID:              uuid.NewString(),
+		UserUUID:          in.UserUUID,
+		Reason:            reason,
+		Status:            models.ErasureRequestPending,
+		RequestedAt:       now,
+		Source:            models.ErasureSourceAdmin,
+		RequestedBy:       in.RequestedBy,
+		Mode:              eraseModeLabel(in.Mode),
+		RequiredApprovals: s.snapshotApprovals(ctx),
+		Approvals:         []models.ErasureApproval{{By: in.RequestedBy, At: now, Note: reason}},
+	}
+	if err := s.repo.Insert(ctx, req); err != nil {
+		if errors.Is(err, repository.ErrErasureOpenExists) {
+			// Another operator won the race: name the request that holds the subject.
+			if id, open, herr := s.repo.HasOpen(ctx, in.UserUUID); herr == nil && open {
+				return nil, &ErasureRequestExistsError{UUID: id}
+			}
+			return nil, ErrErasureRequestExists
+		}
+		return nil, err
+	}
+	if s.sink != nil {
+		s.sink.Emit(ctx, iface.AuditEvent{
+			ActorUserID:  in.RequestedBy,
+			ActorType:    "user",
+			Action:       "gdpr.dsr.erasure_opened",
+			ResourceType: "erasure_request",
+			ResourceID:   req.UUID,
+			Outcome:      "success",
+			Metadata: map[string]any{
+				"subjectUserUuid":   in.UserUUID,
+				"mode":              req.Mode,
+				"requiredApprovals": req.RequiredApprovals,
+			},
+		})
+	}
+	return req, nil
+}
+
+// Approve records the operator's approval of a pending request and locks its
+// mode on the first one. The subject cannot approve; the note is mandatory and
+// masked. A lost compare-and-set is resolved by re-reading the row, so the
+// caller gets the precise sentinel.
+func (s *ErasureRequestService) Approve(ctx context.Context, requestUUID string, mode iface.EraseMode, actor, note string) (*models.ErasureRequest, error) {
+	note, valid := NormalizeReason(note)
+	if !valid {
+		return nil, ErrReasonRequired
+	}
+	note = maskReason(note)
+	row, err := s.repo.Get(ctx, requestUUID)
 	if err != nil {
 		return nil, err
+	}
+	if actor == row.UserUUID {
+		return nil, ErrErasureSelfApproval
+	}
+	if row.Status != models.ErasureRequestPending {
+		return nil, repository.ErrErasureRequestNotFound
+	}
+	label := eraseModeLabel(mode)
+	got, err := s.repo.AddApproval(ctx, requestUUID, label, models.ErasureApproval{By: actor, At: s.now(), Note: note})
+	if errors.Is(err, repository.ErrErasureApprovalConflict) {
+		return nil, s.approvalConflict(ctx, requestUUID, label, actor)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if s.sink != nil {
+		s.sink.Emit(ctx, iface.AuditEvent{
+			ActorUserID:  actor,
+			ActorType:    "user",
+			Action:       "gdpr.dsr.erasure_approved",
+			ResourceType: "erasure_request",
+			ResourceID:   requestUUID,
+			Outcome:      "success",
+			Metadata: map[string]any{
+				"subjectUserUuid": got.UserUUID,
+				"mode":            got.Mode,
+				"approvals":       len(got.Approvals),
+				"required":        got.RequiredApprovals,
+			},
+		})
+	}
+	return got, nil
+}
+
+// approvalConflict re-reads the request after a lost approval compare-and-set
+// and names why it lost.
+func (s *ErasureRequestService) approvalConflict(ctx context.Context, requestUUID, label, actor string) error {
+	cur, err := s.repo.Get(ctx, requestUUID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case cur.Status != models.ErasureRequestPending:
+		return repository.ErrErasureRequestNotFound
+	case approvedBy(cur, actor):
+		return ErrErasureAlreadyApproved
+	case cur.Mode != "" && cur.Mode != label:
+		return ErrErasureModeMismatch
+	}
+	return repository.ErrErasureApprovalConflict
+}
+
+func approvedBy(r *models.ErasureRequest, by string) bool {
+	for _, a := range r.Approvals {
+		if a.By == by {
+			return true
+		}
+	}
+	return false
+}
+
+// ListOpen returns requests awaiting operator action or further erasure work.
+func (s *ErasureRequestService) ListOpen(ctx context.Context) ([]models.ErasureRequest, error) {
+	rows, _, err := s.List(ctx, repository.ErasureListFilter{Statuses: []string{models.ErasureRequestPending, models.ErasureRequestIncomplete}})
+	return rows, err
+}
+
+// List returns a page of requests, newest first, filtered by status and
+// subject (see repository.ErasureListFilter), with the next-page cursor ("" on
+// the last page). Incomplete rows carry Closable.
+func (s *ErasureRequestService) List(ctx context.Context, f repository.ErasureListFilter) ([]models.ErasureRequest, string, error) {
+	rows, next, err := s.repo.List(ctx, f)
+	if err != nil {
+		return nil, "", err
 	}
 	for i := range rows {
 		if rows[i].Status == models.ErasureRequestIncomplete {
 			_, rows[i].Closable = s.closable(rows[i].Progress)
 		}
 	}
-	return rows, nil
+	return rows, next, nil
 }
 
 // closable reports the abandoned keys of a request with progress, judged
@@ -202,7 +428,18 @@ func (s *ErasureRequestService) ClosePartial(ctx context.Context, requestUUID, c
 			},
 		})
 	}
-	return s.repo.Get(ctx, requestUUID)
+	closed, err := s.repo.Get(ctx, requestUUID)
+	if err != nil {
+		// The close is written; still audit the receipt from the row in hand.
+		at := s.now()
+		rowClosed := *row
+		rowClosed.Status, rowClosed.Abandoned, rowClosed.ResolutionNote = models.ErasureRequestClosedPartial, keys, note
+		rowClosed.ResolvedAt, rowClosed.ResolvedBy = &at, closedBy
+		s.emitReceipt(ctx, &rowClosed, closedBy)
+		return nil, err
+	}
+	s.emitReceipt(ctx, closed, closedBy)
+	return closed, nil
 }
 
 // HasIncomplete reports whether the subject has an erasure still incomplete.
@@ -214,6 +451,15 @@ func (s *ErasureRequestService) HasIncomplete(ctx context.Context, userUUID stri
 // incomplete one (with its stored mode and a fresh attempt budget). A held
 // subject errors with ErrLegalHoldActive and the row is left untouched.
 func (s *ErasureRequestService) Execute(ctx context.Context, requestUUID string, mode iface.EraseMode, resolvedBy string) (*ErasureOutcome, error) {
+	return s.ExecuteInMode(ctx, requestUUID, eraseModeLabel(mode), resolvedBy)
+}
+
+// ExecuteInMode is Execute with the mode as its label ("hard_delete",
+// "anonymize") or "" for no choice: a pending request then runs in the mode
+// its approvals locked, else as a hard delete. A label that differs from a
+// locked mode is ErrErasureModeMismatch, judged before the retention gate so
+// the gate always sees the mode that will run.
+func (s *ErasureRequestService) ExecuteInMode(ctx context.Context, requestUUID, label, resolvedBy string) (*ErasureOutcome, error) {
 	req, err := s.repo.Get(ctx, requestUUID)
 	if err != nil {
 		return nil, err
@@ -221,24 +467,129 @@ func (s *ErasureRequestService) Execute(ctx context.Context, requestUUID string,
 	if req.Status != models.ErasureRequestPending && req.Status != models.ErasureRequestIncomplete {
 		return nil, repository.ErrErasureRequestNotFound
 	}
+	// The subject never acts on their own request, retries included; judged
+	// before the hold and the retention gate.
+	if resolvedBy == req.UserUUID {
+		return nil, ErrErasureSelfApproval
+	}
 	if err := s.dsr.CheckLegalHold(ctx, req.UserUUID); err != nil {
 		return nil, err
 	}
+	// An incomplete request keeps its stored mode; a pending one runs in its
+	// locked mode, or the one chosen now when none is locked yet.
+	effective := label
+	switch {
+	case req.Status == models.ErasureRequestIncomplete:
+		effective = req.Mode
+	case req.Mode != "" && label != "" && label != req.Mode:
+		return nil, ErrErasureModeMismatch
+	case req.Mode != "":
+		effective = req.Mode
+	case label == "":
+		effective = eraseModeLabel(iface.EraseHardDelete)
+	}
+	if err := s.dsr.CheckRetention(ctx, req.UserUUID, parseEraseMode(effective)); err != nil {
+		return nil, err
+	}
+	label = effective
+	// The executor of a pending request counts as an approver (when not one
+	// already); incomplete requests (retries) skip approvals.
+	var approval *models.ErasureApproval
+	if req.Status == models.ErasureRequestPending {
+		have := distinctApprovers(req, resolvedBy)
+		if need := max(1, req.RequiredApprovals); have < need {
+			return nil, &ErasureApprovalsMissingError{Have: have, Need: need}
+		}
+		if !approvedBy(req, resolvedBy) {
+			approval = &models.ErasureApproval{By: resolvedBy, At: s.now(), Note: "executed"}
+		}
+	}
 	now := s.now()
-	row, err := s.repo.Claim(ctx, requestUUID, req.Status, eraseModeLabel(mode), resolvedBy, now, now.Add(erasureRunLease))
+	row, err := s.repo.Claim(ctx, requestUUID, req.Status, label, resolvedBy, now, now.Add(erasureRunLease), approval)
+	if errors.Is(err, repository.ErrErasureApprovalConflict) {
+		// A concurrent approval changed the mode or added this operator.
+		cerr := s.approvalConflict(ctx, requestUUID, label, resolvedBy)
+		if !errors.Is(cerr, ErrErasureAlreadyApproved) {
+			return nil, cerr
+		}
+		// The operator's own approval landed meanwhile: they already count,
+		// so claim once more without adding one.
+		now = s.now()
+		row, err = s.repo.Claim(ctx, requestUUID, req.Status, label, resolvedBy, now, now.Add(erasureRunLease), nil)
+		if errors.Is(err, repository.ErrErasureApprovalConflict) {
+			return nil, repository.ErrErasureRequestBusy
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	return s.run(ctx, row)
+	if req.Status == models.ErasureRequestIncomplete {
+		s.emitRetried(ctx, row, resolvedBy, req.Attempts)
+	}
+	return s.run(ctx, row, resolvedBy)
 }
 
-// Reject closes a pending request without erasing. An incomplete request has
+// emitRetried audits an operator restarting an incomplete request: who, which
+// request and subject (UUIDs) and how many attempts it had used.
+func (s *ErasureRequestService) emitRetried(ctx context.Context, row *models.ErasureRequest, actor string, attempts int) {
+	if s.sink == nil {
+		return
+	}
+	s.sink.Emit(ctx, iface.AuditEvent{
+		ActorUserID:  actor,
+		ActorType:    actorTypeOf(actor),
+		Action:       "gdpr.dsr.erasure_retried",
+		ResourceType: "erasure_request",
+		ResourceID:   row.UUID,
+		Outcome:      "success",
+		Metadata: map[string]any{
+			"requestUuid":     row.UUID,
+			"subjectUserUuid": row.UserUUID,
+			"attempts":        attempts,
+		},
+	})
+}
+
+// distinctApprovers counts the distinct operators on the request plus actor.
+func distinctApprovers(r *models.ErasureRequest, actor string) int {
+	seen := map[string]struct{}{actor: {}}
+	for _, a := range r.Approvals {
+		seen[a.By] = struct{}{}
+	}
+	return len(seen)
+}
+
+// Reject closes a pending request without erasing. The note is mandatory (1 to
+// 500 characters) and masked. An incomplete request has
 // already started erasing and is refused.
 func (s *ErasureRequestService) Reject(ctx context.Context, requestUUID, resolvedBy, note string) error {
-	if req, err := s.repo.Get(ctx, requestUUID); err == nil && req.Status == models.ErasureRequestIncomplete {
+	note, valid := NormalizeReason(note)
+	if !valid {
+		return ErrReasonRequired
+	}
+	note = maskReason(note)
+	req, err := s.repo.Get(ctx, requestUUID)
+	if err != nil {
+		return err
+	}
+	if req.Status == models.ErasureRequestIncomplete {
 		return ErrErasureRequestStarted
 	}
-	return s.repo.Resolve(ctx, requestUUID, models.ErasureRequestRejected, resolvedBy, "", note)
+	if err := s.repo.Resolve(ctx, requestUUID, models.ErasureRequestRejected, resolvedBy, "", note); err != nil {
+		return err
+	}
+	if s.sink != nil {
+		s.sink.Emit(ctx, iface.AuditEvent{
+			ActorUserID:  resolvedBy,
+			ActorType:    actorTypeOf(resolvedBy),
+			Action:       "gdpr.dsr.erasure_rejected",
+			ResourceType: "erasure_request",
+			ResourceID:   requestUUID,
+			Outcome:      "success",
+			Metadata:     map[string]any{"subjectUserUuid": req.UserUUID},
+		})
+	}
+	return nil
 }
 
 // EraseNow records an incomplete, leased request for the subject (attempt 1),
@@ -247,6 +598,9 @@ func (s *ErasureRequestService) Reject(ctx context.Context, requestUUID, resolve
 // worker finishes. A subject already under a legal hold records nothing.
 func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID, source, actor string, mode iface.EraseMode) (*ErasureOutcome, error) {
 	if err := s.dsr.CheckLegalHold(ctx, userUUID); err != nil {
+		return nil, err
+	}
+	if err := s.dsr.CheckRetention(ctx, userUUID, mode); err != nil {
 		return nil, err
 	}
 	now := s.now()
@@ -269,7 +623,7 @@ func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID
 	if err := s.repo.Insert(ctx, row); err != nil {
 		return nil, err
 	}
-	return s.run(ctx, row)
+	return s.run(ctx, row, actor)
 }
 
 // RetryDue claims the next incomplete request whose retry is due and runs its
@@ -284,7 +638,7 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 	if row == nil {
 		return false, nil
 	}
-	if _, err := s.run(ctx, row); err != nil {
+	if _, err := s.run(ctx, row, erasureWorkerActor); err != nil {
 		s.logger.Warn("compliance: erasure retry run failed",
 			slog.String("request", row.UUID), slog.String("error", err.Error()))
 	}
@@ -292,7 +646,8 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 }
 
 // run executes the remaining producers of a leased request and settles the
-// outcome. Before any producer runs, every registered producer missing from
+// outcome. actor is who the receipt names: the operator who ran it (the one
+// who retried it, for a retry) or the worker. Before any producer runs, every registered producer missing from
 // the stored progress is recorded as pending (under the lease); when that
 // fails no producer runs and the error is returned, the row staying incomplete
 // for the worker. The attempt was counted when the row was claimed, so
@@ -302,7 +657,7 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 // the lease was lost the outcome is not stored: the request is reported as it
 // is stored, incomplete, and the worker re-runs the remaining producers once
 // the lease expires (or the newer holder's state stands).
-func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest) (*ErasureOutcome, error) {
+func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest, actor string) (*ErasureOutcome, error) {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), erasureRunLease/2)
 	defer cancel()
 	if plan, added := s.dsr.PlanProgress(row.Progress); added {
@@ -324,6 +679,8 @@ func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequ
 	switch {
 	case errors.Is(runErr, ErrLegalHoldActive):
 		st.LastError = models.ErasureLastErrorLegalHold
+	case errors.Is(runErr, ErrRetentionMinimum):
+		st.LastError = models.ErasureLastErrorRetention
 	case runErr != nil:
 		st.LastError = models.ErasureLastErrorRun
 	default:
@@ -360,6 +717,10 @@ func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequ
 		settled.NextAttemptAt, settled.LastError, settled.LeaseUntil = st.NextAttemptAt, st.LastError, nil
 		if st.ResolvedAt != nil {
 			settled.ResolvedAt = st.ResolvedAt
+		}
+		if st.Status == models.ErasureRequestCompleted {
+			// Only a settle that landed is a transition to completed.
+			s.emitReceipt(context.WithoutCancel(ctx), &settled, actor)
 		}
 	}
 	if runErr != nil {

@@ -180,7 +180,7 @@ func (r *mfaFactorRepository) Delete(ctx context.Context, uuid string) error {
 }
 
 func (r *mfaFactorRepository) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
-	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.coll.DeleteMany(ctx, ByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

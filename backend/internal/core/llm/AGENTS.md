@@ -387,3 +387,7 @@ make backend-vulncheck   # after every provider SDK bump
 The budget tests (`repository/budget_txn_test.go`, `services/budget_mongo_test.go`) exercise real multi-document transactions: they need `MONGO_TEST_URI` pointing at a replica set and skip without it, so a green run without the variable proves nothing about admission or finalization.
 
 When you add a route, re-run `make openapi-dump` from `backend/` (the spec is committed) and keep `llm.cedar` in step with `Permissions()`. When you change this module, update [the published page](../../../../docs/site/modules/core/llm.mdx) too.
+
+## DSR dry-run count
+
+`PIIProducer` implements `iface.PIIProducerCounter`, one `CountDocuments` per purge step with the selectors of `repository/subject_filters.go`, which the export and the purge use too. It counts rows the way the purge does (a budget naming the subject as recipient and editor counts twice; a self-grant counts once, as deleted; grants issued count only those to other users). Exact in both erase modes: nothing is held outside Mongo. The count methods are optional interfaces next to the `*DSRRepo` ones; a wired repository without one fails the count.

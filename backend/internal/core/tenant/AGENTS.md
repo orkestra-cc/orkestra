@@ -377,3 +377,5 @@ The system-wide invariants that govern tenant isolation live in [`../authz/AGENT
 - [`../auth/AGENTS.md`](../auth/AGENTS.md) — embeds memberships in JWT claims via `TenantProvider.ListUserMemberships`
 - [`../../../pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `TenantProvider` interface definition (`type TenantProvider interface` ~`:366`)
 - [`../../../pkg/sdk/tenantrepo/`](../../../pkg/sdk/tenantrepo) — helpers for other modules that need to scope queries by tenant
+
+- **DSR dry-run count.** `piiProducer` implements `iface.PIIProducerCounter` through `Repository.CountMembershipsByUser` (`repository/count.go`), which shares `membershipsByUserFilter` with `DeleteMembershipsByUser` (every membership row, expired ones included).

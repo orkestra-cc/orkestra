@@ -824,3 +824,70 @@ const ComplianceErasureRequestNotClosable = "compliance.erasure_request_not_clos
 // ComplianceErasureCloseNoteRequired signals a close without a note of 1 to
 // 500 characters. 422.
 const ComplianceErasureCloseNoteRequired = "compliance.erasure_close_note_required"
+
+// ComplianceLegalHoldActive signals an erasure refused because the subject is
+// under an active legal hold. 409.
+const ComplianceLegalHoldActive = "compliance.legal_hold_active"
+
+// ComplianceRetentionMinimumNotMet signals a hard delete refused because the
+// subject's data must be kept longer; the body carries retainUntil (RFC 3339)
+// and reasons. 409.
+const ComplianceRetentionMinimumNotMet = "compliance.retention_minimum_not_met"
+
+// ComplianceRetentionCheckUnavailable signals a hard delete refused because the
+// retention check could not be completed (it fails closed). 503.
+const ComplianceRetentionCheckUnavailable = "compliance.retention_check_unavailable"
+
+// ComplianceErasureRequestExists signals that the subject already has a
+// pending or incomplete erasure request; the body carries its id. 409.
+const ComplianceErasureRequestExists = "compliance.erasure_request_exists"
+
+// ComplianceErasureApprovalsMissing signals an execute with fewer distinct
+// approvals than the request requires; the body carries have and need. 409.
+const ComplianceErasureApprovalsMissing = "compliance.erasure_approvals_missing"
+
+// ComplianceErasureSelfApproval signals the data subject acting as approver or
+// executor of their own erasure request. 409.
+const ComplianceErasureSelfApproval = "compliance.erasure_self_approval"
+
+// ComplianceErasureAlreadyApproved signals an operator approving a request
+// they already approved. 409.
+const ComplianceErasureAlreadyApproved = "compliance.erasure_already_approved"
+
+// ComplianceErasureModeMismatch signals an approve or execute in a mode other
+// than the one the first approval locked. 409.
+const ComplianceErasureModeMismatch = "compliance.erasure_mode_mismatch"
+
+// ComplianceErasureReceiptUnavailable signals a receipt request for an erasure
+// request that is not completed or closed_partial (pending, incomplete or
+// rejected). 409.
+const ComplianceErasureReceiptUnavailable = "compliance.erasure_receipt_unavailable"
+
+// ComplianceInvalidCursor signals a list cursor the server did not issue. 422.
+const ComplianceInvalidCursor = "compliance.invalid_cursor"
+
+// ComplianceReasonRequired signals a reason or note outside 1 to 500
+// characters. 422.
+const ComplianceReasonRequired = "compliance.reason_required"
+
+// ComplianceLegalHoldExpiryPast signals a legal-hold expiry that is not in the
+// future. 422.
+const ComplianceLegalHoldExpiryPast = "compliance.legal_hold_expiry_past"
+
+// ComplianceExportStorageUnavailable signals a DSR export that needs object
+// storage when none is configured. 503.
+const ComplianceExportStorageUnavailable = "compliance.export_storage_unavailable"
+
+// ComplianceExportExpired signals a download of a DSR export past its expiry. 410.
+const ComplianceExportExpired = "compliance.export_expired"
+
+// ComplianceExportErasureInProgress signals a DSR export refused or removed
+// because the subject is being erased. 409.
+const ComplianceExportErasureInProgress = "compliance.export_erasure_in_progress"
+
+// ComplianceExportNotFound signals a DSR export that does not exist. 404.
+const ComplianceExportNotFound = "compliance.export_not_found"
+
+// ComplianceSubjectNotFound signals a data subject UUID that matches no
+// operator or client user row (a deleted tombstone still counts). 404.
+const ComplianceSubjectNotFound = "compliance.subject_not_found"

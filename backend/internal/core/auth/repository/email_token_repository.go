@@ -95,7 +95,7 @@ func (r *emailTokenRepository) InvalidateByUserAndPurpose(ctx context.Context, u
 }
 
 func (r *emailTokenRepository) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
-	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.coll.DeleteMany(ctx, ByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

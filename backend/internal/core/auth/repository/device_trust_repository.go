@@ -237,7 +237,7 @@ func (r *deviceTrustRepository) DeleteAllByUser(ctx context.Context, userUUID st
 	if userUUID == "" {
 		return 0, nil
 	}
-	res, err := r.collection.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.collection.DeleteMany(ctx, ByUserFilter(userUUID))
 	if err != nil {
 		return 0, fmt.Errorf("device trust: delete all by user: %w", err)
 	}

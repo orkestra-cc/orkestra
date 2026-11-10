@@ -142,7 +142,7 @@ func (r *Grants) DeleteByModel(ctx context.Context, modelUUID string) error {
 // Only the DSR pipeline (PIIProducer.PurgePersonalData) calls it.
 func (r *Grants) DeleteByUser(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure of the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.coll.DeleteMany(ctx, userUUIDFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}
@@ -152,7 +152,7 @@ func (r *Grants) DeleteByUser(ctx context.Context, userUUID string) (int64, erro
 // ListByUserAllTenants exports every grant of a data subject for DSR.
 func (r *Grants) ListByUserAllTenants(ctx context.Context, userUUID string) ([]models.LLMGrant, error) {
 	//tenantscope:allow dsr: right-of-access export of the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"userUuid": userUUID})
+	cur, err := r.coll.Find(ctx, userUUIDFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (r *Grants) ListByUserAllTenants(ctx context.Context, userUUID string) ([]m
 // grantedBy actor), across all tenants.
 func (r *Grants) ListByGranter(ctx context.Context, userUUID string) ([]models.LLMGrant, error) {
 	//tenantscope:allow dsr: right-of-access export of grants issued by the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"grantedBy": userUUID})
+	cur, err := r.coll.Find(ctx, grantedByFilter(userUUID))
 	if err != nil {
 		return nil, err
 	}
@@ -183,9 +183,23 @@ func (r *Grants) ListByGranter(ctx context.Context, userUUID string) ([]models.L
 // users) stay.
 func (r *Grants) PseudonymizeGranter(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure pseudonymization of the grantedBy actor across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.UpdateMany(ctx, bson.M{"grantedBy": userUUID}, bson.M{"$set": bson.M{"grantedBy": models.ErasedActor}})
+	res, err := r.coll.UpdateMany(ctx, grantedByFilter(userUUID), bson.M{"$set": bson.M{"grantedBy": models.ErasedActor}})
 	if err != nil {
 		return 0, err
 	}
 	return res.ModifiedCount, nil
+}
+
+// CountByUser counts what DeleteByUser would remove (DSR dry-run).
+func (r *Grants) CountByUser(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of the subject's grants across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, userUUIDFilter(userUUID))
+}
+
+// CountIssuedToOthers counts what PseudonymizeGranter rewrites once the
+// subject's own grants are gone: the grants issued to someone else (DSR
+// dry-run).
+func (r *Grants) CountIssuedToOthers(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of grants issued by the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, issuedToOthersFilter(userUUID))
 }

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -431,4 +432,151 @@ func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, mo
 	return res, nil
 }
 
-var _ iface.PIIProducer = (*PIIProducer)(nil)
+// The count views of the DSR repositories: one method per purge step, each
+// built on the filter that step uses. They are optional interfaces next to the
+// *DSRRepo ones, so a repository double that predates the dry-run still
+// satisfies the DSR contracts; CountPersonalData refuses (rather than
+// under-reports) when a wired repository lacks its counter.
+type (
+	grantCounter interface {
+		CountByUser(ctx context.Context, userUUID string) (int64, error)
+		CountIssuedToOthers(ctx context.Context, userUUID string) (int64, error)
+	}
+	creatorCounter interface {
+		CountByCreator(ctx context.Context, userUUID string) (int64, error)
+	}
+	usageCounter interface {
+		CountByUser(ctx context.Context, userUUID string) (int64, error)
+	}
+	budgetCounter interface {
+		CountRecipient(ctx context.Context, userUUID string) (int64, error)
+		CountUpdater(ctx context.Context, userUUID string) (int64, error)
+	}
+	outboxCounter interface {
+		CountDelivered(ctx context.Context, userUUID string) (int64, error)
+	}
+	accountCounter interface {
+		CountByUser(ctx context.Context, userUUID string) (int64, error)
+	}
+)
+
+var (
+	_ grantCounter   = (*repository.Grants)(nil)
+	_ creatorCounter = (*repository.Credentials)(nil)
+	_ creatorCounter = (*repository.Models)(nil)
+	_ usageCounter   = (*repository.Usage)(nil)
+	_ budgetCounter  = (*repository.Budgets)(nil)
+	_ outboxCounter  = (*repository.Outbox)(nil)
+	_ accountCounter = (*repository.UserAccounts)(nil)
+)
+
+// CountPersonalData implements iface.PIIProducerCounter: the rows
+// PurgePersonalData deletes, anonymizes or rewrites for the subject, counted
+// with the filters of each purge step, in both erase modes alike (hard delete
+// removes the finalized usage rows and anonymizes the pending ones, anonymize
+// rewrites all of them; the total is the same). Rows are counted the way the
+// purge counts them: a budget naming the subject as recipient and as editor
+// counts twice, a self-grant once. Nothing is held outside Mongo, so the count
+// is exact.
+func (p *PIIProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	if userUUID == "" {
+		return iface.PersonalDataCount{}, ErrEmptySubject
+	}
+	var out iface.PersonalDataCount
+	add := func(coll string, ns ...int64) {
+		var sum int64
+		for _, n := range ns {
+			sum += n
+		}
+		if sum > 0 {
+			out.Rows += int(sum)
+			out.Collections = append(out.Collections, coll)
+		}
+	}
+	fail := func(what string, err error) (iface.PersonalDataCount, error) {
+		return iface.PersonalDataCount{}, fmt.Errorf("llm count: %s: %w", what, err)
+	}
+	errNoCounter := func(what string) (iface.PersonalDataCount, error) {
+		return fail(what, errors.New("repository cannot count"))
+	}
+
+	accounts, ok := p.accounts.(accountCounter)
+	if !ok {
+		return errNoCounter("linked accounts")
+	}
+	nAccounts, err := accounts.CountByUser(ctx, userUUID)
+	if err != nil {
+		return fail("linked accounts", err)
+	}
+	grants, ok := p.grants.(grantCounter)
+	if !ok {
+		return errNoCounter("grants")
+	}
+	nHeld, err := grants.CountByUser(ctx, userUUID)
+	if err != nil {
+		return fail("grants held", err)
+	}
+	nIssued, err := grants.CountIssuedToOthers(ctx, userUUID)
+	if err != nil {
+		return fail("grants issued", err)
+	}
+	usage, ok := p.usage.(usageCounter)
+	if !ok {
+		return errNoCounter("usage")
+	}
+	nUsage, err := usage.CountByUser(ctx, userUUID)
+	if err != nil {
+		return fail("usage", err)
+	}
+	creds, ok := p.creds.(creatorCounter)
+	if !ok {
+		return errNoCounter("credentials")
+	}
+	nCreds, err := creds.CountByCreator(ctx, userUUID)
+	if err != nil {
+		return fail("credentials", err)
+	}
+	mods, ok := p.models.(creatorCounter)
+	if !ok {
+		return errNoCounter("models")
+	}
+	nModels, err := mods.CountByCreator(ctx, userUUID)
+	if err != nil {
+		return fail("models", err)
+	}
+	budgets, ok := p.budgets.(budgetCounter)
+	if !ok {
+		return errNoCounter("budgets")
+	}
+	nRecipient, err := budgets.CountRecipient(ctx, userUUID)
+	if err != nil {
+		return fail("budget recipients", err)
+	}
+	nUpdater, err := budgets.CountUpdater(ctx, userUUID)
+	if err != nil {
+		return fail("budget editor", err)
+	}
+	outbox, ok := p.outbox.(outboxCounter)
+	if !ok {
+		return errNoCounter("budget alerts")
+	}
+	nAlerts, err := outbox.CountDelivered(ctx, userUUID)
+	if err != nil {
+		return fail("budget alerts", err)
+	}
+
+	// Same order as the purge's Collections.
+	add(repository.CollGrants, nHeld, nIssued)
+	add(repository.CollCredentials, nCreds)
+	add(repository.CollModels, nModels)
+	add(repository.CollUsage, nUsage)
+	add(repository.CollBudgets, nRecipient, nUpdater)
+	add(repository.CollBudgetOutbox, nAlerts)
+	add(repository.CollUserAccounts, nAccounts)
+	return out, nil
+}
+
+var (
+	_ iface.PIIProducer        = (*PIIProducer)(nil)
+	_ iface.PIIProducerCounter = (*PIIProducer)(nil)
+)

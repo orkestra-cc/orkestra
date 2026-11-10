@@ -58,7 +58,7 @@ func (r *Budgets) Put(ctx context.Context, b *models.Budget) error {
 // the data subject as an extra alert recipient or as the last editor.
 func (r *Budgets) ListReferencingUser(ctx context.Context, userUUID string) ([]models.Budget, error) {
 	//tenantscope:allow dsr: right-of-access export of the budgets naming the subject (recipient or updatedBy) across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	cur, err := r.coll.Find(ctx, bson.M{"$or": []bson.M{{"notifyExtraUserUuids": userUUID}, {"updatedBy": userUUID}}})
+	cur, err := r.coll.Find(ctx, bson.M{"$or": []bson.M{budgetRecipientFilter(userUUID), budgetUpdaterFilter(userUUID)}})
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (r *Budgets) ListReferencingUser(ctx context.Context, userUUID string) ([]m
 // recipients.
 func (r *Budgets) RemoveRecipient(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure removal of the subject from budget alert recipients across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.UpdateMany(ctx, bson.M{"notifyExtraUserUuids": userUUID}, bson.M{"$pull": bson.M{"notifyExtraUserUuids": userUUID}})
+	res, err := r.coll.UpdateMany(ctx, budgetRecipientFilter(userUUID), bson.M{"$pull": bson.M{"notifyExtraUserUuids": userUUID}})
 	if err != nil {
 		return 0, err
 	}
@@ -84,11 +84,25 @@ func (r *Budgets) RemoveRecipient(ctx context.Context, userUUID string) (int64, 
 // in every org; updatedAt is left as is (the budget did not change).
 func (r *Budgets) PseudonymizeUpdater(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure pseudonymization of the budget updatedBy actor across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.UpdateMany(ctx, bson.M{"updatedBy": userUUID}, bson.M{"$set": bson.M{"updatedBy": models.ErasedActor}})
+	res, err := r.coll.UpdateMany(ctx, budgetUpdaterFilter(userUUID), bson.M{"$set": bson.M{"updatedBy": models.ErasedActor}})
 	if err != nil {
 		return 0, err
 	}
 	return res.ModifiedCount, nil
+}
+
+// CountRecipient counts what RemoveRecipient would modify (DSR dry-run).
+func (r *Budgets) CountRecipient(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of the budgets listing the subject as alert recipient across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, budgetRecipientFilter(userUUID))
+}
+
+// CountUpdater counts what PseudonymizeUpdater would modify (DSR dry-run). A
+// budget that names the subject as recipient and as editor is counted by both
+// methods, as the purge counts its two rewrites.
+func (r *Budgets) CountUpdater(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: dry-run count of the budgets last edited by the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducerCounter
+	return r.coll.CountDocuments(ctx, budgetUpdaterFilter(userUUID))
 }
 
 // BudgetStore implements services.BudgetStore over the four collections

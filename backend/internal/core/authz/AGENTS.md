@@ -352,3 +352,5 @@ Section B item #4 of the auth roadmap (2026-04-24) plumbs attribute-based signal
 - [`../auth/AGENTS.md`](../auth/AGENTS.md) — consumes `HasPermission` via middleware on every protected request
 - [`../../../pkg/sdk/iface/interfaces.go:198-229`](../../../pkg/sdk/iface/interfaces.go) — `AuthzProvider` and `PermissionSpec` definitions
 - [`../../shared/middleware/auth.go`](../../shared/middleware/auth.go) — `RequirePermission`, `RequireSystemPermission`
+
+- **DSR dry-run count.** `piiProducer` implements `iface.PIIProducerCounter` through `Repository.CountBindingsByUser` (`repository/count.go`), which shares `bindingsByUserFilter` with `DeleteBindingsByUser` (every binding, global and expired ones included).

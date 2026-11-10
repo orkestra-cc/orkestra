@@ -61,7 +61,41 @@ type PIIProducer struct {
 	logger *slog.Logger
 }
 
-var _ iface.PIIProducer = (*PIIProducer)(nil)
+var (
+	_ iface.PIIProducer        = (*PIIProducer)(nil)
+	_ iface.PIIProducerCounter = (*PIIProducer)(nil)
+)
+
+// SearchLogCounter is the count view of the search log (*repository.SearchLogDSR),
+// an optional companion to SearchLogDSRRepo: same filter as DeleteByUserAllTenants.
+type SearchLogCounter interface {
+	CountByUserAllTenants(ctx context.Context, userUUID string) (int64, error)
+}
+
+var _ SearchLogCounter = (*repository.SearchLogDSR)(nil)
+
+// CountPersonalData implements iface.PIIProducerCounter with what is exact in
+// Mongo: the search-log rows PurgePersonalData deletes (the rows where the user
+// searched or was a returned subject), which are also the only rows its result
+// reports. It does not include the user's points in the vector index, which the
+// finalizer deletes by filter in the engine: the engine offers no cheap exact
+// count of them, so Collections lists the search log only and omits the index.
+// A zero count therefore means no search-log rows, not that the index holds
+// nothing.
+func (p *PIIProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	if userUUID == "" {
+		return iface.PersonalDataCount{}, ErrErasureEmptySubject
+	}
+	c, ok := p.logs.(SearchLogCounter)
+	if !ok {
+		return iface.PersonalDataCount{}, errors.New("retrieval: search log cannot be counted")
+	}
+	n, err := c.CountByUserAllTenants(ctx, userUUID)
+	if err != nil || n == 0 {
+		return iface.PersonalDataCount{}, err
+	}
+	return iface.PersonalDataCount{Rows: int(n), Collections: []string{collSearchLogName}}, nil
+}
 
 func NewPIIProducer(store ErasureStore, logs SearchLogDSRRepo, fin *Finalizer, now func() time.Time, logger *slog.Logger) *PIIProducer {
 	if now == nil {

@@ -46,5 +46,17 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 	if err != nil {
 		return iface.PurgeResult{}, err
 	}
-	return iface.PurgeResult{RowsDeleted: int(n), Collections: []string{"authz_bindings"}}, nil
+	return iface.PurgeResult{RowsDeleted: int(n), Collections: []string{repository.CollBindings}}, nil
 }
+
+// CountPersonalData implements iface.PIIProducerCounter with the purge's
+// filter (every binding of the subject, global and expired ones included).
+func (p *piiProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	n, err := p.repo.CountBindingsByUser(ctx, userUUID)
+	if err != nil || n == 0 {
+		return iface.PersonalDataCount{}, err
+	}
+	return iface.PersonalDataCount{Rows: int(n), Collections: []string{repository.CollBindings}}, nil
+}
+
+var _ iface.PIIProducerCounter = (*piiProducer)(nil)

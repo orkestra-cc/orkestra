@@ -443,7 +443,7 @@ func (r *Repository) DeleteBindingsByUser(ctx context.Context, userUUID string) 
 		return 0, nil
 	}
 	//tenantscope:allow DSR erase is cross-tenant by data-subject; the filter pins userUUID explicitly (mirrors DeleteBindingsByUserAndTenant).
-	res, err := r.db.Collection(CollBindings).DeleteMany(ctx, bson.M{"userUUID": userUUID})
+	res, err := r.db.Collection(CollBindings).DeleteMany(ctx, bindingsByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

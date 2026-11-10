@@ -12,6 +12,10 @@ import CompliancePage from './index';
 vi.mock('react-toastify', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
 }));
+// The erasure tab reads the operator id (to count their own approval).
+vi.mock('hooks/auth/useAuthRTK', () => ({
+  useAuth: () => ({ currentUser: { id: 'op-me' } })
+}));
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.useRealTimers());
 
@@ -433,6 +437,11 @@ describe('CompliancePage', () => {
 
     await screen.findByText('u-erase-1');
     await userEvent.click(screen.getByRole('button', { name: /^execute$/i }));
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: /^execute$/i
+      })
+    );
 
     await waitFor(() => expect(executeHit).not.toBeNull());
     expect(executeHit!.path).toBe(
@@ -644,6 +653,11 @@ describe('CompliancePage', () => {
     renderWithProviders(<CompliancePage />);
     await screen.findByText('u-erase-1');
     await userEvent.click(screen.getByRole('button', { name: /^execute$/i }));
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: /^execute$/i
+      })
+    );
     await waitFor(() =>
       expect(toast.warning).toHaveBeenCalledWith(
         expect.stringMatching(/will be retried/i)
@@ -659,6 +673,35 @@ describe('CompliancePage', () => {
     expect(screen.getByText('Review overdue')).toBeInTheDocument();
     const changesTab = screen.getByRole('tab', { name: /^Requests/ });
     await waitFor(() => expect(changesTab).toHaveTextContent('1'));
+  });
+
+  it('runs the subject preview only once the Subject tab is opened', async () => {
+    stubReads();
+    const subject = '11111111-1111-4111-8111-111111111111';
+    let previews = 0;
+    server.use(
+      http.get(url('/v1/admin/compliance/dsr/preview'), () => {
+        previews++;
+        return HttpResponse.json({
+          userUuid: subject,
+          legalHolds: [],
+          openRequests: [],
+          producers: [],
+          hardDeleteAllowed: true,
+          anonymizeAllowed: true
+        });
+      }),
+      http.get(url('/v1/admin/compliance/dsr/exports'), () =>
+        HttpResponse.json({ items: [] })
+      )
+    );
+    renderWithProviders(<CompliancePage />, {
+      routerEntries: [`/?tab=requests&userUuid=${subject}`]
+    });
+    expect(await screen.findByText('u-erase-1')).toBeInTheDocument();
+    expect(previews).toBe(0);
+    await userEvent.click(screen.getByRole('tab', { name: /subject/i }));
+    await waitFor(() => expect(previews).toBe(1));
   });
 
   it('opens a change request and offers the decision to another operator', async () => {
