@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -202,8 +203,12 @@ func (s *ErasureRequestService) Open(ctx context.Context, in OpenInput) (*models
 		return nil, ErrReasonRequired
 	}
 	reason = maskReason(reason)
-	if in.RequestedBy == in.UserUUID {
+	in.UserUUID = NormalizeSubjectUUID(in.UserUUID)
+	if strings.EqualFold(in.RequestedBy, in.UserUUID) {
 		return nil, ErrErasureSelfApproval
+	}
+	if err := s.dsr.requireSubject(ctx, in.UserUUID); err != nil {
+		return nil, err
 	}
 	if err := s.dsr.CheckLegalHold(ctx, in.UserUUID); err != nil {
 		return nil, err
@@ -271,11 +276,11 @@ func (s *ErasureRequestService) Approve(ctx context.Context, requestUUID string,
 	if err != nil {
 		return nil, err
 	}
-	if row.Status != models.ErasureRequestPending {
-		return nil, repository.ErrErasureRequestNotFound
-	}
 	if actor == row.UserUUID {
 		return nil, ErrErasureSelfApproval
+	}
+	if row.Status != models.ErasureRequestPending {
+		return nil, repository.ErrErasureRequestNotFound
 	}
 	label := eraseModeLabel(mode)
 	got, err := s.repo.AddApproval(ctx, requestUUID, label, models.ErasureApproval{By: actor, At: s.now(), Note: note})
@@ -462,6 +467,11 @@ func (s *ErasureRequestService) ExecuteInMode(ctx context.Context, requestUUID, 
 	if req.Status != models.ErasureRequestPending && req.Status != models.ErasureRequestIncomplete {
 		return nil, repository.ErrErasureRequestNotFound
 	}
+	// The subject never acts on their own request, retries included; judged
+	// before the hold and the retention gate.
+	if resolvedBy == req.UserUUID {
+		return nil, ErrErasureSelfApproval
+	}
 	if err := s.dsr.CheckLegalHold(ctx, req.UserUUID); err != nil {
 		return nil, err
 	}
@@ -486,9 +496,6 @@ func (s *ErasureRequestService) ExecuteInMode(ctx context.Context, requestUUID, 
 	// already); incomplete requests (retries) skip approvals.
 	var approval *models.ErasureApproval
 	if req.Status == models.ErasureRequestPending {
-		if resolvedBy == req.UserUUID {
-			return nil, ErrErasureSelfApproval
-		}
 		have := distinctApprovers(req, resolvedBy)
 		if need := max(1, req.RequiredApprovals); have < need {
 			return nil, &ErasureApprovalsMissingError{Have: have, Need: need}
@@ -516,7 +523,31 @@ func (s *ErasureRequestService) ExecuteInMode(ctx context.Context, requestUUID, 
 	if err != nil {
 		return nil, err
 	}
-	return s.run(ctx, row, false)
+	if req.Status == models.ErasureRequestIncomplete {
+		s.emitRetried(ctx, row, resolvedBy, req.Attempts)
+	}
+	return s.run(ctx, row, resolvedBy)
+}
+
+// emitRetried audits an operator restarting an incomplete request: who, which
+// request and subject (UUIDs) and how many attempts it had used.
+func (s *ErasureRequestService) emitRetried(ctx context.Context, row *models.ErasureRequest, actor string, attempts int) {
+	if s.sink == nil {
+		return
+	}
+	s.sink.Emit(ctx, iface.AuditEvent{
+		ActorUserID:  actor,
+		ActorType:    actorTypeOf(actor),
+		Action:       "gdpr.dsr.erasure_retried",
+		ResourceType: "erasure_request",
+		ResourceID:   row.UUID,
+		Outcome:      "success",
+		Metadata: map[string]any{
+			"requestUuid":     row.UUID,
+			"subjectUserUuid": row.UserUUID,
+			"attempts":        attempts,
+		},
+	})
 }
 
 // distinctApprovers counts the distinct operators on the request plus actor.
@@ -528,13 +559,37 @@ func distinctApprovers(r *models.ErasureRequest, actor string) int {
 	return len(seen)
 }
 
-// Reject closes a pending request without erasing. An incomplete request has
+// Reject closes a pending request without erasing. The note is mandatory (1 to
+// 500 characters) and masked. An incomplete request has
 // already started erasing and is refused.
 func (s *ErasureRequestService) Reject(ctx context.Context, requestUUID, resolvedBy, note string) error {
-	if req, err := s.repo.Get(ctx, requestUUID); err == nil && req.Status == models.ErasureRequestIncomplete {
+	note, valid := NormalizeReason(note)
+	if !valid {
+		return ErrReasonRequired
+	}
+	note = maskReason(note)
+	req, err := s.repo.Get(ctx, requestUUID)
+	if err != nil {
+		return err
+	}
+	if req.Status == models.ErasureRequestIncomplete {
 		return ErrErasureRequestStarted
 	}
-	return s.repo.Resolve(ctx, requestUUID, models.ErasureRequestRejected, resolvedBy, "", note)
+	if err := s.repo.Resolve(ctx, requestUUID, models.ErasureRequestRejected, resolvedBy, "", note); err != nil {
+		return err
+	}
+	if s.sink != nil {
+		s.sink.Emit(ctx, iface.AuditEvent{
+			ActorUserID:  resolvedBy,
+			ActorType:    actorTypeOf(resolvedBy),
+			Action:       "gdpr.dsr.erasure_rejected",
+			ResourceType: "erasure_request",
+			ResourceID:   requestUUID,
+			Outcome:      "success",
+			Metadata:     map[string]any{"subjectUserUuid": req.UserUUID},
+		})
+	}
+	return nil
 }
 
 // EraseNow records an incomplete, leased request for the subject (attempt 1),
@@ -568,7 +623,7 @@ func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID
 	if err := s.repo.Insert(ctx, row); err != nil {
 		return nil, err
 	}
-	return s.run(ctx, row, false)
+	return s.run(ctx, row, actor)
 }
 
 // RetryDue claims the next incomplete request whose retry is due and runs its
@@ -583,7 +638,7 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 	if row == nil {
 		return false, nil
 	}
-	if _, err := s.run(ctx, row, true); err != nil {
+	if _, err := s.run(ctx, row, erasureWorkerActor); err != nil {
 		s.logger.Warn("compliance: erasure retry run failed",
 			slog.String("request", row.UUID), slog.String("error", err.Error()))
 	}
@@ -591,7 +646,8 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 }
 
 // run executes the remaining producers of a leased request and settles the
-// outcome. Before any producer runs, every registered producer missing from
+// outcome. actor is who the receipt names: the operator who ran it (the one
+// who retried it, for a retry) or the worker. Before any producer runs, every registered producer missing from
 // the stored progress is recorded as pending (under the lease); when that
 // fails no producer runs and the error is returned, the row staying incomplete
 // for the worker. The attempt was counted when the row was claimed, so
@@ -601,7 +657,7 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 // the lease was lost the outcome is not stored: the request is reported as it
 // is stored, incomplete, and the worker re-runs the remaining producers once
 // the lease expires (or the newer holder's state stands).
-func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest, byWorker bool) (*ErasureOutcome, error) {
+func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest, actor string) (*ErasureOutcome, error) {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), erasureRunLease/2)
 	defer cancel()
 	if plan, added := s.dsr.PlanProgress(row.Progress); added {
@@ -664,10 +720,6 @@ func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequ
 		}
 		if st.Status == models.ErasureRequestCompleted {
 			// Only a settle that landed is a transition to completed.
-			actor := settled.ResolvedBy
-			if byWorker {
-				actor = erasureWorkerActor
-			}
 			s.emitReceipt(context.WithoutCancel(ctx), &settled, actor)
 		}
 	}

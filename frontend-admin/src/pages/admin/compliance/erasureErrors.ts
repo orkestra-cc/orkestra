@@ -24,7 +24,8 @@ const KNOWN = new Set([
   'compliance.export_storage_unavailable',
   'compliance.export_erasure_in_progress',
   'compliance.export_expired',
-  'compliance.export_not_found'
+  'compliance.export_not_found',
+  'compliance.subject_not_found'
 ]);
 
 interface ErrBody {

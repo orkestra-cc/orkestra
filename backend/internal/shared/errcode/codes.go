@@ -887,3 +887,7 @@ const ComplianceExportErasureInProgress = "compliance.export_erasure_in_progress
 
 // ComplianceExportNotFound signals a DSR export that does not exist. 404.
 const ComplianceExportNotFound = "compliance.export_not_found"
+
+// ComplianceSubjectNotFound signals a data subject UUID that matches no
+// operator or client user row (a deleted tombstone still counts). 404.
+const ComplianceSubjectNotFound = "compliance.subject_not_found"

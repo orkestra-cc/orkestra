@@ -74,12 +74,13 @@ const ErasureRequestsTab = () => {
   const [fetchMore, { isFetching: loadingMore }] =
     useLazyListErasureRequestsQuery();
   // Pages after the first, appended client-side; dropped whenever the first
-  // page is refetched or the filter changes.
+  // page is refetched (its data changed) or the filter changes, so a stale
+  // tail never sits under a fresh head.
   const [more, setMore] = useState<{
     items: ErasureRequest[];
     next?: string;
   } | null>(null);
-  useEffect(() => setMore(null), [status]);
+  useEffect(() => setMore(null), [status, data]);
   const onLoadMore = async () => {
     const cursor = more ? more.next : data?.next;
     if (!cursor) return;
@@ -98,7 +99,8 @@ const ErasureRequestsTab = () => {
   const next = more ? more.next : data?.next;
 
   const [execute] = useExecuteErasureRequestMutation();
-  const [reject] = useRejectErasureRequestMutation();
+  const [reject, { isLoading: rejecting }] = useRejectErasureRequestMutation();
+  const [rejectTarget, setRejectTarget] = useState<ErasureRequest | null>(null);
   const [close, { isLoading: closing }] = useCloseErasureRequestMutation();
   const [openRequest, { isLoading: opening }] = useOpenErasureRequestMutation();
   const [approve, { isLoading: approving }] =
@@ -137,12 +139,16 @@ const ErasureRequestsTab = () => {
       toast.error(msg);
     }
   };
-  const onReject = async (id: string) => {
+  const onReject = async (note: string) => {
+    if (!rejectTarget) return;
     try {
-      await reject({ id }).unwrap();
+      await reject({ id: rejectTarget.uuid, note }).unwrap();
       toast.success(t('adminCompliance.erasure.rejectSuccess'));
-    } catch {
-      toast.error(t('adminCompliance.erasure.rejectError'));
+      setRejectTarget(null);
+    } catch (err) {
+      toast.error(
+        erasureErrorMessage(err, t, t('adminCompliance.erasure.rejectError'))
+      );
     }
   };
 
@@ -310,7 +316,7 @@ const ErasureRequestsTab = () => {
             me={me}
             onApprove={() => setApproveTarget(original)}
             onExecute={() => setExecuteTarget(original)}
-            onReject={() => onReject(original.uuid)}
+            onReject={() => setRejectTarget(original)}
           />
         ) : original.status === 'completed' ||
           original.status === 'closed_partial' ? (
@@ -405,6 +411,15 @@ const ErasureRequestsTab = () => {
         busy={closing}
         onCancel={() => setCloseTarget(null)}
         onConfirm={onClose}
+      />
+      <ReasonModal
+        show={rejectTarget !== null}
+        title={t('adminCompliance.erasure.rejectTitle')}
+        body={t('adminCompliance.erasure.rejectBody')}
+        confirmLabel={t('adminCompliance.erasure.reject')}
+        busy={rejecting}
+        onCancel={() => setRejectTarget(null)}
+        onConfirm={onReject}
       />
       <OpenErasureRequestModal
         show={showOpen}

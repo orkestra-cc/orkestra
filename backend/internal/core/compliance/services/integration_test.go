@@ -344,3 +344,19 @@ func TestRetentionGateFloorFromUserRowsAndReaperSkips(t *testing.T) {
 		t.Fatalf("rows = %+v; want only the free subject", rows)
 	}
 }
+
+func TestSubjectLookupFindsEveryTierAndTombstones(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "op-live"})
+	insertDoc(t, db, "client_users", bson.M{"uuid": "cl-live"})
+	insertDoc(t, db, "client_users", bson.M{"uuid": "cl-gone", "deletedAt": time.Now()}) // soft-deleted tombstone
+	lookup := NewSubjectLookup(db)
+	ctx := context.Background()
+	for id, want := range map[string]bool{"op-live": true, "cl-live": true, "cl-gone": true, "nobody": false, "": false} {
+		got, err := lookup(ctx, id)
+		if err != nil || got != want {
+			t.Errorf("lookup(%q) = %v, %v; want %v", id, got, err, want)
+		}
+	}
+}

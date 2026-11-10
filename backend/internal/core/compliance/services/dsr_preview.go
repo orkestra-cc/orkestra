@@ -134,6 +134,7 @@ type DSRPreview struct {
 type previewDSR interface {
 	CountAll(ctx context.Context, userUUID string) []ProducerCount
 	EvaluateRetention(ctx context.Context, userUUID string) (*RetentionGateError, error)
+	SubjectExists(ctx context.Context, userUUID string) (bool, error)
 }
 
 type previewHolds interface {
@@ -162,10 +163,19 @@ func NewDSRPreviewService(dsr previewDSR, holds previewHolds, requests previewRe
 }
 
 // Preview gathers the legal holds, the retention gate, the open requests and
-// the per-producer counts. A failure to read the holds or the requests fails
+// the per-producer counts. An unknown subject is ErrSubjectNotFound and nothing
+// is audited. A failure to read the holds or the requests fails
 // the preview (their state is unknown); a retention or counter failure is
 // reported in the preview itself.
 func (s *DSRPreviewService) Preview(ctx context.Context, userUUID string) (*DSRPreview, error) {
+	userUUID = NormalizeSubjectUUID(userUUID)
+	exists, err := s.dsr.SubjectExists(ctx, userUUID)
+	if err != nil {
+		return nil, fmt.Errorf("look up subject: %w", err)
+	}
+	if !exists {
+		return nil, ErrSubjectNotFound
+	}
 	holds, err := s.holds.ListActive(ctx, userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("list active legal holds: %w", err)

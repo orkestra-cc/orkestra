@@ -205,14 +205,16 @@ const LegalHoldsTab = () => {
           </IconButton>
           {original.active && (
             <>
-              <IconButton
-                size="sm"
-                variant="outline-secondary"
-                icon="edit"
-                onClick={() => setEditTarget(original)}
-              >
-                {t('adminCompliance.holds.edit.open')}
-              </IconButton>
+              {!original.expired && (
+                <IconButton
+                  size="sm"
+                  variant="outline-secondary"
+                  icon="edit"
+                  onClick={() => setEditTarget(original)}
+                >
+                  {t('adminCompliance.holds.edit.open')}
+                </IconButton>
+              )}
               <IconButton
                 size="sm"
                 variant="outline-secondary"

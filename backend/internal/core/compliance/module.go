@@ -371,6 +371,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		erasureRepoForExports := repository.NewErasureRequestRepo(deps.DB)
 		dsrSvc := services.NewDSRService(reg, sink, deps.Logger)
 		dsrSvc.SetLegalHoldChecker(legalHoldSvc)
+		dsrSvc.SetSubjectLookup(services.NewSubjectLookup(deps.DB))
 		// Stored exports: operator-generated exports kept as expiring blobs.
 		// Without object storage the store is nil and creating one answers 503.
 		var exportStore iface.ObjectStore

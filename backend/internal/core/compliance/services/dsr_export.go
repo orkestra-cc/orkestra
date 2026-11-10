@@ -25,6 +25,10 @@ const DSRExportDownloadTTL = 5 * time.Minute
 
 const defaultExportRetentionDays = 30
 
+// exportMarkerSkew is the clock skew a Create tolerates between replicas when
+// it compares an erasure marker with its own start.
+const exportMarkerSkew = 2 * time.Second
+
 var (
 	// ErrExportStorageUnavailable: no object store is configured.
 	ErrExportStorageUnavailable = errors.New("compliance: object storage for DSR exports is not available")
@@ -112,6 +116,10 @@ func (s *DSRExportService) Create(ctx context.Context, userUUID, format, reason,
 	if !ok {
 		return nil, ErrReasonRequired
 	}
+	userUUID = NormalizeSubjectUUID(userUUID)
+	if err := s.dsr.requireSubject(ctx, userUUID); err != nil {
+		return nil, err
+	}
 	if s.store == nil {
 		return nil, ErrExportStorageUnavailable
 	}
@@ -177,7 +185,9 @@ func (s *DSRExportService) Create(ctx context.Context, userUUID, format, reason,
 	// outlive the erasure.
 	if s.markers != nil {
 		at, ok, merr := s.markers.ErasedAt(ctx, userUUID)
-		if merr != nil || (ok && !at.Before(started)) {
+		// Replicas' clocks differ a little: a marker written up to
+		// exportMarkerSkew before this export began still counts as racing.
+		if merr != nil || (ok && at.After(started.Add(-exportMarkerSkew))) {
 			if derr := s.deleteOne(ctx, *row); derr != nil {
 				s.logger.Warn("DSR export: could not remove an export that raced an erasure", slog.String("exportUuid", id))
 			}
@@ -203,7 +213,7 @@ func (s *DSRExportService) Create(ctx context.Context, userUUID, format, reason,
 
 // List returns the subject's exports, newest first.
 func (s *DSRExportService) List(ctx context.Context, userUUID string) ([]models.DSRExport, error) {
-	return s.repo.ListByUser(ctx, userUUID)
+	return s.repo.ListByUser(ctx, NormalizeSubjectUUID(userUUID))
 }
 
 // DownloadURL mints a 5-minute URL for the export. An export past its expiry is

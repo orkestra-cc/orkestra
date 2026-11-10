@@ -463,21 +463,25 @@ export const complianceApi = baseApi.injectEndpoints({
         method: 'POST',
         body: mode ? { mode } : {}
       }),
+      // An erasure deletes the subject's stored exports: refetch their list.
       invalidatesTags: (_r, e) =>
-        e ? [] : [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+        e
+          ? []
+          : [
+              { type: 'ErasureRequest' as const, id: 'LIST' },
+              { type: 'DSRExport' as const, id: 'LIST' }
+            ]
     }),
-    rejectErasureRequest: builder.mutation<void, { id: string; note?: string }>(
-      {
-        query: ({ id, note }) => ({
-          url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
-            id
-          )}/reject`,
-          method: 'POST',
-          body: { note }
-        }),
-        invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
-      }
-    ),
+    rejectErasureRequest: builder.mutation<void, { id: string; note: string }>({
+      query: ({ id, note }) => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/reject`,
+        method: 'POST',
+        body: { note }
+      }),
+      invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
     closeErasureRequest: builder.mutation<
       ErasureRequest,
       { id: string; note: string }

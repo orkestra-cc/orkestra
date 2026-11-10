@@ -111,7 +111,7 @@ func TestErasureExecuteNotFoundIs404(t *testing.T) {
 func TestErasureRejectNotFoundIs404(t *testing.T) {
 	t.Parallel()
 	h := newErasureHandler(erasuretest.NewMemRepo(), newDSR())
-	_, err := h.Reject(authedCtx("admin-1"), &RejectErasureRequestInput{ID: "missing"})
+	_, err := h.Reject(authedCtx("admin-1"), rejectInput("missing", "not needed"))
 	assertStatus(t, err, 404)
 }
 
@@ -177,7 +177,7 @@ func TestErasureExecuteBusyIs409(t *testing.T) {
 func TestErasureRejectIncompleteIs409(t *testing.T) {
 	t.Parallel()
 	h := newErasureHandler(seeded(incompleteRow()), newDSR())
-	_, err := h.Reject(authedCtx("admin-1"), &RejectErasureRequestInput{ID: "r-1"})
+	_, err := h.Reject(authedCtx("admin-1"), rejectInput("r-1", "not needed"))
 	assertCode(t, err, http.StatusConflict, errcode.ComplianceErasureRequestStarted)
 }
 
@@ -349,4 +349,17 @@ func TestErasureListRouteWithoutQueryParams(t *testing.T) {
 	if rec.Code != 422 || !strings.Contains(rec.Body.String(), errcode.ComplianceInvalidCursor) {
 		t.Fatalf("bad cursor: %d %s", rec.Code, rec.Body)
 	}
+}
+
+func rejectInput(id, note string) *RejectErasureRequestInput {
+	in := &RejectErasureRequestInput{ID: id}
+	in.Body.Note = note
+	return in
+}
+
+func TestErasureRejectWithoutNoteIs422(t *testing.T) {
+	t.Parallel()
+	h := newErasureHandler(seeded(models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestPending}), newDSR())
+	_, err := h.Reject(authedCtx("admin-1"), rejectInput("r-1", "  "))
+	assertCode(t, err, http.StatusUnprocessableEntity, errcode.ComplianceReasonRequired)
 }

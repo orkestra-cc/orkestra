@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
@@ -165,6 +165,32 @@ describe('complianceApi', () => {
         body: { mode: 'anonymize', note: 'ok' }
       }
     ]);
+  });
+
+  it('a successful execute refetches the stored exports of the subject', async () => {
+    let lists = 0;
+    server.use(
+      http.get(url('/v1/admin/compliance/dsr/exports'), () => {
+        lists++;
+        return HttpResponse.json({ items: [] });
+      }),
+      http.post(url('/v1/admin/compliance/erasure-requests/er-1/execute'), () =>
+        HttpResponse.json({ status: 'completed', purged: {}, progress: [] })
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    const sub = store.dispatch(
+      complianceApi.endpoints.listDsrExports.initiate('u-1')
+    );
+    await sub.unwrap();
+    expect(lists).toBe(1);
+    await store
+      .dispatch(
+        complianceApi.endpoints.executeErasureRequest.initiate({ id: 'er-1' })
+      )
+      .unwrap();
+    await vi.waitFor(() => expect(lists).toBe(2));
+    sub.unsubscribe();
   });
 
   it('executeErasureRequest omits the mode when none is given', async () => {

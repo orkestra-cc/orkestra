@@ -73,6 +73,7 @@ var goldenCodes = map[string]string{
 	"ComplianceExportExpired":                "compliance.export_expired",
 	"ComplianceExportErasureInProgress":      "compliance.export_erasure_in_progress",
 	"ComplianceExportNotFound":               "compliance.export_not_found",
+	"ComplianceSubjectNotFound":              "compliance.subject_not_found",
 	"AuthEmailInUse":                         "auth.email_in_use",
 	"AuthJWTNotConfigured":                   "auth.jwt_not_configured",
 	"AuthUnavailable":                        "auth.unavailable",

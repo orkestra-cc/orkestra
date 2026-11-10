@@ -54,7 +54,7 @@ type ComplianceDSRExportDownload struct {
 
 type CreateDSRExportInput struct {
 	Body struct {
-		UserUUID string `json:"userUuid" minLength:"1" doc:"Data subject"`
+		UserUUID string `json:"userUuid" format:"uuid" doc:"Data subject; lower-cased server-side"`
 		Format   string `json:"format" enum:"json,csv" doc:"Export format"`
 		Reason   string `json:"reason" doc:"Why the operator generates the export (1 to 500 characters)"`
 	}
@@ -73,7 +73,7 @@ func (h *DSRExportHandler) Create(ctx context.Context, in *CreateDSRExportInput)
 }
 
 type ListDSRExportsInput struct {
-	UserUUID string `query:"userUuid" required:"true" minLength:"1" doc:"Data subject"`
+	UserUUID string `query:"userUuid" required:"true" format:"uuid" doc:"Data subject"`
 }
 type ListDSRExportsOutput struct {
 	Body struct {
@@ -112,6 +112,8 @@ func (h *DSRExportHandler) Download(ctx context.Context, in *DownloadDSRExportIn
 
 func mapDSRExportError(err error, op string) error {
 	switch {
+	case errors.Is(err, services.ErrSubjectNotFound):
+		return errcode.NotFound(errcode.ComplianceSubjectNotFound, "No user matches this subject UUID.")
 	case errors.Is(err, services.ErrExportStorageUnavailable):
 		return errcode.ServiceUnavailable(errcode.ComplianceExportStorageUnavailable, "Object storage is not configured, so exports cannot be stored.")
 	case errors.Is(err, services.ErrExportExpired):

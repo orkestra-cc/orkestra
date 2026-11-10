@@ -205,7 +205,9 @@ const CompliancePage = () => {
               <Tab.Pane eventKey="requests">
                 <ErasureRequestsTab />
               </Tab.Pane>
-              <Tab.Pane eventKey="subject">
+              {/* mountOnEnter: the preview is audited (gdpr.dsr.previewed) per load, so
+                  it must not run for a subject nobody opened the tab for. */}
+              <Tab.Pane eventKey="subject" mountOnEnter>
                 <SubjectTab />
               </Tab.Pane>
               <Tab.Pane eventKey="holds">

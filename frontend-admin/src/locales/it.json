@@ -2573,6 +2573,8 @@
       "executeError": "Esecuzione non riuscita (o bloccata da un vincolo legale)",
       "rejectSuccess": "Richiesta rifiutata",
       "rejectError": "Rifiuto non riuscito",
+      "rejectTitle": "Rifiuta questa richiesta di cancellazione",
+      "rejectBody": "La richiesta viene chiusa senza cancellare nulla. Indica il motivo (viene conservato, con i dati personali mascherati).",
       "close": "Chiudi",
       "closeTitle": "Chiudi una cancellazione parziale",
       "closeBody": "Questi produttori non sono più installati e non finiranno mai: {{keys}}. Chiudere registra la cancellazione come parziale; non si può annullare.",
@@ -2663,7 +2665,8 @@
         "export_storage_unavailable": "L'archivio delle esportazioni non è disponibile; riprova più tardi",
         "export_erasure_in_progress": "È in corso una cancellazione di questo interessato; le esportazioni sono bloccate",
         "export_expired": "Questa esportazione è scaduta",
-        "export_not_found": "Esportazione non trovata"
+        "export_not_found": "Esportazione non trovata",
+        "subject_not_found": "Nessun utente corrisponde a questo UUID del soggetto."
       },
       "retentionReason": {
         "platform_minimum": "conservazione minima di piattaforma"
@@ -2729,6 +2732,7 @@
         "error": "Aggiornamento non riuscito"
       },
       "notes": {
+        "readOnly": "Questo blocco è terminato: non si possono più aggiungere note.",
         "open": "Note ({{count}})",
         "title": "Note del blocco",
         "empty": "Nessuna nota.",

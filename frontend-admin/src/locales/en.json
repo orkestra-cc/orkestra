@@ -2573,6 +2573,8 @@
       "executeError": "Execute failed (or blocked by a legal hold)",
       "rejectSuccess": "Request rejected",
       "rejectError": "Reject failed",
+      "rejectTitle": "Reject this erasure request",
+      "rejectBody": "The request is closed without erasing anything. Give the reason (it is stored, with personal data masked).",
       "close": "Close",
       "closeTitle": "Close a partial erasure",
       "closeBody": "These producers are no longer installed and will never finish: {{keys}}. Closing records the erasure as partial; it cannot be undone.",
@@ -2663,7 +2665,8 @@
         "export_storage_unavailable": "Export storage is unavailable; try again later",
         "export_erasure_in_progress": "An erasure of this subject is in progress; exports are blocked",
         "export_expired": "This export has expired",
-        "export_not_found": "Export not found"
+        "export_not_found": "Export not found",
+        "subject_not_found": "No user matches this subject UUID."
       },
       "retentionReason": {
         "platform_minimum": "platform minimum retention"
@@ -2729,6 +2732,7 @@
         "error": "Update failed"
       },
       "notes": {
+        "readOnly": "This hold has ended, so notes can no longer be added.",
         "open": "Notes ({{count}})",
         "title": "Hold notes",
         "empty": "No notes yet.",

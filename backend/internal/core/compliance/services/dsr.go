@@ -47,6 +47,7 @@ type DSRService struct {
 	logger        *slog.Logger
 	holdChecker   LegalHoldChecker
 	retentionGate *RetentionGate
+	subjectLookup SubjectLookup
 	warnedKeys    sync.Map      // suffixed producer keys already warned about
 	countTimeout  time.Duration // per-producer count timeout; 0 = producerCountTimeout
 }

@@ -4,9 +4,14 @@ import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { useTranslation } from 'react-i18next';
+import { UUID_RE } from './legalHoldDates';
 
 const schema = yup.object({
-  userUuid: yup.string().trim().required(),
+  userUuid: yup
+    .string()
+    .trim()
+    .required()
+    .test('uuid', 'invalid', v => UUID_RE.test(v ?? '')),
   mode: yup.string().required(),
   reason: yup.string().trim().required().max(500)
 });
@@ -53,7 +58,9 @@ const OpenErasureRequestModal = ({
         noValidate
         onSubmit={handleSubmit(v =>
           onSubmit({
-            userUuid: v.userUuid.trim(),
+            // Lower-cased: the shared UUID pattern accepts either case, the
+            // backend stores one.
+            userUuid: v.userUuid.trim().toLowerCase(),
             mode: v.mode,
             reason: v.reason.trim()
           })
@@ -72,7 +79,7 @@ const OpenErasureRequestModal = ({
               {...register('userUuid')}
             />
             <Form.Control.Feedback type="invalid">
-              {t('adminCompliance.erasure.open.required')}
+              {t('adminCompliance.subject.invalidUuid')}
             </Form.Control.Feedback>
           </Form.Group>
           <Form.Group className="mb-3" controlId="open-erasure-mode">

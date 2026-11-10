@@ -277,6 +277,51 @@ describe('SubjectTab', () => {
     expect(clicked[0].rel).toBe('noopener');
   });
 
+  it('disables the download of an export past its expiry', async () => {
+    server.use(
+      http.get(url(`${P}/preview`), () => HttpResponse.json(preview())),
+      http.get(url(`${P}/exports`), () =>
+        HttpResponse.json({
+          items: [
+            {
+              uuid: 'x1',
+              userUuid: '11111111-1111-4111-8111-111111111111',
+              format: 'json',
+              requestedBy: 'op',
+              reason: 'r',
+              createdAt: '2020-01-01T10:00:00Z',
+              expiresAt: '2020-02-01T10:00:00Z',
+              sizeBytes: 5
+            }
+          ]
+        })
+      )
+    );
+    render('/?tab=subject&userUuid=11111111-1111-4111-8111-111111111111');
+    expect(
+      await screen.findByRole('button', { name: /download/i })
+    ).toBeDisabled();
+    expect(screen.getByText(/expired/i)).toBeInTheDocument();
+  });
+
+  it('lower-cases a typed subject before loading it', async () => {
+    server.use(
+      http.get(url(`${P}/preview`), () => HttpResponse.json(preview())),
+      http.get(url(`${P}/exports`), () => HttpResponse.json({ items: [] }))
+    );
+    render('/?tab=subject');
+    await userEvent.type(
+      screen.getByLabelText(/subject useruuid/i),
+      '11111111-AAAA-4111-8111-111111111111'
+    );
+    await userEvent.click(screen.getByRole('button', { name: /^load$/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId('loc').textContent).toContain(
+        'userUuid=11111111-aaaa-4111-8111-111111111111'
+      )
+    );
+  });
+
   it('shows the expired message on a 410 download', async () => {
     const clicked: HTMLAnchorElement[] = [];
     const click = vi

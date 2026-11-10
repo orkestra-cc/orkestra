@@ -261,6 +261,8 @@ func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string,
 	r.LeaseUntil, r.NextAttemptAt, r.Attempts, r.LastError = &lease, cloneTime(&lease), 1, ""
 	if fromStatus == models.ErasureRequestPending {
 		r.Status, r.Mode, r.ResolvedBy = models.ErasureRequestIncomplete, mode, actor
+	} else {
+		r.LastRunBy = actor
 	}
 	m.rows[uuid] = r
 	c := clone(r)

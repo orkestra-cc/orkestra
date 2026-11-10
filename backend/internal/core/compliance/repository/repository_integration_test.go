@@ -534,6 +534,10 @@ func TestErasureClaimFromIncompleteKeepsModeAndResets(t *testing.T) {
 	if got.Mode != "anonymize" || got.ResolvedBy != "admin-1" || got.Attempts != 1 || got.LastError != "" || got.Status != models.ErasureRequestIncomplete {
 		t.Fatalf("claimed = %+v", got)
 	}
+	// The retrying operator is recorded apart from the first executor.
+	if got.LastRunBy != "admin-2" {
+		t.Fatalf("lastRunBy = %q, want admin-2", got.LastRunBy)
+	}
 }
 
 // --- kms keys --------------------------------------------------------------

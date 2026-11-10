@@ -201,7 +201,7 @@ func leaseFree(now time.Time) []bson.M {
 // Claim takes the lease on one request for an erasure run. fromStatus is the
 // status the caller expects: pending (first execution: the row becomes
 // incomplete with mode and resolver recorded) or incomplete (an operator
-// retry: mode and resolver stay). Either way the attempt budget restarts and
+// retry: mode and resolver stay, lastRunBy records the retrying operator). Either way the attempt budget restarts and
 // this run is attempt 1. It returns the row after the update.
 //
 // approval (pending only) is appended to the row's approvals in the same
@@ -215,6 +215,9 @@ func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, 
 	set := bson.M{"leaseUntil": lease, "nextAttemptAt": lease, "attempts": 1}
 	filter := bson.M{"uuid": uuid, "status": fromStatus, "$or": leaseFree(now)}
 	update := bson.M{"$set": set, "$unset": bson.M{"lastError": ""}}
+	if fromStatus == models.ErasureRequestIncomplete {
+		set["lastRunBy"] = actor // the operator retrying; resolvedBy stays the first executor
+	}
 	if fromStatus == models.ErasureRequestPending {
 		set["status"] = models.ErasureRequestIncomplete
 		set["mode"] = mode

@@ -24,6 +24,8 @@ const LegalHoldNotesModal = ({ hold, busy, onClose, onAdd }: Props) => {
     if (await onAdd(trimmed)) setText('');
   };
   const notes = hold?.notes ?? [];
+  // An expired or released hold is history: no new notes.
+  const readOnly = !!hold && (hold.expired || !hold.active);
   return (
     <Modal show={!!hold} onHide={onClose} centered>
       <Modal.Header closeButton>
@@ -49,27 +51,33 @@ const LegalHoldNotesModal = ({ hold, busy, onClose, onAdd }: Props) => {
             ))}
           </ul>
         )}
-        <Form onSubmit={submit}>
-          <Form.Group controlId="hold-note-text">
-            <Form.Label>{t('adminCompliance.holds.notes.label')}</Form.Label>
-            <Form.Control
-              as="textarea"
-              rows={2}
-              maxLength={1000}
-              value={text}
-              onChange={e => setText(e.target.value)}
-            />
-          </Form.Group>
-          <Button
-            className="mt-2"
-            type="submit"
-            size="sm"
-            variant="orkestra-primary"
-            disabled={busy || !trimmed}
-          >
-            {t('adminCompliance.holds.notes.add')}
-          </Button>
-        </Form>
+        {readOnly ? (
+          <p className="fs-10 text-muted mb-0">
+            {t('adminCompliance.holds.notes.readOnly')}
+          </p>
+        ) : (
+          <Form onSubmit={submit}>
+            <Form.Group controlId="hold-note-text">
+              <Form.Label>{t('adminCompliance.holds.notes.label')}</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={2}
+                maxLength={1000}
+                value={text}
+                onChange={e => setText(e.target.value)}
+              />
+            </Form.Group>
+            <Button
+              className="mt-2"
+              type="submit"
+              size="sm"
+              variant="orkestra-primary"
+              disabled={busy || !trimmed}
+            >
+              {t('adminCompliance.holds.notes.add')}
+            </Button>
+          </Form>
+        )}
       </Modal.Body>
     </Modal>
   );

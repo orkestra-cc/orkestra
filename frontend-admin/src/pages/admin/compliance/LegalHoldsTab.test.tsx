@@ -197,4 +197,28 @@ describe('LegalHoldsTab', () => {
     await waitFor(() => expect(body).toEqual({ text: 'second' }));
     await screen.findByText('second');
   });
+
+  it('offers no edit and no new note on a hold that has expired', async () => {
+    server.use(
+      http.get(url(L), () =>
+        HttpResponse.json({
+          items: [
+            hold({
+              expired: true,
+              notes: [
+                { id: 'n1', by: 'op', at: '2026-06-02T10:00:00Z', text: 'kept' }
+              ]
+            })
+          ]
+        })
+      )
+    );
+    renderWithProviders(<LegalHoldsTab />);
+    await screen.findByText('u-1');
+    expect(rowOf('u-1').queryByRole('button', { name: /edit/i })).toBeNull();
+    await userEvent.click(rowOf('u-1').getByRole('button', { name: /notes/i }));
+    await screen.findByText('kept');
+    expect(screen.queryByLabelText(/add a note/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /add note/i })).toBeNull();
+  });
 });

@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 // DSRPreviewHandler is the admin surface of the dry-run erasure preview.
@@ -48,7 +50,7 @@ type ComplianceDSRPreview struct {
 }
 
 type DSRPreviewInput struct {
-	UserUUID string `query:"userUuid" required:"true" minLength:"1" doc:"Data subject"`
+	UserUUID string `query:"userUuid" required:"true" format:"uuid" doc:"Data subject"`
 }
 type DSRPreviewOutput struct {
 	Body ComplianceDSRPreview
@@ -57,6 +59,9 @@ type DSRPreviewOutput struct {
 // Preview handles GET /v1/admin/compliance/dsr/preview.
 func (h *DSRPreviewHandler) Preview(ctx context.Context, in *DSRPreviewInput) (*DSRPreviewOutput, error) {
 	p, err := h.svc.Preview(ctx, in.UserUUID)
+	if errors.Is(err, services.ErrSubjectNotFound) {
+		return nil, errcode.NotFound(errcode.ComplianceSubjectNotFound, "No user matches this subject UUID.")
+	}
 	if err != nil {
 		return nil, huma.Error500InternalServerError("dsr preview", err)
 	}

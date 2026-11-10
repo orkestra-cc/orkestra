@@ -106,6 +106,9 @@ type ErasureRequest struct {
 	LeaseUntil    *time.Time                `bson:"leaseUntil,omitempty" json:"-"`
 	LastError     string                    `bson:"lastError,omitempty" json:"lastError,omitempty"`
 	Abandoned     []string                  `bson:"abandoned,omitempty" json:"abandoned,omitempty"` // closed_partial: producer keys never done
+	// LastRunBy is the operator who last restarted an incomplete request by
+	// hand; ResolvedBy stays the one who first executed it.
+	LastRunBy string `bson:"lastRunBy,omitempty" json:"lastRunBy,omitempty"`
 
 	// RequestedBy is the operator who opened an admin request; RequiredApprovals
 	// is the number of distinct operators snapshotted at creation (absent = 1);

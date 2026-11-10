@@ -134,17 +134,65 @@ describe('ErasureRequestsTab', () => {
     await user.click(
       await screen.findByRole('button', { name: /new request/i })
     );
-    await user.type(screen.getByLabelText(/subject useruuid/i), 'u-77');
+    // An upper-case subject is accepted by the shape check and sent lower-case.
+    await user.type(
+      screen.getByLabelText(/subject useruuid/i),
+      '7C1E5B3A-4F0D-4A2E-9B8C-1D2E3F4A5B6C'
+    );
     await user.selectOptions(screen.getByLabelText(/^mode/i), 'anonymize');
     await user.type(screen.getByLabelText(/^reason/i), 'subject asked');
     await user.click(screen.getByRole('button', { name: /open request/i }));
     await waitFor(() =>
       expect(body).toEqual({
-        userUuid: 'u-77',
+        userUuid: '7c1e5b3a-4f0d-4a2e-9b8c-1d2e3f4a5b6c',
         mode: 'anonymize',
         reason: 'subject asked'
       })
     );
+  });
+
+  it('refuses a malformed subject in the open form and sends nothing', async () => {
+    let posts = 0;
+    server.use(
+      http.get(url(LIST), () => HttpResponse.json({ items: [] })),
+      http.post(url(LIST), () => {
+        posts++;
+        return HttpResponse.json(row({}), { status: 201 });
+      })
+    );
+    renderWithProviders(<ErasureRequestsTab />);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole('button', { name: /new request/i })
+    );
+    await user.type(screen.getByLabelText(/subject useruuid/i), 'u-77');
+    await user.type(screen.getByLabelText(/^reason/i), 'subject asked');
+    await user.click(screen.getByRole('button', { name: /open request/i }));
+    expect(await screen.findByText(/valid user uuid/i)).toBeInTheDocument();
+    expect(posts).toBe(0);
+  });
+
+  it('rejects with a mandatory note', async () => {
+    let body: unknown;
+    server.use(
+      http.get(url(LIST), () =>
+        HttpResponse.json({ items: [row({ uuid: 'a', userUuid: 'u-a' })] })
+      ),
+      http.post(url(`${LIST}/:id/reject`), async ({ request }) => {
+        body = await request.json();
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderWithProviders(<ErasureRequestsTab />);
+    const user = userEvent.setup();
+    await screen.findByText('u-a');
+    await user.click(rowOf('u-a').getByRole('button', { name: /^reject$/i }));
+    const dialog = within(await screen.findByRole('dialog'));
+    await user.click(dialog.getByRole('button', { name: /^reject$/i }));
+    expect(body).toBeUndefined();
+    await user.type(dialog.getByLabelText(/reason/i), 'no proof of identity');
+    await user.click(dialog.getByRole('button', { name: /^reject$/i }));
+    await waitFor(() => expect(body).toEqual({ note: 'no proof of identity' }));
   });
 
   it('approves with mode and note, and translates a self-approval error', async () => {

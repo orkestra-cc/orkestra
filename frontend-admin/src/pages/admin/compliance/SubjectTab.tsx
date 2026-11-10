@@ -33,7 +33,8 @@ import { UUID_RE, expiryDisplayInstant } from './legalHoldDates';
 const SubjectTab = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const rawUuid = (searchParams.get('userUuid') ?? '').trim();
+  // Lower-cased: the backend stores and matches subjects in lower case.
+  const rawUuid = (searchParams.get('userUuid') ?? '').trim().toLowerCase();
   // Only a well-formed UUID is loaded; anything else shows a field error.
   const userUuid = UUID_RE.test(rawUuid) ? rawUuid : '';
   const [draft, setDraft] = useState(rawUuid);
@@ -57,7 +58,7 @@ const SubjectTab = () => {
 
   const onLoad = (e: FormEvent) => {
     e.preventDefault();
-    const v = draft.trim();
+    const v = draft.trim().toLowerCase();
     if (v && !UUID_RE.test(v)) {
       setFieldError(true);
       return;
@@ -215,6 +216,7 @@ const SubjectTab = () => {
           size="sm"
           variant="outline-secondary"
           icon="download"
+          disabled={Date.parse(original.expiresAt) < Date.now()}
           onClick={() => onDownload(original.uuid)}
         >
           {t('adminCompliance.subject.exports.download')}

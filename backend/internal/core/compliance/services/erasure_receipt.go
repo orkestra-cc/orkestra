@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
@@ -32,6 +33,7 @@ type ErasureReceipt struct {
 	RequestedBy     string     `json:"requestedBy,omitempty"`
 	Mode            string     `json:"mode,omitempty"`
 	ExecutedBy      string     `json:"executedBy,omitempty"`
+	RetriedBy       string     `json:"retriedBy,omitempty" doc:"The operator who last restarted the incomplete request by hand, when one did"`
 	Status          string     `json:"status" enum:"completed,closed_partial"`
 	CloseNote       string     `json:"closeNote,omitempty" doc:"closed_partial: the operator's masked note"`
 	RequestedAt     time.Time  `json:"requestedAt"`
@@ -61,6 +63,7 @@ func BuildErasureReceipt(row *models.ErasureRequest, now time.Time) (*ErasureRec
 		RequestedBy:     row.RequestedBy,
 		Mode:            row.Mode,
 		ExecutedBy:      row.ResolvedBy,
+		RetriedBy:       row.LastRunBy,
 		Status:          row.Status,
 		RequestedAt:     row.RequestedAt,
 		CompletedAt:     row.ResolvedAt,
@@ -100,6 +103,7 @@ func (r *ErasureReceipt) auditMetadata() map[string]any {
 		"requestedBy":         r.RequestedBy,
 		"mode":                r.Mode,
 		"executedBy":          r.ExecutedBy,
+		"retriedBy":           r.RetriedBy,
 		"status":              r.Status,
 		"requestedAt":         r.RequestedAt,
 		"attempts":            r.Attempts,
@@ -124,13 +128,9 @@ func (s *ErasureRequestService) emitReceipt(ctx context.Context, row *models.Era
 	if err != nil {
 		return
 	}
-	actorType := models.ActorTypeUser
-	if actor == "" || actor == erasureWorkerActor {
-		actorType = models.ActorTypeSystem
-	}
 	s.sink.Emit(ctx, iface.AuditEvent{
 		ActorUserID:  actor,
-		ActorType:    actorType,
+		ActorType:    actorTypeOf(actor),
 		Action:       "gdpr.dsr.erasure_receipt",
 		ResourceType: "erasure_request",
 		ResourceID:   row.UUID,
@@ -148,4 +148,13 @@ func (s *ErasureRequestService) Receipt(ctx context.Context, requestUUID string)
 		return nil, err
 	}
 	return BuildErasureReceipt(row, s.now())
+}
+
+// actorTypeOf labels an audit actor: empty and "system:" actors (the retry
+// worker, the retention job) are the system, anything else a user.
+func actorTypeOf(actor string) string {
+	if actor == "" || strings.HasPrefix(actor, "system:") {
+		return models.ActorTypeSystem
+	}
+	return models.ActorTypeUser
 }

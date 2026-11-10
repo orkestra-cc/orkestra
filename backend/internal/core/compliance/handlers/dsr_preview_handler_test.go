@@ -67,7 +67,7 @@ func TestDSRPreviewRouteRequiresUserUuid(t *testing.T) {
 	if resp.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("missing userUuid = %d", resp.Code)
 	}
-	if ok := api.Get("/v1/admin/compliance/dsr/preview?userUuid=u"); ok.Code != http.StatusOK {
+	if ok := api.Get("/v1/admin/compliance/dsr/preview?userUuid=7c1e5b3a-4f0d-4a2e-9b8c-1d2e3f4a5b6c"); ok.Code != http.StatusOK {
 		t.Fatalf("ok = %d %s", ok.Code, ok.Body.String())
 	}
 }

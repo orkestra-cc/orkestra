@@ -54,7 +54,7 @@ func (h *ErasureRequestHandler) Lodge(ctx context.Context, in *LodgeErasureReque
 
 type ListErasureRequestsInput struct {
 	Status   string `query:"status" enum:"open,completed,rejected,closed_partial,all" default:"open" doc:"open (pending and incomplete, the default), completed, rejected, closed_partial or all"`
-	UserUUID string `query:"userUuid" doc:"Only the requests of this data subject"`
+	UserUUID string `query:"userUuid" format:"uuid" doc:"Only the requests of this data subject"`
 	Limit    int    `query:"limit" minimum:"1" maximum:"200" doc:"Page size (1-200). Omitted: 50, except for status open, which lists every open request"`
 	After    string `query:"after" doc:"Opaque cursor: the next of the previous page"`
 }
@@ -166,7 +166,7 @@ func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureR
 // request for a subject.
 type OpenErasureRequestInput struct {
 	Body struct {
-		UserUUID string `json:"userUuid" minLength:"1" doc:"UUID of the data subject to erase"`
+		UserUUID string `json:"userUuid" format:"uuid" doc:"UUID of the data subject to erase; lower-cased server-side"`
 		Reason   string `json:"reason" minLength:"1" maxLength:"500" doc:"Why the subject is erased; also the opener's approval note"`
 		Mode     string `json:"mode" enum:"hard_delete,anonymize" doc:"Erasure mode; the request is locked to it"`
 	}
@@ -233,7 +233,7 @@ func parseHandlerMode(mode string) iface.EraseMode {
 type RejectErasureRequestInput struct {
 	ID   string `path:"id"`
 	Body struct {
-		Note string `json:"note,omitempty" doc:"Why the request is rejected"`
+		Note string `json:"note" minLength:"1" maxLength:"500" doc:"Why the request is rejected (masked before it is stored)"`
 	}
 }
 type RejectErasureRequestOutput struct{}
@@ -241,6 +241,9 @@ type RejectErasureRequestOutput struct{}
 func (h *ErasureRequestHandler) Reject(ctx context.Context, in *RejectErasureRequestInput) (*RejectErasureRequestOutput, error) {
 	actor, _ := ctxauth.GetUserUUID(ctx)
 	err := h.svc.Reject(ctx, in.ID, actor, in.Body.Note)
+	if apprErr := erasureApprovalError(err); apprErr != nil {
+		return nil, apprErr
+	}
 	if errors.Is(err, services.ErrErasureRequestStarted) {
 		return nil, errcode.Conflict(errcode.ComplianceErasureRequestStarted, "This erasure has started; it can be retried, not rejected.")
 	}
@@ -388,6 +391,8 @@ func erasureApprovalError(err error) error {
 	var miss *services.ErasureApprovalsMissingError
 	var exists *services.ErasureRequestExistsError
 	switch {
+	case errors.Is(err, services.ErrSubjectNotFound):
+		return errcode.NotFound(errcode.ComplianceSubjectNotFound, "No user matches this subject UUID.")
 	case errors.Is(err, services.ErrReasonRequired):
 		return errcode.UnprocessableEntity(errcode.ComplianceReasonRequired, "A reason or note of 1 to 500 characters is required.")
 	case errors.As(err, &exists):
