@@ -12,6 +12,10 @@ import CompliancePage from './index';
 vi.mock('react-toastify', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
 }));
+// The erasure tab reads the operator id (to count their own approval).
+vi.mock('hooks/auth/useAuthRTK', () => ({
+  useAuth: () => ({ currentUser: { id: 'op-me' } })
+}));
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.useRealTimers());
 

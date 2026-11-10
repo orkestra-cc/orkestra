@@ -2562,7 +2562,8 @@
         "reason": "Motivo",
         "status": "Stato",
         "requested": "Data richiesta",
-        "actions": "Azioni"
+        "actions": "Azioni",
+        "approvals": "Approvazioni"
       },
       "execute": "Esegui",
       "reject": "Rifiuta",
@@ -2582,16 +2583,78 @@
       "retriesExhausted": "Tentativi automatici esauriti",
       "lastError": {
         "legal_hold_active": "Bloccata da un blocco legale",
-        "run_failed": "Ultima esecuzione non riuscita"
+        "run_failed": "Ultima esecuzione non riuscita",
+        "retention_minimum": "Bloccata dalla conservazione minima"
       },
       "busy": "È in corso un'altra esecuzione; riprova tra qualche minuto",
       "source": {
         "self_service": "Self-service",
-        "retention": "Conservazione"
+        "retention": "Conservazione",
+        "admin": "Amministratore"
       },
       "emptyMessage": "Nessuna richiesta di cancellazione aperta.",
       "emptyHint": "Le richieste di cancellazione in attesa di revisione o di un nuovo tentativo appariranno qui.",
-      "searchPlaceholder": "Cerca per soggetto o motivo"
+      "searchPlaceholder": "Cerca per soggetto o motivo",
+      "approvalsNeeded": "Approvazioni {{have}}/{{need}}: servono altri approvatori prima di procedere",
+      "loadMore": "Carica altre",
+      "loadMoreError": "Impossibile caricare altre richieste",
+      "emptyFiltered": "Nessuna richiesta di cancellazione con questo stato.",
+      "filter": {
+        "label": "Filtro stato",
+        "open": "Aperte",
+        "completed": "Completate",
+        "rejected": "Rifiutate",
+        "closed_partial": "Chiuse (parziali)",
+        "all": "Tutte"
+      },
+      "mode": {
+        "hard_delete": "Cancellazione definitiva",
+        "anonymize": "Anonimizzazione"
+      },
+      "open": {
+        "button": "Nuova richiesta",
+        "title": "Apri una richiesta di cancellazione",
+        "subject": "userUuid del soggetto",
+        "mode": "Modalità",
+        "reason": "Motivo",
+        "required": "Obbligatorio",
+        "submit": "Apri richiesta",
+        "success": "Richiesta di cancellazione aperta",
+        "error": "Impossibile aprire la richiesta"
+      },
+      "approve": {
+        "button": "Approva",
+        "title": "Approva la cancellazione",
+        "note": "Nota",
+        "submit": "Approva",
+        "success": "Approvazione registrata",
+        "error": "Approvazione non riuscita"
+      },
+      "receipt": {
+        "open": "Ricevuta",
+        "title": "Ricevuta di cancellazione",
+        "download": "Scarica JSON",
+        "close": "Chiudi",
+        "completedAt": "Completata",
+        "totals": "Righe",
+        "totalsValue": "{{deleted}} eliminate, {{anonymized}} anonimizzate",
+        "producer": "Produttore",
+        "error": "Ricevuta non disponibile"
+      },
+      "errors": {
+        "erasure_approvals_missing": "Approvazioni insufficienti: {{have}} su {{need}}",
+        "erasure_self_approval": "Non puoi approvare una richiesta che hai aperto",
+        "erasure_already_approved": "Hai già approvato questa richiesta",
+        "erasure_mode_mismatch": "La modalità è diversa da quella già approvata",
+        "erasure_request_exists": "Esiste già una richiesta aperta per questo soggetto ({{requestId}})",
+        "erasure_request_busy": "Un'altra esecuzione è in corso; riprova tra qualche minuto",
+        "legal_hold_active": "Bloccata da un blocco legale",
+        "retention_minimum_not_met": "La cancellazione definitiva non è consentita prima del {{date}} (conservazione minima); usa l'anonimizzazione",
+        "retention_check_unavailable": "Il controllo di conservazione non è disponibile; riprova più tardi",
+        "reason_required": "Motivo o nota devono avere da 1 a 500 caratteri",
+        "invalid_cursor": "Il cursore di pagina non è più valido; ricarica l'elenco",
+        "erasure_receipt_unavailable": "La ricevuta non è disponibile per questa richiesta"
+      }
     },
     "holds": {
       "columns": {

@@ -2562,7 +2562,8 @@
         "reason": "Reason",
         "status": "Status",
         "requested": "Requested",
-        "actions": "Actions"
+        "actions": "Actions",
+        "approvals": "Approvals"
       },
       "execute": "Execute",
       "reject": "Reject",
@@ -2582,16 +2583,78 @@
       "retriesExhausted": "Automatic retries exhausted",
       "lastError": {
         "legal_hold_active": "Blocked by a legal hold",
-        "run_failed": "Last run failed"
+        "run_failed": "Last run failed",
+        "retention_minimum": "Blocked by the minimum retention period"
       },
       "busy": "Another run is in progress; try again in a few minutes",
       "source": {
         "self_service": "Self-service",
-        "retention": "Retention"
+        "retention": "Retention",
+        "admin": "Admin"
       },
       "emptyMessage": "No open erasure requests.",
       "emptyHint": "Erasure requests awaiting review or retry will appear here.",
-      "searchPlaceholder": "Search by subject or reason"
+      "searchPlaceholder": "Search by subject or reason",
+      "approvalsNeeded": "Approvals {{have}}/{{need}}: more approvers needed before this can run",
+      "loadMore": "Load more",
+      "loadMoreError": "Could not load more requests",
+      "emptyFiltered": "No erasure requests with this status.",
+      "filter": {
+        "label": "Status filter",
+        "open": "Open",
+        "completed": "Completed",
+        "rejected": "Rejected",
+        "closed_partial": "Closed (partial)",
+        "all": "All"
+      },
+      "mode": {
+        "hard_delete": "Hard delete",
+        "anonymize": "Anonymize"
+      },
+      "open": {
+        "button": "New request",
+        "title": "Open an erasure request",
+        "subject": "Subject userUuid",
+        "mode": "Mode",
+        "reason": "Reason",
+        "required": "Required",
+        "submit": "Open request",
+        "success": "Erasure request opened",
+        "error": "Could not open the request"
+      },
+      "approve": {
+        "button": "Approve",
+        "title": "Approve erasure",
+        "note": "Note",
+        "submit": "Approve",
+        "success": "Approval recorded",
+        "error": "Approval failed"
+      },
+      "receipt": {
+        "open": "Receipt",
+        "title": "Erasure receipt",
+        "download": "Download JSON",
+        "close": "Close",
+        "completedAt": "Completed",
+        "totals": "Rows",
+        "totalsValue": "{{deleted}} deleted, {{anonymized}} anonymized",
+        "producer": "Producer",
+        "error": "Receipt unavailable"
+      },
+      "errors": {
+        "erasure_approvals_missing": "Not enough approvals: {{have}} of {{need}}",
+        "erasure_self_approval": "You cannot approve a request you opened",
+        "erasure_already_approved": "You have already approved this request",
+        "erasure_mode_mismatch": "The mode differs from the one already approved",
+        "erasure_request_exists": "An open request already exists for this subject ({{requestId}})",
+        "erasure_request_busy": "Another run is in progress; try again in a few minutes",
+        "legal_hold_active": "Blocked by a legal hold",
+        "retention_minimum_not_met": "Hard delete is not allowed before {{date}} (minimum retention); anonymize instead",
+        "retention_check_unavailable": "The retention check is unavailable; try again later",
+        "reason_required": "The reason or note must be 1 to 500 characters",
+        "invalid_cursor": "The page cursor is no longer valid; reload the list",
+        "erasure_receipt_unavailable": "The receipt is not available for this request"
+      }
     },
     "holds": {
       "columns": {

@@ -46,6 +46,46 @@ export interface PurgeResult {
   pending?: boolean;
 }
 
+export interface ErasureApproval {
+  by: string;
+  at: string;
+  note?: string;
+}
+export type ErasureListStatus =
+  'open' | 'completed' | 'rejected' | 'closed_partial' | 'all';
+export interface ListErasureRequestsArgs {
+  status?: ErasureListStatus;
+  userUuid?: string;
+  limit?: number;
+  after?: string;
+}
+export interface ErasureReceipt {
+  requestUuid: string;
+  subjectUserUuid: string;
+  status: 'completed' | 'closed_partial';
+  mode?: string;
+  source?: string;
+  requestedBy?: string;
+  requestedAt: string;
+  completedAt?: string;
+  executedBy?: string;
+  attempts: number;
+  approvals: ErasureApproval[] | null;
+  producers:
+    | {
+        key: string;
+        outcome: ErasureProducerOutcome;
+        rowsDeleted?: number;
+        rowsAnonymized?: number;
+      }[]
+    | null;
+  abandoned: string[] | null;
+  closeNote?: string;
+  totalRowsDeleted: number;
+  totalRowsAnonymized: number;
+  generatedAt: string;
+}
+
 export interface ErasureRequest {
   uuid: string;
   userUuid: string;
@@ -56,7 +96,11 @@ export interface ErasureRequest {
   resolvedAt?: string;
   resolvedBy?: string;
   mode?: string;
-  source?: 'request' | 'self_service' | 'retention';
+  source?: 'request' | 'self_service' | 'retention' | 'admin';
+  requestedBy?: string;
+  // Missing on rows that predate the approvals workflow: counts as 1.
+  requiredApprovals?: number;
+  approvals?: ErasureApproval[];
   progress?: ErasureProducerProgress[];
   attempts?: number;
   nextAttemptAt?: string;
@@ -279,12 +323,58 @@ export const complianceApi = baseApi.injectEndpoints({
       providesTags: [{ type: 'AuditEvent' as const, id: 'LIST' }]
     }),
 
-    listErasureRequests: builder.query<{ items: ErasureRequest[] }, void>({
-      query: () => ({
-        url: '/v1/admin/compliance/erasure-requests',
-        method: 'GET'
-      }),
+    listErasureRequests: builder.query<
+      { items: ErasureRequest[]; next?: string },
+      ListErasureRequestsArgs | void
+    >({
+      query: args => {
+        const sp = new URLSearchParams();
+        if (args?.status && args.status !== 'open')
+          sp.set('status', args.status);
+        if (args?.userUuid) sp.set('userUuid', args.userUuid);
+        if (args?.limit) sp.set('limit', String(args.limit));
+        if (args?.after) sp.set('after', args.after);
+        const qs = sp.toString();
+        return {
+          url: `/v1/admin/compliance/erasure-requests${qs ? `?${qs}` : ''}`,
+          method: 'GET'
+        };
+      },
       providesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
+    openErasureRequest: builder.mutation<
+      ErasureRequest,
+      { userUuid: string; reason: string; mode: string }
+    >({
+      query: body => ({
+        url: '/v1/admin/compliance/erasure-requests',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
+    approveErasureRequest: builder.mutation<
+      ErasureRequest,
+      { id: string; mode: string; note: string }
+    >({
+      query: ({ id, mode, note }) => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/approve`,
+        method: 'POST',
+        body: { mode, note }
+      }),
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
+    getErasureReceipt: builder.query<ErasureReceipt, string>({
+      query: id => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/receipt`,
+        method: 'GET'
+      })
     }),
     executeErasureRequest: builder.mutation<
       {
@@ -292,16 +382,18 @@ export const complianceApi = baseApi.injectEndpoints({
         purged: Record<string, PurgeResult>;
         progress: ErasureProducerProgress[];
       },
-      { id: string; mode: string }
+      // mode omitted: the backend uses the mode locked by the approvals.
+      { id: string; mode?: string }
     >({
       query: ({ id, mode }) => ({
         url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
           id
         )}/execute`,
         method: 'POST',
-        body: { mode }
+        body: mode ? { mode } : {}
       }),
-      invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'ErasureRequest' as const, id: 'LIST' }]
     }),
     rejectErasureRequest: builder.mutation<void, { id: string; note?: string }>(
       {
@@ -544,6 +636,10 @@ export const complianceApi = baseApi.injectEndpoints({
 export const {
   useListAuditEventsQuery,
   useListErasureRequestsQuery,
+  useLazyListErasureRequestsQuery,
+  useOpenErasureRequestMutation,
+  useApproveErasureRequestMutation,
+  useGetErasureReceiptQuery,
   useExecuteErasureRequestMutation,
   useRejectErasureRequestMutation,
   useCloseErasureRequestMutation,
