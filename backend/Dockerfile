@@ -15,13 +15,18 @@
 # ============================================
 # STAGE 1: Base Dependencies
 # ============================================
-# Using Docker Hardened Images (DHI) for security
-# dhi.io/golang:<minor>-dev includes git, ca-certificates, tzdata, and build tools.
-# Pinned to the Go minor the gate tests (.mise.toml, backend/go.mod, CI) — never
-# the floating `1`, which silently moved production builds to a Go minor the
-# gate had never run. Patch releases arrive through `orkestra.sh` building with
-# --pull; bump the minor here together with .mise.toml and go.mod.
-FROM dhi.io/golang:1.27-dev AS base
+# TEMPORARY: the official golang:1.27.4-alpine image, pinned by digest, builds
+# the binary until the Docker Hardened Image dhi.io/golang:1.27-dev ships Go
+# 1.27.4. That image still carried 1.27.3 when the release came out, and under
+# GOTOOLCHAIN=local it refuses go.mod's `go 1.27.4`. The runtime stage below
+# stays on DHI: the binary is static (CGO off) and never uses the image's Go.
+# Go back to DHI once it carries the patch:
+#   FROM dhi.io/golang:1.27-dev AS base
+# (dhi.io/golang:<minor>-dev includes git, ca-certificates, tzdata and build
+# tools; pinned to the Go minor the gate tests — .mise.toml, backend/go.mod,
+# CI — never the floating `1`. Patch releases arrive through `orkestra.sh`
+# building with --pull.)
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS base
 
 # Set working directory
 WORKDIR /app
