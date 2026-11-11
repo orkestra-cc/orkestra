@@ -388,7 +388,10 @@ export default ({ mode }) => {
           }
         : true,
       watch: resolveWatchOptions(),
-      proxy: devProxy(process.env.VITE_DEV_PROXY_TARGET)
+      proxy: devProxy(process.env.VITE_DEV_PROXY_TARGET, {
+        target: process.env.VITE_DEV_STORAGE_PROXY_TARGET,
+        prefix: process.env.VITE_DEV_STORAGE_BUCKET_PREFIX
+      })
     }
   });
 };
