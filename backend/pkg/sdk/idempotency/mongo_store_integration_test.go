@@ -153,32 +153,54 @@ func TestMongoStaleOwnerCannotTouchNewOwnerRecord(t *testing.T) {
 
 func TestMiddlewareRenewalBlocksConcurrentRetry(t *testing.T) {
 	s, _ := newTestStore(t)
+	// The TTL leaves room for a slow Mongo on a loaded host: each renewal
+	// (every TTL/3) has a whole TTL to land before the lock lapses.
+	const ttl = time.Second
 	n := 0
 	var mu sync.Mutex
 	release := make(chan struct{})
-	h := Middleware(s, Options{LockTTL: 150 * time.Millisecond})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	entered := make(chan struct{})
+	h := Middleware(s, Options{LockTTL: ttl})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		n++
+		first := n == 1
 		mu.Unlock()
-		<-release
+		// Only the first call waits. If renewal ever loses the lock, the retry
+		// gets in here too and must return at once: blocking it would wait on
+		// a release that only comes after the retry returns, a deadlock until
+		// the go test timeout instead of a failure.
+		if first {
+			close(entered)
+			<-release
+		}
 		w.WriteHeader(201)
 	}))
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- do(t, h, "u1", goodKey, "a") }()
-	// Wait well past several LockTTLs: without renewal the lock would expire.
-	time.Sleep(600 * time.Millisecond)
-	rr := do(t, h, "u1", goodKey, "a")
-	if rr.Code != 409 || code(t, rr) != CodeInProgress {
-		t.Fatalf("retry got %d %s", rr.Code, rr.Body)
+	// The first request must hold the lock before the clock starts, or the
+	// retry would become the first call and wait on release itself.
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		close(release)
+		t.Fatal("first request never reached the handler")
 	}
+	// Wait well past several LockTTLs: without renewal the lock would expire.
+	time.Sleep(3 * ttl)
+	rr := do(t, h, "u1", goodKey, "a")
 	close(release)
-	if first := <-done; first.Code != 201 {
+	first := <-done
+	if rr.Code != 409 || code(t, rr) != CodeInProgress {
+		t.Fatalf("retry got %d %s (the retry took the lock: renewal did not land within LockTTL)", rr.Code, rr.Body)
+	}
+	if first.Code != 201 {
 		t.Fatalf("first got %d", first.Code)
 	}
 	mu.Lock()
-	defer mu.Unlock()
-	if n != 1 {
-		t.Fatalf("handler ran %d times", n)
+	ran := n
+	mu.Unlock()
+	if ran != 1 {
+		t.Fatalf("handler ran %d times", ran)
 	}
 	if rr := do(t, h, "u1", goodKey, "a"); rr.Code != 201 || rr.Header().Get(HeaderReplayed) != "true" {
 		t.Fatalf("replay got %d", rr.Code)
