@@ -79,6 +79,14 @@ This is deliberate rather than an oversight: verification and password-reset mai
 
 **Setting the type correctly is the caller's job.** Mail the user cannot opt out of — auth flows, invoices, legal notices — must set `transactional`. Anything else must set `marketing`, or preferences are silently not honored.
 
+The one thing a transactional message does not get past is the suppression list below.
+
+## Suppression list: addresses that receive nothing
+
+An address on the suppression list (`notification_suppressions`) receives **no email of any type** — marketing, transactional, templated or not, and the admin test send too. Verification, password-reset and security emails are blocked as well, so a user whose address is suppressed cannot reset a password by email until the address is made valid again. The check runs first at the single dispatch chokepoint: the delivery log shows `suppressed` with error `address_invalid`, and the result returned to the calling module carries the same `address_invalid` marker. If the list cannot be read the send is refused (a transient failure), never let through.
+
+The list is platform-wide and keyed by the normalized address; who added a row, from which tenant and why (`hard_bounce` or `manual`) is recorded for attribution. Modules change it through the audited `iface.EmailSuppressionManager` (`notification.suppression.added` / `notification.suppression.lifted` audit events); an addon uses it to let operators mark contact addresses invalid. A row survives data-subject erasure, like the marketing opt-out.
+
 ## RFC 8058 one-click unsubscribe
 
 Marketing mail carries two extra headers a recipient's mail client can act on without opening the message — `List-Unsubscribe` and `List-Unsubscribe-Post`. A transactional message never carries them and can never be affected by them. Clicking (or the mail client's own one-click action) records a durable, address-level "stop sending marketing to this address" fact, separate from the per-category preference described above and separate from the address-level suppression list that blocks everything: this one blocks marketing only, and never expires.
@@ -174,12 +182,12 @@ Nine collections: `notification_messages` (90-day TTL), `notification_templates`
 
 ## GDPR
 
-Registers an `iface.PIIProducer` for the subject `notification`. Export returns the delivered-message history, per-category preferences and the user's push devices (without tokens); erasure deletes all three under either mode. Suppressions are keyed by email address rather than user UUID, so they ride the auth/email erasure path instead of this producer.
+Registers an `iface.PIIProducer` for the subject `notification`. Export returns the delivered-message history, per-category preferences and the user's push devices (without tokens); erasure deletes all three under either mode. Suppressions are keyed by email address rather than user UUID and survive erasure (see the suppression list above).
 
 **The marketing opt-out is retained past erasure, by design.** `notification_marketing_optouts` is address-keyed the same way suppressions are, and nothing in this platform deletes it for any data-subject request, under either erase mode. This is deliberate, for the same reason a suppression record survives too: deleting the fact that an address asked to stop receiving marketing would let a future marketing send to that same address go out again — exactly what the opt-out exists to prevent. Erasing your data does not opt you back in. The only deliberate removal is a consumer module that collects explicit consent lifting the opt-out through the audited `MarketingOptoutManager` seam; an admin endpoint for operators is still a follow-up.
 
 :::note Not in this module
-No SMS or webhook implementations, and no web-push beyond what FCM provides. No async queue — every send is synchronous, though `NotificationResult.Status` reserves `queued` for a future upgrade. No marketing automation, segmentation, or A/B testing. No bounce or complaint ingestion: suppressions are added manually until the SMTP provider offers a webhook. DKIM signing is the relay's job.
+No SMS or webhook implementations, and no web-push beyond what FCM provides. No async queue — every send is synchronous, though `NotificationResult.Status` reserves `queued` for a future upgrade. No marketing automation, segmentation, or A/B testing. No automatic bounce or complaint ingestion: addresses reach the suppression list through `EmailSuppressionManager` (an addon marks them on an operator's request) until a provider webhook is wired. DKIM signing is the relay's job.
 
 **Never bypass the orchestrator** by calling the email sender directly — preferences, suppressions, idempotency, and the delivery log all hang off it.
 :::

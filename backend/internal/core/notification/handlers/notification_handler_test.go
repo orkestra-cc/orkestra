@@ -171,3 +171,46 @@ func TestSendTestEmail_HostileDriverTextNeverReachesTheResponse(t *testing.T) {
 		}
 	}
 }
+
+// suppressedOnly is a SuppressionRepository that holds one address.
+type suppressedOnly struct {
+	addr string
+	err  error
+}
+
+func (s suppressedOnly) IsSuppressed(_ context.Context, a string) (bool, error) {
+	return repository.NormalizeSuppressionAddress(a) == s.addr, s.err
+}
+func (suppressedOnly) GetMany(context.Context, []string) (map[string]models.SuppressionDoc, error) {
+	return nil, nil
+}
+func (suppressedOnly) InsertIfAbsent(context.Context, []string, models.SuppressionDoc) ([]string, error) {
+	return nil, nil
+}
+func (suppressedOnly) DeleteMany(context.Context, []string) ([]string, error) { return nil, nil }
+
+// TestSendTestEmail_SuppressedAddressIs422: the admin test send does not get
+// past the suppression list, and says so with its own code.
+func TestSendTestEmail_SuppressedAddressIs422(t *testing.T) {
+	svc := newHandlerTestSvc(nil)
+	svc.SetSuppressions(suppressedOnly{addr: "ada@example.test"})
+	h := NewNotificationHandler(svc)
+	req := &testEmailRequest{}
+	req.Body.To = "Ada@Example.test"
+	_, err := h.SendTestEmail(context.Background(), req)
+	var ee *errcode.Error
+	if !errors.As(err, &ee) || ee.Code != errcode.NotificationAddressSuppressed || ee.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422 %s, got %v", errcode.NotificationAddressSuppressed, err)
+	}
+
+	svc.SetSuppressions(suppressedOnly{err: errors.New("down")})
+	_, err = h.SendTestEmail(context.Background(), req)
+	if !errors.As(err, &ee) || ee.Code != errcode.NotificationSuppressionUnavailable || ee.Status != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 %s, got %v", errcode.NotificationSuppressionUnavailable, err)
+	}
+
+	svc.SetSuppressions(suppressedOnly{addr: "someone@else.test"})
+	if _, err := h.SendTestEmail(context.Background(), req); err != nil {
+		t.Fatalf("an address not on the list must be sent: %v", err)
+	}
+}

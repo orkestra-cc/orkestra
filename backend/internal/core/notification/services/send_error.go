@@ -220,6 +220,8 @@ func describeSendError(p SenderProfile, err error) string {
 	// default branch as err=unknown.
 	case errors.Is(err, ErrOptoutLookupUnavailable):
 		out = prefix + " err=optout_lookup_unavailable"
+	case errors.Is(err, ErrSuppressionLookupUnavailable):
+		out = prefix + " err=suppression_lookup_unavailable"
 	case errors.Is(err, ErrUnsubscribeTokenUnavailable):
 		out = prefix + " err=unsubscribe_token_unavailable"
 	// Before the iface.ErrSenderInvalid case below, which this one wraps: a
@@ -289,7 +291,7 @@ func readBounded(r io.Reader, max int) (body []byte, tooLarge bool, err error) {
 // timeout, a broken read or an HTTP 500 can follow a request the provider
 // already accepted, and retrying those risks delivering the message twice.
 func isTransientSendFailure(err error) bool {
-	if errors.Is(err, ErrOptoutLookupUnavailable) || errors.Is(err, ErrUnsubscribeTokenUnavailable) || errors.Is(err, ErrSenderConfigUnavailable) {
+	if errors.Is(err, ErrOptoutLookupUnavailable) || errors.Is(err, ErrSuppressionLookupUnavailable) || errors.Is(err, ErrUnsubscribeTokenUnavailable) || errors.Is(err, ErrSenderConfigUnavailable) {
 		return true
 	}
 	var se *SendError

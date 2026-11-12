@@ -102,3 +102,33 @@ func TestInit_WiresTheReconciler(t *testing.T) {
 		t.Fatalf("Stop before Start: %v", err)
 	}
 }
+
+// TestInit_WiresTheSuppressionSeam pins that Init wires the email suppression
+// list into the send path and registers its manager. dispatchEmail treats a
+// nil seam as "no check" (so test-built services send), which makes a silent
+// unwiring invisible: every address someone marked invalid would be mailed
+// again. Same cheap shape as above: no query runs.
+func TestInit_WiresTheSuppressionSeam(t *testing.T) {
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://127.0.0.1:1"))
+	if err != nil {
+		t.Fatalf("mongo.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+
+	m := NewModule()
+	deps := &module.Dependencies{
+		DB:       client.Database("notification_suppression_wiring_test"),
+		Services: module.NewServiceRegistry(),
+		Platform: fakePlatform{},
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	if err := m.Init(deps); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if m.svc.Suppressions() == nil {
+		t.Fatal("Init must wire the suppression list into the send path")
+	}
+	if _, ok := module.GetTyped[iface.EmailSuppressionManager](deps.Services, module.ServiceEmailSuppressionManager); !ok {
+		t.Fatal("Init must register the EmailSuppressionManager under ServiceEmailSuppressionManager")
+	}
+}

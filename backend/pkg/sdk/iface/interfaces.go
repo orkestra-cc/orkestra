@@ -1785,6 +1785,64 @@ type MarketingOptoutManager interface {
 	RecordMarketingOptout(ctx context.Context, address string, ev OptoutEvidence) error
 }
 
+// Reasons an address is on the email suppression list. Wire values: stored
+// on the row and shown to operators, never rename one.
+const (
+	// SuppressionReasonHardBounce: the mailbox does not exist or refuses
+	// mail permanently.
+	SuppressionReasonHardBounce = "hard_bounce"
+	// SuppressionReasonManual: an operator marked the address invalid for
+	// another reason.
+	SuppressionReasonManual = "manual"
+)
+
+// SuppressedAddressInvalid is NotificationResult.Error on a "suppressed"
+// result when the recipient is on the email suppression list. Every other
+// suppressed result (opt-out, preference) carries no Error.
+const SuppressedAddressInvalid = "address_invalid"
+
+// EmailSuppression is one row of the email suppression list.
+type EmailSuppression struct {
+	Address   string
+	Reason    string
+	At        time.Time
+	Source    string
+	ActorUUID string
+	TenantID  string
+}
+
+// SuppressionEvidence attributes a change to the suppression list. Source
+// names the path (e.g. "operator.manual", "operator.import"); ActorUUID and TenantID are
+// read from ctx when empty. None of them scopes the row: the list is
+// platform-wide.
+type SuppressionEvidence struct {
+	Reason    string // only for Suppress; empty means SuppressionReasonManual
+	Source    string
+	ActorUUID string
+	TenantID  string
+}
+
+// EmailSuppressionManager is the audited seam over the email suppression list:
+// an address on it receives no email at all, transactional included
+// (verification, password reset, security notices). Resolved lazily via
+// module.ServiceEmailSuppressionManager. Addresses are compared trimmed and
+// lowercased; a display-name form ("Name <a@b>") is reduced to its address.
+// Each call takes at most MaxSuppressionBatch addresses.
+type EmailSuppressionManager interface {
+	// LookupSuppressions returns the rows of the given addresses that are
+	// suppressed, keyed by normalized address.
+	LookupSuppressions(ctx context.Context, addresses []string) (map[string]EmailSuppression, error)
+	// SuppressAddresses adds the addresses that are not already suppressed and
+	// returns them (normalized). An existing row keeps its reason and date.
+	SuppressAddresses(ctx context.Context, addresses []string, ev SuppressionEvidence) ([]string, error)
+	// LiftSuppressions removes the addresses' rows and returns the addresses
+	// that had one (normalized).
+	LiftSuppressions(ctx context.Context, addresses []string, ev SuppressionEvidence) ([]string, error)
+}
+
+// MaxSuppressionBatch bounds the addresses of one EmailSuppressionManager call.
+const MaxSuppressionBatch = 1000
+
 // TemplateView is a read projection of a notification template (campaign preview).
 type TemplateView struct {
 	TemplateID string
