@@ -721,6 +721,14 @@ const NotificationSenderBadAllowedType = "notification.sender_bad_allowed_type"
 // message. The detail carries the bounded diagnostic, never vendor text. 502.
 const NotificationSendFailed = "notification.send_failed"
 
+// NotificationAddressSuppressed: a test send named an address on the email
+// suppression list, which receives no email of any type. 422.
+const NotificationAddressSuppressed = "notification.address_suppressed"
+
+// NotificationSuppressionUnavailable: the email suppression list could not be
+// read, so the test send was refused. 503.
+const NotificationSuppressionUnavailable = "notification.suppression_unavailable"
+
 // NotificationSenderDriverNoOneClick: a sender profile declares marketing in
 // its allowed_types but its provider cannot put the RFC 8058 one-click
 // unsubscribe headers on the wire, while require_one_click_unsubscribe is

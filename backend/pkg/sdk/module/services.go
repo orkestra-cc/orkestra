@@ -57,8 +57,12 @@ const (
 	// ServiceMarketingOptoutManager is the audited lookup/lift/record of
 	// durable marketing opt-outs (iface.MarketingOptoutManager).
 	ServiceMarketingOptoutManager ServiceKey = "notification.marketing_optout_manager"
-	ServicePasswordService        ServiceKey = "auth.password"
-	ServicePasswordAuthService    ServiceKey = "auth.password_auth"
+	// ServiceEmailSuppressionManager is the audited lookup/suppress/lift of
+	// the email suppression list (iface.EmailSuppressionManager): an address
+	// on it receives no email of any type.
+	ServiceEmailSuppressionManager ServiceKey = "notification.email_suppression_manager"
+	ServicePasswordService         ServiceKey = "auth.password"
+	ServicePasswordAuthService     ServiceKey = "auth.password_auth"
 
 	// ServiceSessionRevocation is the Redis-backed revoked-session set. Every
 	// authenticated request checks it before running the handler, so an

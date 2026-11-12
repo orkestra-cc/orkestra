@@ -131,6 +131,14 @@ type NotificationService struct {
 	// sends never touch this field regardless of whether it is wired.
 	optouts repository.MarketingOptoutRepository
 
+	// suppressions is the email suppression list, checked before EVERY email
+	// (transactional included) and by SendTest. nil until SetSuppressions
+	// wires it; module.go always does, and TestInit_WiresTheSuppressionSeam
+	// pins that. Unlike optouts a nil seam is "no check", not a refusal: a
+	// test-built service sends, and an unwired production service would not
+	// silently stop password resets for everyone.
+	suppressions repository.SuppressionRepository
+
 	// push is nil until SetPush wires it; SendPush then reports
 	// ErrPushUnavailable.
 	push *PushService
@@ -185,6 +193,28 @@ func NewNotificationService(
 // are unaffected either way.
 func (s *NotificationService) SetOptouts(o repository.MarketingOptoutRepository) {
 	s.optouts = o
+}
+
+// SetSuppressions wires the email suppression list post-construction.
+func (s *NotificationService) SetSuppressions(r repository.SuppressionRepository) {
+	s.suppressions = r
+}
+
+// Suppressions exposes the wired suppression list (nil when unwired).
+func (s *NotificationService) Suppressions() repository.SuppressionRepository { return s.suppressions }
+
+// checkSuppressed reports whether address is on the email suppression list.
+// An unreadable list is ErrSuppressionLookupUnavailable: the caller refuses
+// the send rather than risk mailing an address someone marked invalid.
+func (s *NotificationService) checkSuppressed(ctx context.Context, address string) (bool, error) {
+	if s.suppressions == nil {
+		return false, nil
+	}
+	suppressed, err := s.suppressions.IsSuppressed(ctx, address)
+	if err != nil {
+		return false, ErrSuppressionLookupUnavailable
+	}
+	return suppressed, nil
 }
 
 // IsConfigured keeps its pre-ADR-0019 meaning: the default ("*") profile
@@ -414,6 +444,21 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		Subject:           in.Subject,
 		IdempotencyKey:    in.IdempotencyKey,
 		CreatedAt:         time.Now(),
+	}
+
+	// Email suppression list: an address on it receives nothing, whatever
+	// the type — transactional mail (verification, password reset, security
+	// notices) included. Checked first, so the row names this reason rather
+	// than a preference or opt-out. Fail-closed when the list is unreadable.
+	suppressed, err := s.checkSuppressed(ctx, in.Recipient.Address)
+	if err != nil {
+		return s.failSend(ctx, logDoc, SenderProfile{}, err)
+	}
+	if suppressed {
+		logDoc.Status = models.StatusSuppressed
+		logDoc.Error = iface.SuppressedAddressInvalid
+		_ = s.logRepo.Create(ctx, logDoc)
+		return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status, Error: logDoc.Error}, nil
 	}
 
 	// Preference check (marketing only).
@@ -649,6 +694,14 @@ var ErrSendFailed = errors.New("notification: send failed")
 // ErrOptoutLookupUnavailable: the durable opt-out list could not be read, so
 // the send was refused rather than risked.
 var ErrOptoutLookupUnavailable = errors.New("notification: marketing opt-out lookup unavailable")
+
+// ErrSuppressionLookupUnavailable: the email suppression list could not be
+// read, so the send was refused rather than risked.
+var ErrSuppressionLookupUnavailable = errors.New("notification: suppression list lookup unavailable")
+
+// ErrAddressSuppressed: SendTest was asked to mail an address on the email
+// suppression list.
+var ErrAddressSuppressed = errors.New("notification: address is on the suppression list")
 
 // ErrUnsubscribeTokenUnavailable: a marketing send needed a one-click
 // unsubscribe token (for the List-Unsubscribe header) and IssueToken could
@@ -1056,11 +1109,20 @@ type TestSendResult struct {
 
 // SendTest sends through the default profile, bypassing preferences,
 // idempotency and the delivery log exactly as the /test endpoint always has.
+// The suppression list is NOT bypassed: an address on it receives no email,
+// a test included (ErrAddressSuppressed).
 func (s *NotificationService) SendTest(ctx context.Context, in TestSendInput) (TestSendResult, error) {
 	var (
 		profile SenderProfile
 		err     error
 	)
+	suppressed, err := s.checkSuppressed(ctx, in.To)
+	if err != nil {
+		return TestSendResult{Diagnostic: "err=suppression_lookup_unavailable"}, err
+	}
+	if suppressed {
+		return TestSendResult{Diagnostic: iface.SuppressedAddressInvalid}, ErrAddressSuppressed
+	}
 	if in.Sender != "" {
 		profile, err = s.resolver.BySlug(ctx, in.Sender)
 	} else {

@@ -43,7 +43,7 @@ func (m *NotificationModule) Description() string {
 func (m *NotificationModule) Category() module.ModuleCategory { return module.CategoryCore }
 
 func (m *NotificationModule) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceNotificationSender, module.ServiceNotificationTemplateSeeder, module.ServiceMarketingOptoutManager}
+	return []module.ServiceKey{module.ServiceNotificationSender, module.ServiceNotificationTemplateSeeder, module.ServiceMarketingOptoutManager, module.ServiceEmailSuppressionManager}
 }
 
 func (m *NotificationModule) Permissions() []iface.PermissionSpec {
@@ -349,6 +349,8 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		},
 	)
 	m.svc.SetOptouts(optoutRepo)
+	suppressionRepo := repository.NewSuppressionRepository(deps.DB)
+	m.svc.SetSuppressions(suppressionRepo)
 	// Auth inits after notification, so the per-tier session readers are
 	// looked up lazily on every send.
 	registry := deps.Services
@@ -379,6 +381,8 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServiceNotificationSender, m.svc)
 	deps.Services.Register(module.ServiceMarketingOptoutManager,
 		iface.MarketingOptoutManager(services.NewOptoutManager(optoutRepo, unsubRepo, deps.Services, deps.Logger)))
+	deps.Services.Register(module.ServiceEmailSuppressionManager,
+		services.NewSuppressionManager(suppressionRepo, deps.Services, deps.Logger))
 	deps.Services.Register(module.ServiceNotificationTemplateSeeder,
 		module.NotificationTemplateSeeder(m.svc.TemplateService()))
 	return nil

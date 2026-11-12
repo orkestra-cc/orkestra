@@ -56,10 +56,6 @@ func (f *fakePrefRepo) UpsertPreference(_ context.Context, doc *models.Preferenc
 	return nil
 }
 
-func (f *fakePrefRepo) IsSuppressed(_ context.Context, _ string) (bool, error)           { return false, nil }
-func (f *fakePrefRepo) AddSuppression(_ context.Context, _ *models.SuppressionDoc) error { return nil }
-func (f *fakePrefRepo) RemoveSuppression(_ context.Context, _ string) error              { return nil }
-
 func TestPreferenceService_CanDeliver_TransactionalAlwaysTrue(t *testing.T) {
 	repo := newFakePrefRepo()
 	// Even when the user has explicitly opted out of this category, the

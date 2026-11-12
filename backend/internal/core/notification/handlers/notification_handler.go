@@ -85,6 +85,10 @@ func (h *NotificationHandler) SendTestEmail(ctx context.Context, req *testEmailR
 	res, err := h.svc.SendTest(ctx, services.TestSendInput{To: req.Body.To, Subject: subject, BodyText: body, Sender: req.Body.Sender})
 	if err != nil {
 		switch {
+		case errors.Is(err, services.ErrAddressSuppressed):
+			return nil, errcode.UnprocessableEntity(errcode.NotificationAddressSuppressed, "That address is on the suppression list (marked invalid) and receives no email, a test included.")
+		case errors.Is(err, services.ErrSuppressionLookupUnavailable):
+			return nil, errcode.ServiceUnavailable(errcode.NotificationSuppressionUnavailable, "The suppression list could not be read, so the test was not sent.")
 		case errors.Is(err, services.ErrSenderNotFound):
 			return nil, errcode.NotFound(errcode.NotificationSenderNotFound, "No sender profile has that slug.")
 		case errors.Is(err, services.ErrNoSenderForCategory), errors.Is(err, services.ErrUnknownDriver), errors.Is(err, services.ErrSenderNotConfigured):

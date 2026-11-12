@@ -33,6 +33,8 @@ var goldenCodes = map[string]string{
 	"NotificationSenderNotFound":             "notification.sender_not_found",
 	"NotificationSenderBadAllowedType":       "notification.sender_bad_allowed_type",
 	"NotificationSendFailed":                 "notification.send_failed",
+	"NotificationAddressSuppressed":          "notification.address_suppressed",
+	"NotificationSuppressionUnavailable":     "notification.suppression_unavailable",
 	"NotificationSenderDriverNoOneClick":     "notification.sender_driver_no_one_click",
 	"NotificationPublicBaseURLMissing":       "notification.public_base_url_missing",
 	"NotificationPushInvalidRequest":         "notification.push_invalid_request",

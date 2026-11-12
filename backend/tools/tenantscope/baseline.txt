@@ -96,12 +96,9 @@ internal/core/authz/repository/repository.go:478:Find
 internal/core/authz/repository/repository.go:47:UpdateOne
 internal/core/authz/repository/repository.go:60:Find
 internal/core/authz/repository/repository.go:73:Find
-internal/core/notification/repository/preference_repository.go:107:UpdateOne
-internal/core/notification/repository/preference_repository.go:124:DeleteOne
-internal/core/notification/repository/preference_repository.go:40:FindOne
-internal/core/notification/repository/preference_repository.go:55:Find
-internal/core/notification/repository/preference_repository.go:73:UpdateOne
-internal/core/notification/repository/preference_repository.go:96:CountDocuments
+internal/core/notification/repository/preference_repository.go:34:FindOne
+internal/core/notification/repository/preference_repository.go:49:Find
+internal/core/notification/repository/preference_repository.go:67:UpdateOne
 internal/core/tenant/repository/entitlements.go:108:UpdateOne
 internal/core/tenant/repository/entitlements.go:44:FindOne
 internal/core/tenant/repository/entitlements.go:68:CountDocuments
