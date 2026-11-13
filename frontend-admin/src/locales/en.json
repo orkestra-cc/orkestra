@@ -129,7 +129,8 @@
       "suppliers": "Suppliers",
       "invoicesIssued": "Invoices Issued",
       "invoicesReceived": "Invoices Received",
-      "sdiNotifications": "SDI Notifications"
+      "sdiNotifications": "SDI Notifications",
+      "deliveryLog": "Delivery log"
     }
   },
   "errors": {
@@ -4470,5 +4471,47 @@
         "outbox": "Pending updates"
       }
     }
+  },
+  "adminDeliveryLog": {
+    "title": "Delivery log",
+    "subtitle": "The emails the platform tried to send in the last 90 days, with their outcome. A «suppressed» row was never sent.",
+    "col": {
+      "date": "Date",
+      "type": "Type",
+      "category": "Category",
+      "recipient": "Recipient",
+      "status": "Status",
+      "reason": "Reason",
+      "sender": "Sender"
+    },
+    "status": {
+      "sent": "Sent",
+      "suppressed": "Suppressed",
+      "failed": "Failed",
+      "queued": "Queued"
+    },
+    "type": {
+      "transactional": "Transactional",
+      "marketing": "Marketing"
+    },
+    "reason": {
+      "addressInvalid": "Address marked invalid",
+      "marketingOptout": "Unsubscribed from marketing",
+      "categoryPreference": "The user's preference for this category"
+    },
+    "filter": {
+      "address": "Search by address",
+      "status": "Status",
+      "anyStatus": "Any status",
+      "type": "Type",
+      "anyType": "Any type",
+      "category": "Category (e.g. auth.reset_password)"
+    },
+    "refresh": "Refresh",
+    "loading": "Loading the log…",
+    "loadError": "The delivery log could not be loaded.",
+    "retry": "Retry",
+    "empty": "No email in the last 90 days.",
+    "noResults": "No row matches the filters."
   }
 }

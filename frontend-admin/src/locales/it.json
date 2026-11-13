@@ -129,7 +129,8 @@
       "suppliers": "Fornitori",
       "invoicesIssued": "Fatture emesse",
       "invoicesReceived": "Fatture ricevute",
-      "sdiNotifications": "Notifiche SDI"
+      "sdiNotifications": "Notifiche SDI",
+      "deliveryLog": "Registro delle consegne"
     }
   },
   "errors": {
@@ -4470,5 +4471,47 @@
         "outbox": "Aggiornamenti in attesa"
       }
     }
+  },
+  "adminDeliveryLog": {
+    "title": "Registro delle consegne",
+    "subtitle": "Le email che la piattaforma ha provato a inviare negli ultimi 90 giorni, con l'esito. Una riga «soppressa» non è mai partita.",
+    "col": {
+      "date": "Data",
+      "type": "Tipo",
+      "category": "Categoria",
+      "recipient": "Destinatario",
+      "status": "Stato",
+      "reason": "Motivo",
+      "sender": "Mittente"
+    },
+    "status": {
+      "sent": "Inviata",
+      "suppressed": "Soppressa",
+      "failed": "Non riuscita",
+      "queued": "In coda"
+    },
+    "type": {
+      "transactional": "Transazionale",
+      "marketing": "Marketing"
+    },
+    "reason": {
+      "addressInvalid": "Indirizzo segnato non valido",
+      "marketingOptout": "Disiscritto dal marketing",
+      "categoryPreference": "Preferenza dell'utente per questa categoria"
+    },
+    "filter": {
+      "address": "Cerca per indirizzo",
+      "status": "Stato",
+      "anyStatus": "Tutti gli stati",
+      "type": "Tipo",
+      "anyType": "Tutti i tipi",
+      "category": "Categoria (es. auth.reset_password)"
+    },
+    "refresh": "Aggiorna",
+    "loading": "Caricamento del registro…",
+    "loadError": "Non è stato possibile caricare il registro delle consegne.",
+    "retry": "Riprova",
+    "empty": "Nessuna email negli ultimi 90 giorni.",
+    "noResults": "Nessuna riga corrisponde ai filtri."
   }
 }

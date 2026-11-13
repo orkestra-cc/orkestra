@@ -54,6 +54,10 @@ func (f *fakeNotifRepo) List(_ context.Context, _ repository.Filter, _ int64) ([
 	return nil, nil
 }
 
+func (f *fakeNotifRepo) Page(_ context.Context, _ repository.Filter, _, _ int64) ([]*models.NotificationDoc, int64, error) {
+	return nil, 0, nil
+}
+
 func (f *fakeNotifRepo) GetByUUID(_ context.Context, _ string) (*models.NotificationDoc, error) {
 	return nil, nil
 }

@@ -38,6 +38,7 @@ const CompliancePolicyPage = lazy(
 );
 const LlmAdminPage = lazy(() => import('pages/admin/llm'));
 const RetrievalAdminPage = lazy(() => import('pages/admin/retrieval'));
+const DeliveryLogPage = lazy(() => import('pages/admin/delivery-log'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
@@ -188,6 +189,30 @@ export function buildCoreRoutes(
                         fallback={<OrkestraLoader />}
                       >
                         <CompliancePolicyPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // Delivery log of the notification module (read-only):
+                  // GET /v1/notifications needs notification.log.read.
+                  path: 'delivery-log',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'notification.log.read',
+                          'super_admin',
+                          'administrator',
+                          'developer'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-delivery-log"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <DeliveryLogPage />
                       </Suspense>
                     </ProtectedRoute>
                   )
