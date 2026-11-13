@@ -104,6 +104,8 @@ Three config fields, all in the **Delivery** group, govern it:
 :::danger Upgrading a live installation
 `require_one_click_unsubscribe` is `true` and `public_api_base_url` is empty by default. **If you upgrade to this behavior with `public_api_base_url` still unset, every marketing send starts being refused** — this is the fail-closed design working as specified, not a bug, but it means a campaign scheduled for right after the upgrade will not go out silently swapped for something worse; it simply will not go out. Set `public_api_base_url` before your next marketing send. A refusal from this cause shows up in the delivery log (`GET /v1/notifications`) as a `failed` row whose `error` column reads `sender=<slug> err=one_click_unavailable` — that string is how you tell this failure apart from an unrelated sender misconfiguration.
 
+A module that sends marketing can tell this refusal from a malformed sender slug: the error matches `iface.ErrOneClickUnsubscribeUnavailable` (which still matches `iface.ErrSenderInvalid`, for consumers that only know that one), so it can tell the operator that the https `public_api_base_url` is what is missing.
+
 **To confirm the fix took effect:** saving `public_api_base_url` is itself a check — the save is refused (`422`) if any sender profile whose `Explicitly selectable for` includes `marketing` still can't satisfy the requirement, so a successful save already proves those profiles clear. That save-time check cannot see a profile that only carries marketing through category routing rather than explicit selection (see below), so also send one real marketing message afterward and confirm its row in `GET /v1/notifications` reads `sent`, not `failed` with `err=one_click_unavailable`.
 :::
 

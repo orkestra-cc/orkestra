@@ -12,6 +12,7 @@ package iface
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -572,6 +573,15 @@ var (
 	// 8058 one-click unsubscribe, which the notification module refuses
 	// rather than delivers, at save time and again at dispatch.
 	ErrSenderInvalid = errors.New("sender slug malformed")
+	// ErrOneClickUnsubscribeUnavailable: a marketing send would go out with
+	// no RFC 8058 one-click unsubscribe while require_one_click_unsubscribe
+	// is on — there is no usable https public API base URL to point the
+	// headers at, or the sender's driver cannot put them on the wire. It
+	// WRAPS ErrSenderInvalid, so a consumer that only knows that sentinel
+	// keeps refusing the send; a consumer that matches this one first can
+	// tell the operator what is actually missing instead of reporting a
+	// malformed slug.
+	ErrOneClickUnsubscribeUnavailable = fmt.Errorf("one-click unsubscribe cannot be guaranteed for this marketing send: %w", ErrSenderInvalid)
 	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
 	ErrSenderNotFound = errors.New("sender profile not found")
 	// ErrSenderNotEligible: the profile exists but its allowed_types does not

@@ -716,19 +716,21 @@ var ErrUnsubscribeTokenUnavailable = errors.New("notification: unsubscribe token
 // on the wire, or there is no public API base URL to point them at — while
 // require_one_click_unsubscribe is on.
 //
-// It WRAPS iface.ErrSenderInvalid rather than standing beside it, for two
-// reasons at once: every consumer outside this module matches the iface
-// sentinel it already knows (and newDispatchError therefore records
-// iface.ErrSenderInvalid as the DispatchError's sentinel, unchanged), while
-// describeSendError still gives this cause a bounded reason of its own so the
-// delivery log does not read like a malformed sender slug.
+// It IS iface.ErrOneClickUnsubscribeUnavailable, which wraps
+// iface.ErrSenderInvalid rather than standing beside it: newDispatchError
+// records the one-click sentinel (listed first in trustedSentinels) and
+// DispatchError.Is follows its chain, so every consumer that only knows the
+// older sentinel keeps refusing the send while one that matches the new one
+// first can name the missing setting; describeSendError gives this cause a
+// bounded reason of its own so the delivery log does not read like a
+// malformed sender slug.
 //
 // The wrap order puts THIS message first and the sentinel's second. %w
 // renders the wrapped error's text where the verb sits, so the other order
 // made preflightFail produce "sender slug malformed: one-click unsubscribe
 // cannot be guaranteed: ..." — leading a reader with a malformed slug that
 // does not exist. errors.Is is unaffected by the order.
-var ErrOneClickUnsubscribeUnavailable = fmt.Errorf("one-click unsubscribe cannot be guaranteed for this marketing send: %w", iface.ErrSenderInvalid)
+var ErrOneClickUnsubscribeUnavailable = iface.ErrOneClickUnsubscribeUnavailable
 
 // oneClickPolicy answers what the requirement is RIGHT NOW. It prefers the
 // configured source — see Options.OneClickSource for why a value captured at
@@ -757,6 +759,9 @@ func (s *NotificationService) oneClickPolicy(ctx context.Context) OneClickPolicy
 // error through mapBySlugErr before failing, and both of that mapper's
 // outputs must be trusted here or the mapping is invisible to errors.Is.
 var trustedSentinels = []error{
+	// Before iface.ErrSenderInvalid, which it wraps: the first match is the
+	// one recorded, and DispatchError.Is still answers for the wrapped one.
+	iface.ErrOneClickUnsubscribeUnavailable,
 	ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured,
 	iface.ErrSenderInvalid, iface.ErrSenderNotEligible, iface.ErrSenderNotFound, iface.ErrSenderUnavailable,
 	ErrOptoutLookupUnavailable, ErrUnsubscribeTokenUnavailable,
@@ -776,7 +781,11 @@ type DispatchError struct {
 
 func (e *DispatchError) Error() string { return e.Reason }
 
-func (e *DispatchError) Is(target error) bool { return target == ErrSendFailed || e.sentinel == target }
+// Is follows the sentinel's own chain, so the one-click sentinel also
+// answers for the iface.ErrSenderInvalid it wraps.
+func (e *DispatchError) Is(target error) bool {
+	return target == ErrSendFailed || (e.sentinel != nil && errors.Is(e.sentinel, target))
+}
 
 func newDispatchError(profile SenderProfile, err error) *DispatchError {
 	sentinel := ErrSendFailed
