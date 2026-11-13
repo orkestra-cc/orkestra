@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +106,40 @@ func TestMongo_SuppressionDeleteManyReportsRemoved(t *testing.T) {
 	}
 	if ok, _ := repo.IsSuppressed(ctx, "b@example.test"); !ok {
 		t.Fatal("b@example.test must stay suppressed")
+	}
+}
+
+func TestMongo_SuppressionListPagesAndFilters(t *testing.T) {
+	repo := newTestSuppressionRepo(t)
+	ctx := context.Background()
+	if _, err := repo.InsertIfAbsent(ctx, []string{"c@example.test", "a@example.test", "b.x@other.test"}, models.SuppressionDoc{Reason: "hard_bounce", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.InsertIfAbsent(ctx, []string{"d@example.test"}, models.SuppressionDoc{Reason: "manual", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	addrs := func(rows []models.SuppressionDoc) []string {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.Address)
+		}
+		return out
+	}
+	page, err := repo.List(ctx, "", 2, "", "")
+	if err != nil || strings.Join(addrs(page), ",") != "a@example.test,b.x@other.test" {
+		t.Fatalf("page 1 = %v, %v", addrs(page), err)
+	}
+	page, err = repo.List(ctx, "B.X@other.test", 10, "", "")
+	if err != nil || strings.Join(addrs(page), ",") != "c@example.test,d@example.test" {
+		t.Fatalf("page 2 = %v, %v", addrs(page), err)
+	}
+	// "." is literal: it must not match every character.
+	page, err = repo.List(ctx, "", 10, "B.X", "")
+	if err != nil || strings.Join(addrs(page), ",") != "b.x@other.test" {
+		t.Fatalf("contains = %v, %v", addrs(page), err)
+	}
+	page, err = repo.List(ctx, "a@example.test", 10, "example", "manual")
+	if err != nil || strings.Join(addrs(page), ",") != "d@example.test" {
+		t.Fatalf("after+contains+reason = %v, %v", addrs(page), err)
 	}
 }

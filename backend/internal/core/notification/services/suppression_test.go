@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sort"
 	"strings"
 	"testing"
 
@@ -86,6 +87,31 @@ func (m *memSuppressions) DeleteMany(_ context.Context, addrs []string) ([]strin
 		}
 	}
 	return removed, nil
+}
+
+func (m *memSuppressions) List(_ context.Context, after string, limit int, contains, reason string) ([]models.SuppressionDoc, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	keys := make([]string, 0, len(m.rows))
+	for k := range m.rows {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	after = repository.NormalizeSuppressionAddress(after)
+	contains = strings.ToLower(strings.TrimSpace(contains))
+	var out []models.SuppressionDoc
+	for _, k := range keys {
+		d := m.rows[k]
+		if (after != "" && k <= after) || (contains != "" && !strings.Contains(k, contains)) || (reason != "" && d.Reason != reason) {
+			continue
+		}
+		if len(out) == limit {
+			break
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // suppressionKit: a service that can deliver both types (one-click waived,
@@ -305,5 +331,34 @@ func TestSuppressionManager_BoundsBatchAndScrubsErrors(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret@example.test") {
 		t.Fatalf("error leaks the address: %v", err)
+	}
+}
+
+func TestSuppressionManager_ListPagesByAddressWithFilters(t *testing.T) {
+	k := newSuppressionKit(t, "c@example.test", "a@example.test", "b@other.test")
+	if _, err := k.mgr.SuppressAddresses(context.Background(), []string{"d@example.test"}, iface.SuppressionEvidence{}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := k.mgr.ListSuppressions(context.Background(), iface.SuppressionListQuery{Limit: 2})
+	if err != nil || len(page) != 2 || page[0].Address != "a@example.test" || page[1].Address != "b@other.test" {
+		t.Fatalf("first page = %+v, %v", page, err)
+	}
+	page, err = k.mgr.ListSuppressions(context.Background(), iface.SuppressionListQuery{AfterAddress: page[1].Address, Limit: 2})
+	if err != nil || len(page) != 2 || page[0].Address != "c@example.test" || page[1].Address != "d@example.test" {
+		t.Fatalf("second page = %+v, %v", page, err)
+	}
+	page, err = k.mgr.ListSuppressions(context.Background(), iface.SuppressionListQuery{Contains: "EXAMPLE", Reason: iface.SuppressionReasonManual})
+	if err != nil || len(page) != 1 || page[0].Address != "d@example.test" || page[0].At.IsZero() {
+		t.Fatalf("filtered = %+v, %v", page, err)
+	}
+	if _, err := k.mgr.ListSuppressions(context.Background(), iface.SuppressionListQuery{Reason: "spam"}); !errors.Is(err, ErrSuppressionReasonInvalid) {
+		t.Fatalf("unknown reason: %v", err)
+	}
+	if len(k.sink.events) != 1 {
+		t.Fatalf("a read must not audit; events = %d", len(k.sink.events))
+	}
+	k.store.err = errors.New("boom: secret@example.test")
+	if _, err := k.mgr.ListSuppressions(context.Background(), iface.SuppressionListQuery{}); !errors.Is(err, ErrSuppressionOperationFailed) || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("err = %v", err)
 	}
 }
