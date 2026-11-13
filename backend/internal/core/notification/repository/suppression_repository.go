@@ -194,7 +194,10 @@ func (r *suppressionRepo) List(ctx context.Context, after string, limit int, con
 		return nil, nil
 	}
 	filter := bson.M{}
-	if after = NormalizeSuppressionAddress(after); after != "" {
+	// A cursor is an address already stored (normalized): compare it as it
+	// is, only trimmed and lowercased — re-parsing it as "Name <a@b>" could
+	// move it and repeat or skip a page.
+	if after = strings.ToLower(strings.TrimSpace(after)); after != "" {
 		filter["address"] = bson.M{"$gt": after}
 	}
 	if c := strings.ToLower(strings.TrimSpace(contains)); c != "" {
