@@ -196,7 +196,9 @@
       "login_disabled": "Login is temporarily disabled for this surface. Contact an administrator.",
       "country_blocked": "Access from your country is not permitted.",
       "password_confirm_unavailable": "This account cannot reconfirm with a password. Use MFA or reauthenticate via OAuth.",
-      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator."
+      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator.",
+      "recipient_suppressed": "the email was not sent because the user's address is marked invalid (suppression list). Make it valid again before trying once more.",
+      "suppression_unavailable": "the list of invalid addresses could not be read, so the email was not sent. Try again shortly."
     },
     "compliance": {
       "policy_not_found": "The compliance policy does not exist.",

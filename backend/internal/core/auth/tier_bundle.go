@@ -77,6 +77,10 @@ type tierBundleDeps struct {
 	deviceTrust             services.DeviceTrustService
 	suspiciousLoginNotifier services.SuspiciousLoginNotifier
 	notifier                iface.NotificationSender
+	// suppressions is the email suppression list the admin-initiated sends
+	// check before minting a token. Nil when the notification module did
+	// not register it.
+	suppressions iface.EmailSuppressionManager
 	// attemptCounter is the Redis fixed-window counter behind every
 	// lockout and request cap (spec D8). shared/errors.RateLimiter's
 	// auth-facing surface is gone (H-1, Task 11); this is the only
@@ -195,6 +199,7 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		DeviceTrust:              d.deviceTrust,
 		SuspiciousLoginNotifier:  d.suspiciousLoginNotifier,
 		Notifier:                 d.notifier,
+		Suppressions:             d.suppressions,
 		AttemptCounter:           d.attemptCounter,
 		MailDispatcher:           d.mailDispatcher,
 		FrontendURL:              d.frontendURL,

@@ -90,6 +90,8 @@ var goldenCodes = map[string]string{
 	"AuthPolicyUnavailable":                  "auth.policy_unavailable",
 	"AuthOAuthEmailUnverified":               "auth.oauth_email_unverified",
 	"AuthPasswordLoginDisabled":              "auth.password_login_disabled",
+	"AuthRecipientSuppressed":                "auth.recipient_suppressed",
+	"AuthSuppressionUnavailable":             "auth.suppression_unavailable",
 	"AuthLoginMethodLockout":                 "auth.login_method_lockout",
 	"AuthTooManyAttempts":                    "auth.too_many_attempts",
 	"AuthPINLoginDisabled":                   "auth.pin_login_disabled",

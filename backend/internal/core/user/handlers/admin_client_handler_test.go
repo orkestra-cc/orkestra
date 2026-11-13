@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/user/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -666,4 +667,84 @@ func TestMapInviteErr(t *testing.T) {
 			assertStatus(t, got, c.wantStatus)
 		})
 	}
+}
+
+// suppressedOnlyList is the EmailSuppressionManager of the invite pre-check:
+// only LookupSuppressions is reachable from the user module.
+type suppressedOnlyList struct {
+	iface.EmailSuppressionManager
+	blocked string
+	err     error
+}
+
+func (l suppressedOnlyList) LookupSuppressions(_ context.Context, addresses []string) (map[string]iface.EmailSuppression, error) {
+	if l.err != nil {
+		return nil, l.err
+	}
+	out := map[string]iface.EmailSuppression{}
+	for _, a := range addresses {
+		if a == l.blocked {
+			out[a] = iface.EmailSuppression{Address: a}
+		}
+	}
+	return out, nil
+}
+
+// TestInviteClientUserAdmin_SuppressedAddressCreatesNoUser: an invite to an
+// address on the suppression list is refused with 409 before the row is
+// created, so no account is left that nobody can enter; an unreadable list
+// is a 503, again before the row.
+func TestInviteClientUserAdmin_SuppressedAddressCreatesNoUser(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		list   suppressedOnlyList
+		status int
+		code   string
+	}{
+		{"suppressed", suppressedOnlyList{blocked: "a@b.c"}, 409, "auth.recipient_suppressed"},
+		{"list unreadable", suppressedOnlyList{err: errors.New("mongo down")}, 503, "auth.suppression_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			created := false
+			svc := &fakeUserService{
+				createUserFn: func(context.Context, *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
+					created = true
+					return &iface.UserManagementResponse{ID: "u1"}, nil
+				},
+			}
+			h, reg := newAdminHandler(svc)
+			reg.Register(module.ServiceClientPasswordAuthService, &fakeAdminAuthInviter{
+				sendInviteFn: func(context.Context, string, string) error { return nil },
+			})
+			reg.Register(module.ServiceEmailSuppressionManager, tc.list)
+			_, err := h.InviteClientUserAdmin(authorisedOperator(reg), &InviteClientUserAdminRequest{
+				Body: InviteClientUserAdminBody{Email: "a@b.c", FullName: "x", Role: "operator"},
+			})
+			assertStatus(t, err, tc.status)
+			var ec *errcode.Error
+			if !errors.As(err, &ec) || ec.Code != tc.code {
+				t.Fatalf("want code %s, got %v", tc.code, err)
+			}
+			if created {
+				t.Fatal("no client user may be created when the invite cannot go out")
+			}
+		})
+	}
+}
+
+// TestClientAdminSends_SuppressedAddressIs409: reset and verification map
+// the auth sentinel to the same 409 as the operator routes.
+func TestClientAdminSends_SuppressedAddressIs409(t *testing.T) {
+	t.Parallel()
+	h, reg := newAdminHandler(&fakeUserService{})
+	reg.Register(module.ServiceClientPasswordAuthService, &fakeAdminAuthInviter{
+		triggerPasswordResetFn: func(context.Context, string) error { return iface.ErrRecipientSuppressed },
+		resendVerificationFn:   func(context.Context, string) error { return iface.ErrRecipientSuppressed },
+	})
+	_, err := h.SendPasswordResetClientUserAdmin(context.Background(), &SendPasswordResetClientUserAdminRequest{ID: "u1"})
+	assertStatus(t, err, 409)
+	_, err = h.ResendVerificationClientUserAdmin(context.Background(), &ResendVerificationClientUserAdminRequest{ID: "u1"})
+	assertStatus(t, err, 409)
 }

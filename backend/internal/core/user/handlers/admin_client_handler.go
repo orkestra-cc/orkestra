@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -666,6 +667,11 @@ func (h *AdminClientUserHandler) InviteClientUserAdmin(ctx context.Context, req 
 	if !ok || auth == nil {
 		return nil, huma.Error503ServiceUnavailable("Auth service unavailable — cannot send invite")
 	}
+	// Before the row is created: an invite that cannot go out would leave
+	// an account nobody can enter. AdminSendInvite checks again below.
+	if err := h.checkInviteRecipient(ctx, req.Body.Email); err != nil {
+		return nil, mapInviteErr(err, "Failed to check the invite address")
+	}
 
 	input := &iface.CreateUserInput{
 		Email:    req.Body.Email,
@@ -700,6 +706,25 @@ func (h *AdminClientUserHandler) InviteClientUserAdmin(ctx context.Context, req 
 		return nil, huma.Error500InternalServerError("Failed to load created client user", err)
 	}
 	return &InviteClientUserAdminResponse{Body: *item}, nil
+}
+
+// checkInviteRecipient answers iface.ErrRecipientSuppressed when the address
+// is on the email suppression list and iface.ErrSuppressionListUnavailable
+// when the list cannot be read. Without a registered list (notification
+// disabled) it answers nil: the send itself then reports the outage.
+func (h *AdminClientUserHandler) checkInviteRecipient(ctx context.Context, address string) error {
+	list, ok := module.GetTyped[iface.EmailSuppressionManager](h.services, module.ServiceEmailSuppressionManager)
+	if !ok || list == nil {
+		return nil
+	}
+	rows, err := list.LookupSuppressions(ctx, []string{address})
+	if err != nil {
+		return fmt.Errorf("%w: %w", iface.ErrSuppressionListUnavailable, err)
+	}
+	if len(rows) > 0 {
+		return iface.ErrRecipientSuppressed
+	}
+	return nil
 }
 
 // ResendInviteClientUserAdminRequest re-emits an admin_invite token for
@@ -798,6 +823,14 @@ func mapInviteErr(err error, generic string) error {
 	if errors.Is(err, iface.ErrAuthPolicyUnavailable) {
 		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
 			"Sign-in policy is temporarily unavailable; try again shortly.")
+	}
+	if errors.Is(err, iface.ErrRecipientSuppressed) {
+		return errcode.Conflict(errcode.AuthRecipientSuppressed,
+			"The email was not sent: the user's address is on the email suppression list (marked invalid). Remove it from the list before trying again.")
+	}
+	if errors.Is(err, iface.ErrSuppressionListUnavailable) {
+		return errcode.ServiceUnavailable(errcode.AuthSuppressionUnavailable,
+			"The email suppression list could not be read, so the email was not sent; try again shortly.")
 	}
 	// ErrNotificationDown lives in auth/services and we don't import it
 	// from here — match by message so we still surface 503 cleanly.

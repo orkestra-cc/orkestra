@@ -36,6 +36,10 @@ import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 import { formatDate, formatTime } from 'helpers/dateFormat';
 import { useAppSelector } from 'store/hooks';
 import { selectUser } from 'store/slices/authSlice';
+import {
+  suppressedSendToast,
+  useSuppressionManageLinks
+} from 'components/notification/suppressedSend';
 
 // extractToastError prefers the typed `code` returned by errcode-bearing
 // handlers (translated via the `errors.<code>` namespace), falling back
@@ -141,6 +145,7 @@ const useUserTable = (options?: any) => {
   const [updateUser, { isLoading: isUpdating }] = useUpdateUserMutation();
   const [resendVerification] = useResendVerificationUserAdminMutation();
   const [sendPasswordReset] = useSendPasswordResetUserAdminMutation();
+  const suppressionLinks = useSuppressionManageLinks();
 
   // Server-side pagination + search state. The backend owns paging and
   // search (page/pageSize/search → total/totalPages), so the table holds
@@ -233,9 +238,14 @@ const useUserTable = (options?: any) => {
       );
     } catch (err) {
       toast.error(
-        t('adminUsers.rowActions.toastVerificationFailed', {
-          error: extractToastError(err, t, genericFailure)
-        })
+        suppressedSendToast(
+          err,
+          t('adminUsers.rowActions.toastVerificationFailed', {
+            error: extractToastError(err, t, genericFailure)
+          }),
+          suppressionLinks,
+          user.email
+        )
       );
     }
   };
@@ -250,9 +260,14 @@ const useUserTable = (options?: any) => {
       );
     } catch (err) {
       toast.error(
-        t('adminUsers.rowActions.toastPasswordResetFailed', {
-          error: extractToastError(err, t, genericFailure)
-        })
+        suppressedSendToast(
+          err,
+          t('adminUsers.rowActions.toastPasswordResetFailed', {
+            error: extractToastError(err, t, genericFailure)
+          }),
+          suppressionLinks,
+          user.email
+        )
       );
     }
   };

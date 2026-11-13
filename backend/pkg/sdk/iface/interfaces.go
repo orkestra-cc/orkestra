@@ -382,6 +382,20 @@ var ErrPasswordLoginDisabled = errors.New("password login disabled for this surf
 // AdminAuthInviter consumers map it with errors.Is.
 var ErrAuthPolicyUnavailable = errors.New("auth policy unavailable")
 
+// ErrRecipientSuppressed reports that an AdminAuthInviter action did not
+// send its email because the user's address is on the email suppression
+// list (iface.EmailSuppressionManager): the notification module would have
+// suppressed it, and an operator must not read that as "sent". The check runs
+// before any token is minted. Only the operator-initiated actions return it;
+// the public forgot-password and resend-verification flows answer the same
+// for every address, so that they never tell who has an account.
+var ErrRecipientSuppressed = errors.New("recipient address is on the email suppression list")
+
+// ErrSuppressionListUnavailable reports that the email suppression list
+// could not be read, so an AdminAuthInviter action could not tell whether its
+// email would go out. It fails closed: nothing is minted or sent.
+var ErrSuppressionListUnavailable = errors.New("email suppression list unavailable")
+
 // ErrUserNotFound is the cross-module "this user does not exist" sentinel.
 //
 // It exists because a consumer outside the user module — auth's refresh path,

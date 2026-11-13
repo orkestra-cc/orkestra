@@ -1093,6 +1093,8 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	if n, ok := module.GetTyped[iface.NotificationSender](deps.Services, module.ServiceNotificationSender); ok {
 		notifier = n
 	}
+	// Registered by notification's Init, which runs first (Dependencies).
+	suppressions, _ := module.GetTyped[iface.EmailSuppressionManager](deps.Services, module.ServiceEmailSuppressionManager)
 
 	// Suspicious-login notifier shares one SecurityEventService
 	// instance with the PII producer below so user-facing security
@@ -1195,6 +1197,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		deviceTrust:              deviceTrustSvc,
 		suspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
 		notifier:                 notifier,
+		suppressions:             suppressions,
 		attemptCounter:           attemptCounter,
 		mailDispatcher:           mailDispatcher,
 		geoResolver:              geoResolver,

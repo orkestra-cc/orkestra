@@ -196,7 +196,9 @@
       "login_disabled": "L'accesso è temporaneamente disabilitato per questa superficie. Contatta un amministratore.",
       "country_blocked": "L'accesso dal tuo paese non è consentito.",
       "password_confirm_unavailable": "Questo account non può riconfermare con una password. Usa l'MFA o autenticati nuovamente tramite OAuth.",
-      "oauth_provider_disabled": "Questo provider OAuth non è abilitato per questa superficie. Contatta un amministratore."
+      "oauth_provider_disabled": "Questo provider OAuth non è abilitato per questa superficie. Contatta un amministratore.",
+      "recipient_suppressed": "l'email non è partita perché l'indirizzo dell'utente è segnato non valido (lista di soppressione). Rendilo di nuovo valido prima di riprovare.",
+      "suppression_unavailable": "non è stato possibile leggere la lista degli indirizzi non validi, quindi l'email non è partita. Riprova tra poco."
     },
     "compliance": {
       "policy_not_found": "La policy di conformità non esiste.",
