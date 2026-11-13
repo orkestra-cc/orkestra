@@ -266,7 +266,7 @@
       // band. Pulling the bar's left edge to the rail closes it: the bar's
       // bottom hairline now meets the rail's vertical hairline in a clean
       // T-junction, and the padding gives the pulled margin back so the
-      // bar's CONTENT (search box) stays on the content grid, aligned with
+      // bar's CONTENT stays on the content grid, aligned with
       // the cards below it. `:where()` keeps this at base specificity: in
       // collapsed mode the bar slides under the higher-z rail and the
       // collapsed block's own padding-left MUST win — it is the clearance

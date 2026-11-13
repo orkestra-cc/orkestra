@@ -2,10 +2,8 @@ import { useEffect, useRef, useState, RefObject } from 'react';
 import { Navbar, Nav } from 'react-bootstrap';
 import classNames from 'classnames';
 import Logo from 'components/common/Logo';
-import SearchBox from './SearchBox';
 import NavbarTopDropDownMenus from './NavbarTopDropDownMenus';
 import { navbarBreakPoint, topNavbarBreakpoint, NavbarPosition } from 'config';
-import autoCompleteInitialItem from 'data/autocomplete/autocomplete';
 import TopNavRightSideNavItem from './TopNavRightSideNavItem';
 import { useLocation } from 'react-router';
 import { useAppContext } from 'providers/AppProvider';
@@ -125,7 +123,9 @@ const NavbarTopElements = ({
 
       <Logo at="navbar-top" textClass="text-primary" width={160} id="topLogo" />
 
-      {navbarPosition === 'top' || navbarPosition === 'combo' ? (
+      {/* No search box here: the theme's one searched demo data, not the
+          console's. It comes back with a real global search. */}
+      {(navbarPosition === 'top' || navbarPosition === 'combo') && (
         <Navbar.Collapse
           in={navbarCollapsed}
           className="scrollbar pb-3 pb-lg-0"
@@ -134,16 +134,6 @@ const NavbarTopElements = ({
             <NavbarTopDropDownMenus />
           </Nav>
         </Navbar.Collapse>
-      ) : (
-        <Nav
-          navbar
-          className={`align-items-center d-none d-${topNavbarBreakpoint}-block`}
-          as="ul"
-        >
-          <Nav.Item as="li">
-            <SearchBox autoCompleteItem={autoCompleteInitialItem} />
-          </Nav.Item>
-        </Nav>
       )}
       <TopNavRightSideNavItem />
     </>
