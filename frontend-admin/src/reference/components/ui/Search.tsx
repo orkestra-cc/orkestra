@@ -26,9 +26,10 @@ const Search = () => (
     <OrkestraComponentCard>
       <OrkestraComponentCard.Header title="Search Example" noPreview>
         <p className="mt-2 mb-0">
-          You can find Orkestra's default searchbox component in{' '}
-          <code>src/components/navbar/top/SearchBox.js</code>. And demo data for
-          search box in <code>src/data/autocomplete/autocomplete.js</code>
+          The searchbox component is{' '}
+          <code>src/components/navbar/top/SearchBox.tsx</code>, with demo data
+          in <code>src/data/autocomplete/autocomplete.js</code>. The console's
+          top bar does not mount it until a real global search exists.
         </p>
       </OrkestraComponentCard.Header>
       <OrkestraComponentCard.Body>
