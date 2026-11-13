@@ -6333,10 +6333,16 @@
               "array",
               "null"
             ]
+          },
+          "total": {
+            "description": "Rows the filters match, across every page",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "type": "object"
       },
@@ -25075,25 +25081,36 @@
     },
     "/v1/notifications": {
       "get": {
+        "description": "One page of the delivery log, newest first, with the number of rows the filters match. A suppressed row carries the reason in `error`: `address_invalid` (the address is on the suppression list), `marketing_optout`, or a category preference. Platform-wide: the log spans every tenant.",
         "operationId": "notifications-list",
         "parameters": [
           {
-            "description": "Filter by category",
+            "description": "Filter by category (exact)",
             "explode": false,
             "in": "query",
             "name": "category",
             "schema": {
-              "description": "Filter by category",
+              "description": "Filter by category (exact)",
               "type": "string"
             }
           },
           {
-            "description": "Filter by status",
+            "description": "Filter by status: queued, sent, failed, suppressed",
             "explode": false,
             "in": "query",
             "name": "status",
             "schema": {
-              "description": "Filter by status",
+              "description": "Filter by status: queued, sent, failed, suppressed",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by send type: transactional, marketing",
+            "explode": false,
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "description": "Filter by send type: transactional, marketing",
               "type": "string"
             }
           },
@@ -25108,12 +25125,35 @@
             }
           },
           {
-            "description": "Max rows (default 100)",
+            "description": "Keep rows whose recipient address contains this text (case-insensitive, literal)",
+            "explode": false,
+            "in": "query",
+            "name": "address",
+            "schema": {
+              "description": "Keep rows whose recipient address contains this text (case-insensitive, literal)",
+              "maxLength": 254,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip, for paging (default 0)",
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "description": "Rows to skip, for paging (default 0)",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Max rows (default 100, at most 500)",
             "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
-              "description": "Max rows (default 100)",
+              "description": "Max rows (default 100, at most 500)",
               "format": "int64",
               "type": "integer"
             }

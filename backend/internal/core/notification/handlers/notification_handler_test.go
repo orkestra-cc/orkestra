@@ -32,6 +32,9 @@ func (htNotifRepo) FindByIdempotencyKey(_ context.Context, _ string, _ time.Time
 func (htNotifRepo) List(_ context.Context, _ repository.Filter, _ int64) ([]*models.NotificationDoc, error) {
 	return nil, nil
 }
+func (htNotifRepo) Page(_ context.Context, _ repository.Filter, _, _ int64) ([]*models.NotificationDoc, int64, error) {
+	return nil, 0, nil
+}
 func (htNotifRepo) GetByUUID(_ context.Context, _ string) (*models.NotificationDoc, error) {
 	return nil, nil
 }

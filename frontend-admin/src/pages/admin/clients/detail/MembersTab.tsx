@@ -18,6 +18,11 @@ import { Button } from 'react-bootstrap';
 import AttachMemberModal from './AttachMemberModal';
 import AdminResetMfaModal from 'pages/admin/users/AdminResetMfaModal';
 import ClientPinModal from './ClientPinModal';
+import { resolveErrorMessage } from 'helpers/errorMessage';
+import {
+  suppressedSendToast,
+  useSuppressionManageLinks
+} from 'components/notification/suppressedSend';
 
 interface Props {
   org: Org;
@@ -56,6 +61,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
   const [setMemberRole] = useSetOrgMemberRoleAdminMutation();
   const [resendVerification] = useResendVerificationClientUserAdminMutation();
   const [sendPasswordReset] = useSendPasswordResetClientUserAdminMutation();
+  const suppressionLinks = useSuppressionManageLinks();
   const [attachOpen, setAttachOpen] = useState(false);
   const [mfaTarget, setMfaTarget] = useState<MfaTarget | null>(null);
   const [pinTarget, setPinTarget] = useState<MfaTarget | null>(null);
@@ -88,28 +94,38 @@ const MembersTab: React.FC<Props> = ({ org }) => {
     }
   };
 
-  const onResendVerification = async (userUUID: string) => {
+  const onResendVerification = async (userUUID: string, email?: string) => {
     try {
       await resendVerification(userUUID).unwrap();
       toast.success(t('adminClients.members.toastVerificationSent'));
     } catch (err: unknown) {
       toast.error(
-        t('adminClients.members.toastResendFailed', {
-          error: extractError(err, unknownErr)
-        })
+        suppressedSendToast(
+          err,
+          t('adminClients.members.toastResendFailed', {
+            error: extractError(err, unknownErr)
+          }),
+          suppressionLinks,
+          email
+        )
       );
     }
   };
 
-  const onSendPasswordReset = async (userUUID: string) => {
+  const onSendPasswordReset = async (userUUID: string, email?: string) => {
     try {
       await sendPasswordReset(userUUID).unwrap();
       toast.success(t('adminClients.members.toastPasswordResetSent'));
     } catch (err: unknown) {
       toast.error(
-        t('adminClients.members.toastSendFailed', {
-          error: extractError(err, unknownErr)
-        })
+        suppressedSendToast(
+          err,
+          t('adminClients.members.toastSendFailed', {
+            error: extractError(err, unknownErr)
+          }),
+          suppressionLinks,
+          email
+        )
       );
     }
   };
@@ -219,7 +235,9 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                       <Dropdown.Item
                         as="button"
                         type="button"
-                        onClick={() => onResendVerification(m.userUUID)}
+                        onClick={() =>
+                          onResendVerification(m.userUUID, m.email)
+                        }
                       >
                         <FontAwesomeIcon icon="envelope" className="me-2" />
                         {t('adminClients.members.actionResendVerification')}
@@ -227,7 +245,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                       <Dropdown.Item
                         as="button"
                         type="button"
-                        onClick={() => onSendPasswordReset(m.userUUID)}
+                        onClick={() => onSendPasswordReset(m.userUUID, m.email)}
                       >
                         <FontAwesomeIcon icon="key" className="me-2" />
                         {t('adminClients.members.actionSendPasswordReset')}
@@ -306,10 +324,14 @@ const MembersTab: React.FC<Props> = ({ org }) => {
   );
 };
 
+// A code the console translates (errors.<code>, e.g. auth.recipient_suppressed)
+// wins over the backend's English detail.
 function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
-    const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || unknownLabel;
+    const data = (
+      err as { data?: { code?: string; detail?: string; title?: string } }
+    ).data;
+    return resolveErrorMessage(data, data?.title || unknownLabel);
   }
   return String(err);
 }

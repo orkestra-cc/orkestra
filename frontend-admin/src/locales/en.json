@@ -129,7 +129,8 @@
       "suppliers": "Suppliers",
       "invoicesIssued": "Invoices Issued",
       "invoicesReceived": "Invoices Received",
-      "sdiNotifications": "SDI Notifications"
+      "sdiNotifications": "SDI Notifications",
+      "deliveryLog": "Delivery log"
     }
   },
   "errors": {
@@ -195,7 +196,9 @@
       "login_disabled": "Login is temporarily disabled for this surface. Contact an administrator.",
       "country_blocked": "Access from your country is not permitted.",
       "password_confirm_unavailable": "This account cannot reconfirm with a password. Use MFA or reauthenticate via OAuth.",
-      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator."
+      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator.",
+      "recipient_suppressed": "the email was not sent because the user's address is marked invalid (suppression list). Make it valid again before trying once more.",
+      "suppression_unavailable": "the list of invalid addresses could not be read, so the email was not sent. Try again shortly."
     },
     "compliance": {
       "policy_not_found": "The compliance policy does not exist.",
@@ -4470,5 +4473,47 @@
         "outbox": "Pending updates"
       }
     }
+  },
+  "adminDeliveryLog": {
+    "title": "Delivery log",
+    "subtitle": "The emails the platform tried to send in the last 90 days, with their outcome. A «suppressed» row was never sent.",
+    "col": {
+      "date": "Date",
+      "type": "Type",
+      "category": "Category",
+      "recipient": "Recipient",
+      "status": "Status",
+      "reason": "Reason",
+      "sender": "Sender"
+    },
+    "status": {
+      "sent": "Sent",
+      "suppressed": "Suppressed",
+      "failed": "Failed",
+      "queued": "Queued"
+    },
+    "type": {
+      "transactional": "Transactional",
+      "marketing": "Marketing"
+    },
+    "reason": {
+      "addressInvalid": "Address marked invalid",
+      "marketingOptout": "Unsubscribed from marketing",
+      "categoryPreference": "The user's preference for this category"
+    },
+    "filter": {
+      "address": "Search by address",
+      "status": "Status",
+      "anyStatus": "Any status",
+      "type": "Type",
+      "anyType": "Any type",
+      "category": "Category (e.g. auth.reset_password)"
+    },
+    "refresh": "Refresh",
+    "loading": "Loading the log…",
+    "loadError": "The delivery log could not be loaded.",
+    "retry": "Retry",
+    "empty": "No email in the last 90 days.",
+    "noResults": "No row matches the filters."
   }
 }

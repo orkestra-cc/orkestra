@@ -114,7 +114,12 @@ type PasswordAuthConfig struct {
 	DeviceTrust             DeviceTrustService             // nil → never skips MFA; Section C item #3
 	SuspiciousLoginNotifier SuspiciousLoginNotifier        // nil → no email on high-risk login; Section C item #5
 	Notifier                iface.NotificationSender
-	AttemptCounter          AttemptCounter
+	// Suppressions lets the admin-initiated sends (reset, verification,
+	// invite) refuse an address on the email suppression list before
+	// minting a token, instead of answering "sent" for a message the
+	// notification module will suppress. Nil skips the check.
+	Suppressions   iface.EmailSuppressionManager
+	AttemptCounter AttemptCounter
 	// MailDispatcher is the bounded worker pool that detaches
 	// ForgotPassword's reset-password send from the request that
 	// triggered it. ResendVerification stays synchronous (see its doc
@@ -159,6 +164,7 @@ type PasswordAuthService struct {
 	deviceTrust             DeviceTrustService
 	suspiciousLoginNotifier SuspiciousLoginNotifier
 	notifier                iface.NotificationSender
+	suppressions            iface.EmailSuppressionManager
 	attempts                AttemptCounter
 	// mail is the bounded dispatcher for transactional auth mail (D5).
 	// ForgotPassword hands its reset-password send to mail.Enqueue so the
@@ -251,6 +257,7 @@ func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 		deviceTrust:              cfg.DeviceTrust,
 		suspiciousLoginNotifier:  cfg.SuspiciousLoginNotifier,
 		notifier:                 cfg.Notifier,
+		suppressions:             cfg.Suppressions,
 		attempts:                 cfg.AttemptCounter,
 		mail:                     cfg.MailDispatcher,
 		frontendURL:              cfg.FrontendURL,
@@ -2468,6 +2475,9 @@ func (s *PasswordAuthService) AdminSendInvite(ctx context.Context, userUUID, inv
 	if err != nil {
 		return err
 	}
+	if err := s.checkRecipientNotSuppressed(ctx, user.Email); err != nil {
+		return err
+	}
 	_ = s.emailTokenRepo.InvalidateByUserAndPurpose(ctx, userUUID, authModels.EmailTokenPurposeAdminInvite)
 
 	raw, hash, err := generateEmailToken()
@@ -2526,8 +2536,32 @@ func (s *PasswordAuthService) AdminResendVerification(ctx context.Context, userU
 	if user.EmailVerified {
 		return nil
 	}
+	if err := s.checkRecipientNotSuppressed(ctx, user.Email); err != nil {
+		return err
+	}
 	_ = s.emailTokenRepo.InvalidateByUserAndPurpose(ctx, user.UUID, authModels.EmailTokenPurposeVerifyEmail)
 	return s.sendVerificationEmail(ctx, user, "")
+}
+
+// checkRecipientNotSuppressed refuses an admin-initiated send to an address
+// on the email suppression list (iface.ErrRecipientSuppressed), and fails
+// closed when the list cannot be read (iface.ErrSuppressionListUnavailable).
+// It runs before a token is minted or an older one invalidated, so a refused
+// action changes nothing. Only the Admin* methods call it: the public
+// forgot-password and resend-verification flows must answer the same for
+// every address, and the notification module suppresses their send anyway.
+func (s *PasswordAuthService) checkRecipientNotSuppressed(ctx context.Context, address string) error {
+	if s.suppressions == nil || strings.TrimSpace(address) == "" {
+		return nil
+	}
+	rows, err := s.suppressions.LookupSuppressions(ctx, []string{address})
+	if err != nil {
+		return fmt.Errorf("%w: %w", iface.ErrSuppressionListUnavailable, err)
+	}
+	if len(rows) > 0 {
+		return iface.ErrRecipientSuppressed
+	}
+	return nil
 }
 
 // AdminTriggerPasswordReset emits a reset-password token + email on
@@ -2549,6 +2583,9 @@ func (s *PasswordAuthService) AdminTriggerPasswordReset(ctx context.Context, use
 
 	user, err := s.userService.GetUserByID(ctx, userUUID)
 	if err != nil {
+		return err
+	}
+	if err := s.checkRecipientNotSuppressed(ctx, user.Email); err != nil {
 		return err
 	}
 	_ = s.emailTokenRepo.InvalidateByUserAndPurpose(ctx, userUUID, authModels.EmailTokenPurposeResetPassword)

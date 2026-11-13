@@ -108,6 +108,17 @@ const AuthOAuthEmailUnverified = "auth.oauth_email_unverified"
 // target's surface refuses.
 const AuthPasswordLoginDisabled = "auth.password_login_disabled"
 
+// AuthRecipientSuppressed signals that an operator-initiated email
+// (password reset, verification, invite) was not sent because the user's
+// address is on the email suppression list: nothing was minted or sent.
+// 409 on the admin user and client-user routes only; the public
+// forgot-password answer never changes.
+const AuthRecipientSuppressed = "auth.recipient_suppressed"
+
+// AuthSuppressionUnavailable signals that the email suppression list could
+// not be read, so an operator-initiated email was not sent. 503.
+const AuthSuppressionUnavailable = "auth.suppression_unavailable"
+
 // AuthLoginMethodLockout signals that a module-config mutation would
 // leave a surface with no way to authenticate: password off with no
 // structurally configured OAuth provider, or with verified-email

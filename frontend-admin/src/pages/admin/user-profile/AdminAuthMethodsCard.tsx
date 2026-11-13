@@ -27,6 +27,11 @@ import {
   useUnlinkOAuthUserAdminMutation
 } from 'store/api/userApi';
 import AdminResetMfaModal from '../users/AdminResetMfaModal';
+import { resolveErrorMessage } from 'helpers/errorMessage';
+import {
+  suppressedSendToast,
+  useSuppressionManageLinks
+} from 'components/notification/suppressedSend';
 
 interface AdminAuthMethodsCardProps {
   user: User;
@@ -55,6 +60,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
     user.id
   );
 
+  const suppressionLinks = useSuppressionManageLinks();
   const [sendPasswordReset, { isLoading: pwBusy }] =
     useSendPasswordResetUserAdminMutation();
   const [resendVerification, { isLoading: verifyBusy }] =
@@ -81,9 +87,14 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
       toast.success(t('adminUserProfile.authMethods.toastPasswordResetSent'));
     } catch (err) {
       toast.error(
-        t('adminUserProfile.authMethods.toastPasswordResetFailed', {
-          error: extractError(err, unknownErr)
-        })
+        suppressedSendToast(
+          err,
+          t('adminUserProfile.authMethods.toastPasswordResetFailed', {
+            error: extractError(err, unknownErr)
+          }),
+          suppressionLinks,
+          user.email
+        )
       );
     }
   };
@@ -94,9 +105,14 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
       toast.success(t('adminUserProfile.authMethods.toastVerificationResent'));
     } catch (err) {
       toast.error(
-        t('adminUserProfile.authMethods.toastVerificationResendFailed', {
-          error: extractError(err, unknownErr)
-        })
+        suppressedSendToast(
+          err,
+          t('adminUserProfile.authMethods.toastVerificationResendFailed', {
+            error: extractError(err, unknownErr)
+          }),
+          suppressionLinks,
+          user.email
+        )
       );
     }
   };
@@ -633,10 +649,14 @@ function formatDate(iso: string): string {
   }
 }
 
+// A code the console translates (errors.<code>, e.g. auth.recipient_suppressed)
+// wins over the backend's English detail.
 function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
-    const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || unknownLabel;
+    const data = (
+      err as { data?: { code?: string; detail?: string; title?: string } }
+    ).data;
+    return resolveErrorMessage(data, data?.title || unknownLabel);
   }
   return String(err);
 }

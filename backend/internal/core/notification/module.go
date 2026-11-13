@@ -46,6 +46,16 @@ func (m *NotificationModule) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceNotificationSender, module.ServiceNotificationTemplateSeeder, module.ServiceMarketingOptoutManager, module.ServiceEmailSuppressionManager}
 }
 
+// NavItems adds the delivery log page to the operator console. The page
+// reads GET /v1/notifications, gated by notification.log.read, a system
+// permission: administrator (and developer outside production) hold it by
+// role, which is why the item asks for administrator.
+func (m *NotificationModule) NavItems() []module.NavItemSpec {
+	return []module.NavItemSpec{
+		{Realm: "platform", Tier: "internal", Name: "Delivery Log", Icon: "envelope-open-text", Path: "/admin/delivery-log", MinRole: "administrator", Active: true},
+	}
+}
+
 func (m *NotificationModule) Permissions() []iface.PermissionSpec {
 	return []iface.PermissionSpec{
 		{Key: "notification.preferences.self", Module: "notification", Description: "View and edit your own notification preferences"},
@@ -70,6 +80,19 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"idempotencyKey": 1}},
 				{Keys: map[string]int{"senderSlug": 1}, Sparse: true},
 				{Keys: map[string]int{"createdAt": 1}, TTL: day90},
+				// The delivery log page reads newest first with an _id
+				// tiebreak (repository.Page), unfiltered or by status
+				// (suppressed, failed): without _id in the key Mongo would
+				// sort the whole log in memory on every page.
+				{OrderedKeys: []module.IndexKey{
+					{Field: "createdAt", Direction: -1},
+					{Field: "_id", Direction: -1},
+				}},
+				{OrderedKeys: []module.IndexKey{
+					{Field: "status", Direction: 1},
+					{Field: "createdAt", Direction: -1},
+					{Field: "_id", Direction: -1},
+				}},
 			},
 		},
 		{

@@ -12,6 +12,7 @@ package iface
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -382,6 +383,20 @@ var ErrPasswordLoginDisabled = errors.New("password login disabled for this surf
 // AdminAuthInviter consumers map it with errors.Is.
 var ErrAuthPolicyUnavailable = errors.New("auth policy unavailable")
 
+// ErrRecipientSuppressed reports that an AdminAuthInviter action did not
+// send its email because the user's address is on the email suppression
+// list (iface.EmailSuppressionManager): the notification module would have
+// suppressed it, and an operator must not read that as "sent". The check runs
+// before any token is minted. Only the operator-initiated actions return it;
+// the public forgot-password and resend-verification flows answer the same
+// for every address, so that they never tell who has an account.
+var ErrRecipientSuppressed = errors.New("recipient address is on the email suppression list")
+
+// ErrSuppressionListUnavailable reports that the email suppression list
+// could not be read, so an AdminAuthInviter action could not tell whether its
+// email would go out. It fails closed: nothing is minted or sent.
+var ErrSuppressionListUnavailable = errors.New("email suppression list unavailable")
+
 // ErrUserNotFound is the cross-module "this user does not exist" sentinel.
 //
 // It exists because a consumer outside the user module — auth's refresh path,
@@ -558,6 +573,15 @@ var (
 	// 8058 one-click unsubscribe, which the notification module refuses
 	// rather than delivers, at save time and again at dispatch.
 	ErrSenderInvalid = errors.New("sender slug malformed")
+	// ErrOneClickUnsubscribeUnavailable: a marketing send would go out with
+	// no RFC 8058 one-click unsubscribe while require_one_click_unsubscribe
+	// is on — there is no usable https public API base URL to point the
+	// headers at, or the sender's driver cannot put them on the wire. It
+	// WRAPS ErrSenderInvalid, so a consumer that only knows that sentinel
+	// keeps refusing the send; a consumer that matches this one first can
+	// tell the operator what is actually missing instead of reporting a
+	// malformed slug.
+	ErrOneClickUnsubscribeUnavailable = fmt.Errorf("one-click unsubscribe cannot be guaranteed for this marketing send: %w", ErrSenderInvalid)
 	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
 	ErrSenderNotFound = errors.New("sender profile not found")
 	// ErrSenderNotEligible: the profile exists but its allowed_types does not
