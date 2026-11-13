@@ -188,6 +188,9 @@ func (suppressedOnly) InsertIfAbsent(context.Context, []string, models.Suppressi
 	return nil, nil
 }
 func (suppressedOnly) DeleteMany(context.Context, []string) ([]string, error) { return nil, nil }
+func (suppressedOnly) List(context.Context, string, int, string, string) ([]models.SuppressionDoc, error) {
+	return nil, nil
+}
 
 // TestSendTestEmail_SuppressedAddressIs422: the admin test send does not get
 // past the suppression list, and says so with its own code.

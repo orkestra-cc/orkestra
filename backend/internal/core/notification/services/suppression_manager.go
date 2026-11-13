@@ -111,6 +111,30 @@ func (m *suppressionManager) LiftSuppressions(ctx context.Context, addresses []s
 	return lifted, nil
 }
 
+func (m *suppressionManager) ListSuppressions(ctx context.Context, q iface.SuppressionListQuery) ([]iface.EmailSuppression, error) {
+	limit := q.Limit
+	if limit <= 0 || limit > iface.MaxSuppressionBatch {
+		limit = iface.MaxSuppressionBatch
+	}
+	switch q.Reason {
+	case "", iface.SuppressionReasonHardBounce, iface.SuppressionReasonManual:
+	default:
+		return nil, ErrSuppressionReasonInvalid
+	}
+	docs, err := m.repo.List(ctx, q.AfterAddress, limit, q.Contains, q.Reason)
+	if err != nil {
+		return nil, m.fail("listing the suppression list", err)
+	}
+	out := make([]iface.EmailSuppression, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, iface.EmailSuppression{
+			Address: d.Address, Reason: d.Reason, At: d.CreatedAt,
+			Source: d.Source, ActorUUID: d.ActorUUID, TenantID: d.TenantID,
+		})
+	}
+	return out, nil
+}
+
 func withContextAttribution(ctx context.Context, ev iface.SuppressionEvidence) iface.SuppressionEvidence {
 	if ev.ActorUUID == "" {
 		ev.ActorUUID, _ = ctxauth.GetUserUUID(ctx)

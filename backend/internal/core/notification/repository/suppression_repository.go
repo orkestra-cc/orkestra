@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/mail"
+	"regexp"
 	"strings"
 
 	"github.com/orkestra/backend/internal/core/notification/models"
@@ -28,6 +29,10 @@ type SuppressionRepository interface {
 	InsertIfAbsent(ctx context.Context, addresses []string, tmpl models.SuppressionDoc) ([]string, error)
 	// DeleteMany removes the addresses' rows and returns those it removed.
 	DeleteMany(ctx context.Context, addresses []string) ([]string, error)
+	// List returns up to limit rows in address order, after the address
+	// after (exclusive), optionally keeping only addresses that contain
+	// contains (literal, case-insensitive) and rows with reason.
+	List(ctx context.Context, after string, limit int, contains, reason string) ([]models.SuppressionDoc, error)
 }
 
 type suppressionRepo struct{ coll *mongo.Collection }
@@ -182,4 +187,41 @@ func (r *suppressionRepo) DeleteMany(ctx context.Context, addresses []string) ([
 		return nil, err
 	}
 	return removed, nil
+}
+
+func (r *suppressionRepo) List(ctx context.Context, after string, limit int, contains, reason string) ([]models.SuppressionDoc, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	filter := bson.M{}
+	// A cursor is an address already stored (normalized): compare it as it
+	// is, only trimmed and lowercased — re-parsing it as "Name <a@b>" could
+	// move it and repeat or skip a page.
+	if after = strings.ToLower(strings.TrimSpace(after)); after != "" {
+		filter["address"] = bson.M{"$gt": after}
+	}
+	if c := strings.ToLower(strings.TrimSpace(contains)); c != "" {
+		// Addresses are stored lowercased, so a literal lowercase match is
+		// the case-insensitive one; QuoteMeta keeps the input literal.
+		addr, _ := filter["address"].(bson.M)
+		if addr == nil {
+			addr = bson.M{}
+		}
+		addr["$regex"] = regexp.QuoteMeta(c)
+		filter["address"] = addr
+	}
+	if reason != "" {
+		filter["reason"] = reason
+	}
+	//tenantscope:allow platform: the suppression list is address-keyed and platform-wide by design (tenantId is attribution only); the consumer filters what a tenant sees
+	cur, err := r.coll.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "address", Value: 1}}).SetLimit(int64(limit)))
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	out := make([]models.SuppressionDoc, 0, limit)
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

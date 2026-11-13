@@ -1838,6 +1838,28 @@ type EmailSuppressionManager interface {
 	// LiftSuppressions removes the addresses' rows and returns the addresses
 	// that had one (normalized).
 	LiftSuppressions(ctx context.Context, addresses []string, ev SuppressionEvidence) ([]string, error)
+	// ListSuppressions pages through the whole list in address order
+	// (keyset: pass the last address of a page as AfterAddress). It is the
+	// one read that is not keyed by address, so a consumer that shows the
+	// list decides itself what each tenant may see: the rows are
+	// platform-wide.
+	ListSuppressions(ctx context.Context, q SuppressionListQuery) ([]EmailSuppression, error)
+}
+
+// SuppressionListQuery selects one page of ListSuppressions.
+type SuppressionListQuery struct {
+	// AfterAddress returns only rows whose (normalized) address sorts after
+	// it; empty starts from the first row.
+	AfterAddress string
+	// Limit is the page size, 1..MaxSuppressionBatch; 0 or more than the
+	// bound means MaxSuppressionBatch.
+	Limit int
+	// Contains keeps rows whose address contains it, case-insensitively and
+	// literally (no pattern syntax). Empty keeps every row.
+	Contains string
+	// Reason keeps rows with that reason (SuppressionReason*). Empty keeps
+	// every row.
+	Reason string
 }
 
 // MaxSuppressionBatch bounds the addresses of one EmailSuppressionManager call.
