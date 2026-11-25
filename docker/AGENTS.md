@@ -880,7 +880,7 @@ Opt-in Qdrant + local inference for the core `retrieval` module (ADR-0023 D3, D4
 
 | Service | Image (pinned by digest) | Networks | Notes |
 | --- | --- | --- | --- |
-| `qdrant` | `qdrant/qdrant:v1.20.0-unprivileged@sha256:8c2150…a41d` | `retrieval-net` | Volume `qdrant-data`; `QDRANT__SERVICE__API_KEY` from `QDRANT_API_KEY`; telemetry and web UI off; healthcheck via bash `/dev/tcp` on `/readyz` (the image has no curl/wget); `mem_limit ${QDRANT_MEM_LIMIT:-2g}` |
+| `qdrant` | `qdrant/qdrant:v1.20.2-unprivileged@sha256:f60765…5277` | `retrieval-net` | Volume `qdrant-data`; `QDRANT__SERVICE__API_KEY` from `QDRANT_API_KEY`; telemetry and web UI off; healthcheck via bash `/dev/tcp` on `/readyz` (the image has no curl/wget); `mem_limit ${QDRANT_MEM_LIMIT:-2g}` |
 | `tei-embed` | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea…c78d` (linux/amd64 only) | `retrieval-net` | `BAAI/bge-m3` @ `5617a9f…`, `--pooling cls`; `tei-weights:/data:ro`; `mem_limit ${TEI_EMBED_MEM_LIMIT:-8g}` |
 | `tei-rerank` | same TEI image | `retrieval-net` | `BAAI/bge-reranker-v2-m3` @ `953dc6f…`; `tei-weights:/data:ro`; `mem_limit ${TEI_RERANK_MEM_LIMIT:-9g}` |
 | `tei-embed-seed`, `tei-rerank-seed` | same image, command and volume as the serving twin | `retrieval-egress` only | Profile `retrieval-seed`, `restart: "no"`, `tei-weights:/data` read-write, healthcheck `start_period ${RETRIEVAL_SEED_TIMEOUT:-1800}s`; same `mem_limit` variable as the twin |

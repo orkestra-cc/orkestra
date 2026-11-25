@@ -14,7 +14,7 @@ The overlay is merged into the stack's own Compose project, like the [observabil
 
 | Service | Image | Role |
 | --- | --- | --- |
-| `qdrant` | `qdrant/qdrant:v1.20.0-unprivileged` | The vector engine: one per stack, single node, API key required (D3) |
+| `qdrant` | `qdrant/qdrant:v1.20.2-unprivileged` | The vector engine: one per stack, single node, API key required (D3) |
 | `tei-embed` | `text-embeddings-inference:cpu-1.9.4` | Embeddings with `BAAI/bge-m3` (dense, 1024 dimensions, `cls` pooling) |
 | `tei-rerank` | `text-embeddings-inference:cpu-1.9.4` | Reranking with `BAAI/bge-reranker-v2-m3` |
 | `tei-embed-seed`, `tei-rerank-seed` | same as their serving twin | One-off weight download (profile `retrieval-seed`), removed as soon as it ends |
@@ -270,7 +270,7 @@ As for the index backup, the archive goes through standard output and input, so 
 
 | Component | Pin | License |
 | --- | --- | --- |
-| Qdrant | `qdrant/qdrant:v1.20.0-unprivileged@sha256:8c215051dc7bc15221b5f89c100a84a4b04d0dd8497fb73e6fa86fc948d1a41d` | Apache-2.0 |
+| Qdrant | `qdrant/qdrant:v1.20.2-unprivileged@sha256:f60765106f26981dabc593d88fe4d0c8138893442c7c59d62257390891b65277` | Apache-2.0 |
 | Text Embeddings Inference (CPU, `linux/amd64` only) | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d` | Apache-2.0 |
 | Embedding model | `BAAI/bge-m3` at revision `5617a9f61b028005a4858fdac845db406aefb181` (dense, 1024 dimensions, `cls` pooling) | MIT |
 | Reranking model | `BAAI/bge-reranker-v2-m3` at revision `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` | Apache-2.0 |

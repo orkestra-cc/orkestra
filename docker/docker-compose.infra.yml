@@ -19,12 +19,16 @@ services:
     # deployment ran 8.0.23 — and CI, which used the same floating tag, was
     # therefore testing on a different patch than the stacks ran, with nothing
     # saying so. Pinning fixed the drift; the 8.0.23 -> 8.0.29 bump that
-    # followed, 8.0.29 -> 8.0.32 after it, and 8.0.32 -> 8.0.34 (mongod 8.0.32
-    # refuses to start on Linux 6.19+, SERVER-121912) were taken deliberately,
-    # as upgrades rather than pulls.
+    # followed, 8.0.29 -> 8.0.32 after it, 8.0.32 -> 8.0.34 (mongod 8.0.32
+    # refuses to start on Linux 6.19+, SERVER-121912) and 8.0.34 -> 8.0.38
+    # (8.0.37 fixes 19 CVEs, among them the pre-authentication
+    # CVE-2026-118383 in replica-set catch-up and CVE-2026-120815 in the
+    # localhost exception) were taken deliberately, as upgrades rather than
+    # pulls. The digest is the multi-arch index: it fixes the content, the
+    # tag only says which release that content is.
     # Same-series patch upgrade: FCV stays 8.0 and no data migration runs.
     # Keep this in step with .github/workflows/backend.yml, same patch.
-    image: mongo:8.0.34
+    image: mongo:8.0.38@sha256:479e85ced54ffb8a40dade1dcde2da2a9ae858515b9415e9cc54bfb8f0575d01
     container_name: ${APP_NAME}-mongodb-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -103,7 +107,7 @@ services:
     # Tech Stack tables in AGENTS.md / backend/AGENTS.md / backend/README.md
     # / docs/site/intro.mdx, which name this version. The Kubernetes
     # reference deploys plain redis too, so the two now agree.
-    image: redis:8.2.10-alpine
+    image: redis:8.2.11-alpine@sha256:da23c2478319ceb4903857d77a2fd7aa5137d9e9d4c8165dafbacedac6403e95
     container_name: ${APP_NAME}-redis-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -174,7 +178,7 @@ services:
     # Since 1.0.0 RustFS rejects x-amz-* headers a presigned request did not
     # sign; the blob store signs only Content-Type (+ the exact length), so an
     # upload that echoes the returned headers verbatim is unaffected.
-    image: rustfs/rustfs:1.0.4@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2
+    image: rustfs/rustfs:1.0.6@sha256:ee717072290bec9b11abfc0365f8310b00df1cd9b3639943edae47bdef05044a
     container_name: ${APP_NAME}-rustfs-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}

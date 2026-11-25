@@ -99,12 +99,12 @@ jobs:
       redis:
         # Same image and patch docker-compose.infra.yml pins — CI must test
         # the Redis the stacks run.
-        image: redis:8.2.10-alpine
+        image: redis:8.2.11-alpine@sha256:da23c2478319ceb4903857d77a2fd7aa5137d9e9d4c8165dafbacedac6403e95
         ports: ['6379:6379']
       qdrant:
         # The engine floor of ADR-0023 (BM25 on the full-text index needs
         # 1.20); pinned by digest like the compose images.
-        image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+        image: qdrant/qdrant:v1.20.2@sha256:d277592721d2e3b73f9b797b53cf05e6a5bb2134f6d13fdbda4ca51782afbcac
         env:
           QDRANT__SERVICE__API_KEY: ci-qdrant-test-key
         ports: ['6333:6333']
@@ -122,7 +122,7 @@ jobs:
         run: |
           docker run --detach --name mongodb --publish 27017:27017 \
             --env GLIBC_TUNABLES=glibc.pthread.rseq=1 \
-            mongo:8.0.34 --replSet rs0 --bind_ip_all
+            mongo:8.0.38@sha256:479e85ced54ffb8a40dade1dcde2da2a9ae858515b9415e9cc54bfb8f0575d01 --replSet rs0 --bind_ip_all
           for attempt in {1..30}; do
             if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' | grep -q '^1$'; then
               break
