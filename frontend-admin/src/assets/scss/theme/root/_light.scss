@@ -109,6 +109,17 @@
         17%
       )};
   }
+  // `orkestra-primary` takes its AA label ink (see `$btn-orkestra-primary-color`);
+  // the active background above stays derived from `$primary`.
+  --#{$prefix}btn-orkestra-primary-color: #{$btn-orkestra-primary-color};
+  --#{$prefix}btn-orkestra-primary-hover-color: #{shift-color(
+      $btn-orkestra-primary-color,
+      17%
+    )};
+  --#{$prefix}btn-orkestra-primary-active-color: #{shift-color(
+      $btn-orkestra-primary-color,
+      17%
+    )};
 
   // Need To Work
   --#{$prefix}input-btn-focus-color: #{rgba(
