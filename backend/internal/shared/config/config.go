@@ -75,7 +75,9 @@ type ServerConfig struct {
 	// route inventory, and the docs page executes a third-party bundle on
 	// the API origin — the same origin that carries the HttpOnly refresh
 	// cookie — so an internet-reachable deployment must opt in explicitly
-	// (API_DOCS_ENABLED=true) and gate both paths at the edge when it does.
+	// (API_DOCS_ENABLED=true) and gate /docs, /openapi* and /schemas/* at the
+	// edge when it does: huma serves the document in four encodings and one
+	// JSON Schema per type next to the two routes registered here.
 	APIDocsEnabled bool
 
 	// TrustedProxyCount / TrustedProxyCIDRs describe the reverse proxies

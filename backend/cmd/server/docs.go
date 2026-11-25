@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
@@ -88,5 +89,29 @@ func registerDocsEndpoints(router *chi.Mux, publicAPI huma.API) {
 			http.Error(w, "Failed to generate OpenAPI spec", http.StatusInternalServerError)
 			return
 		}
+	})
+}
+
+// isSpecRoute reports whether path is one of the routes huma serves from the
+// shared API config on its own: the OpenAPI document (/openapi.json,
+// /openapi.yaml, /openapi-3.0.json, /openapi-3.0.yaml) and the JSON Schema of
+// each type (/schemas/{schema}).
+func isSpecRoute(path string) bool {
+	return strings.HasPrefix(path, "/openapi.") ||
+		strings.HasPrefix(path, "/openapi-") ||
+		strings.HasPrefix(path, "/schemas/")
+}
+
+// denySpecRoutes answers 404 on the spec routes. setupMiddleware mounts it
+// when API docs are disabled (API_DOCS_ENABLED, off by default in staging
+// and production), so the route inventory is not readable from the API
+// origin whatever huma instance registered the route.
+func denySpecRoutes(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isSpecRoute(r.URL.Path) {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }

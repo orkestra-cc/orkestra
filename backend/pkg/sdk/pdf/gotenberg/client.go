@@ -1,5 +1,6 @@
-// Package gotenberg is the iface.PDFRenderer backed by a Gotenberg 8
-// sidecar (Chromium HTML route). It never retries: the caller decides.
+// Package gotenberg is the iface.PDFRenderer backed by a Gotenberg
+// sidecar (Chromium HTML route, the same in Gotenberg 8 and 9). It never
+// retries: the caller decides.
 package gotenberg
 
 import (

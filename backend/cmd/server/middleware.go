@@ -68,7 +68,9 @@ func setupMiddleware(
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("X-Frame-Options", "DENY")
-			w.Header().Set("X-XSS-Protection", "1; mode=block")
+			// "0", not "1; mode=block": the legacy XSS auditor is itself an
+			// attack surface in the browsers that still ship one.
+			w.Header().Set("X-XSS-Protection", "0")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
 			if cfg.IsProductionLike() {
@@ -78,6 +80,14 @@ func setupMiddleware(
 			next.ServeHTTP(w, r)
 		})
 	})
+
+	// With API docs off, the OpenAPI document and the per-type JSON Schemas
+	// are not served at all. Skipping registerDocsEndpoints is not enough:
+	// huma registers its own copies of these routes from the shared config,
+	// once for the mux-level API and again for every module sub-router.
+	if !cfg.Server.APIDocsEnabled {
+		router.Use(denySpecRoutes)
+	}
 
 	// Request body size limit
 	router.Use(func(next http.Handler) http.Handler {

@@ -134,7 +134,7 @@ services:
       - retrieval-net
 
   qdrant:
-    image: qdrant/qdrant:v1.20.0-unprivileged@sha256:8c215051dc7bc15221b5f89c100a84a4b04d0dd8497fb73e6fa86fc948d1a41d
+    image: qdrant/qdrant:v1.20.2-unprivileged@sha256:f60765106f26981dabc593d88fe4d0c8138893442c7c59d62257390891b65277
     container_name: ${APP_NAME}-qdrant-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}

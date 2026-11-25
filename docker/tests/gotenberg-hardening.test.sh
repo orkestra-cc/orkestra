@@ -17,15 +17,29 @@ PDF_RENDERER_PASSWORD=x
 EOF
 infra=$(docker compose --env-file "$env_file" -f docker-compose.infra.yml config)
 need() { grep -qF -- "$1" <<<"$infra" || { echo "FAIL: infra compose lacks: $1"; fail=1; }; }
-# The image stays on the 8.x line, pinned by digest (the exact version moves
-# with Dependabot's docker-compose updates, so it is not asserted here).
-grep -qE 'image: gotenberg/gotenberg:8\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' <<<"$infra" \
-  || { echo "FAIL: infra compose lacks a gotenberg/gotenberg:8.x.y@sha256 pin"; fail=1; }
+# The image is on the 9.x line, pinned by digest (the exact version moves
+# with Dependabot's docker-compose updates, so it is not asserted here). The
+# 8.x line ended with 8.40.0: the advisories published after it are fixed in
+# 9.9.x only.
+grep -qE 'image: gotenberg/gotenberg:9\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' <<<"$infra" \
+  || { echo "FAIL: infra compose lacks a gotenberg/gotenberg:9.x.y@sha256 pin"; fail=1; }
+# Gotenberg 9 removed the --prometheus-* and --pdfengines-* flags and exits
+# on an unknown flag: one of them left in the command keeps the container
+# from starting.
+if grep -qE -- '--(prometheus|pdfengines)-' <<<"$infra"; then
+  echo "FAIL: gotenberg command carries a flag Gotenberg 9 removed"; fail=1
+fi
 need "--chromium-disable-javascript=true"
 need "--chromium-deny-list=^(?!file:///tmp/).*"
 need "--chromium-deny-private-ips=true"
 need "--chromium-deny-public-ips=true"
-need "--api-download-from-max-entries=0"
+# downloadFrom is switched off outright. --api-download-from-max-entries=0
+# used to stand here as the switch, but 0 means "no limit": whoever held the
+# basic-auth pair could make Gotenberg fetch any URL it reaches on pdf-net.
+need "--api-disable-download-from=true"
+if grep -qF -- '--api-download-from-max-entries=0' <<<"$infra"; then
+  echo "FAIL: --api-download-from-max-entries=0 means no limit, it disables nothing"; fail=1
+fi
 need "--webhook-disable=true"
 need "--libreoffice-disable-routes=true"
 need "--api-enable-basic-auth=true"

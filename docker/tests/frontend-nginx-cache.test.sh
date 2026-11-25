@@ -15,6 +15,7 @@
 #   - hashed /assets/*: one year, immutable; a missing one is a plain 404.
 #   - unhashed static files (TinyMCE, favicons): revalidated, never immutable.
 #   - /config.js: no-store.
+#   - no nginx version in the Server header (server_tokens off).
 # plus the security headers each location must re-state — the whole set on
 # documents, since nothing in front of nginx adds any behind a tunnel.
 #
@@ -123,8 +124,16 @@ done
 expect admin "$admin" /tinymce/missing.min.js status:404
 expect admin "$admin" /config.js status:200 'has:cache-control: no-store' 'has:x-content-type-options: nosniff'
 
+# No version in the Server header: `Server: nginx/1.31.8` tells a scanner
+# which advisories to try. With server_tokens off it is a bare `Server: nginx`,
+# on documents, assets and error pages alike.
+for p in / /assets/CampaignEdit-17cCus6X.js /assets/CampaignEdit-Cb8watoq.js /config.js; do
+  expect admin "$admin" "$p" 'lacks:server: nginx/'
+done
+
 # ---- fallback configs baked into the images (static) ----------------------
 for f in frontend-admin/Dockerfile frontend-client/Dockerfile; do
+  grep -qF 'server_tokens off;' "$f" || { echo "FAIL: $f: fallback config exposes the nginx version"; fail=1; }
   grep -qF 'location ^~ /assets/ {' "$f" || { echo "FAIL: $f: no /assets/ location"; fail=1; }
   grep -qF 'add_header Cache-Control "public, max-age=31536000, immutable";' "$f" ||
     { echo "FAIL: $f: /assets/ not immutable"; fail=1; }

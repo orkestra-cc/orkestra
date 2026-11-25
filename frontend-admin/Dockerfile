@@ -10,7 +10,7 @@
 # ============================================
 # Stage 1: Build
 # ============================================
-FROM node:24.22.2-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS builder
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS builder
 
 WORKDIR /app
 
@@ -61,7 +61,7 @@ RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build && test -f dist/tinymce
 # ============================================
 # Stage 2: Production
 # ============================================
-FROM nginx:1.31.8-alpine@sha256:713fc2ebfd92e8217db451477182ee91944b123d2b1ee9fd5a8c6e91ca6c3a11 AS production
+FROM nginx:1.31.10-alpine@sha256:aceb952b920393b7d0bc7b978927fc283370bea89fb082c6fef0ce18c60f96a9 AS production
 
 # curl for healthcheck; gettext for envsubst in the entrypoint.
 RUN apk add --no-cache curl gettext
@@ -79,6 +79,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 RUN echo 'server { \
     listen 80; \
     server_name localhost; \
+    server_tokens off; \
     root /usr/share/nginx/html; \
     index index.html; \
     add_header X-Frame-Options "SAMEORIGIN" always; \

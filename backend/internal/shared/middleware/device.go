@@ -42,18 +42,21 @@ const deviceIDCookieMaxAge = 365 * 24 * 60 * 60
 type DeviceMiddleware struct {
 	errorManager *errors.Manager
 	cookieName   string
+	secureCookie bool
 }
 
 // NewDeviceMiddleware creates a new device middleware instance. cookieName
 // names the device cookie (DEVICE_COOKIE_NAME); empty falls back to
-// DeviceIDCookieName.
-func NewDeviceMiddleware(errorManager *errors.Manager, cookieName string) *DeviceMiddleware {
+// DeviceIDCookieName. secureCookie is the deployment's COOKIE_SECURE: when
+// true the device cookie always carries Secure, as the session cookies do.
+func NewDeviceMiddleware(errorManager *errors.Manager, cookieName string, secureCookie bool) *DeviceMiddleware {
 	if cookieName == "" {
 		cookieName = DeviceIDCookieName
 	}
 	return &DeviceMiddleware{
 		errorManager: errorManager,
 		cookieName:   cookieName,
+		secureCookie: secureCookie,
 	}
 }
 
@@ -71,7 +74,9 @@ func (m *DeviceMiddleware) ExtractDeviceInfo(next http.Handler) http.Handler {
 				Path:     "/",
 				MaxAge:   deviceIDCookieMaxAge,
 				HttpOnly: true,
-				Secure:   r.TLS != nil,
+				// The deployment's cookie setting decides: behind a proxy
+				// that terminates TLS, r.TLS is nil on every request.
+				Secure:   m.secureCookie || r.TLS != nil,
 				SameSite: http.SameSiteLaxMode,
 			})
 		}
