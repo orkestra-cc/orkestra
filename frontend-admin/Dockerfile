@@ -79,6 +79,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 RUN echo 'server { \
     listen 80; \
     server_name localhost; \
+    server_tokens off; \
     root /usr/share/nginx/html; \
     index index.html; \
     add_header X-Frame-Options "SAMEORIGIN" always; \

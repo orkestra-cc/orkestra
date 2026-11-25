@@ -44,6 +44,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 RUN printf 'server {\n\
     listen 80;\n\
     server_name _;\n\
+    server_tokens off;\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
     add_header X-Frame-Options "SAMEORIGIN" always;\n\
