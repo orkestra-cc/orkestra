@@ -4,7 +4,7 @@
 # the backend and AI service can export spans to Tempo and metrics to
 # Prometheus with no code changes.
 #
-# ADR-0005 Phase D extends the stack with Loki + Promtail so logs are
+# ADR-0005 Phase D extends the stack with Loki + Alloy so logs are
 # searchable side-by-side with traces and the Grafana span ↔ log jump
 # works on both sides. The full self-hosted Tier-1 observability
 # package (logs + traces + metrics) is now a single `up -d` away.
@@ -17,7 +17,7 @@
 # Manual equivalent:
 #   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
 #     -f docker-compose.observability.yml --env-file .env \
-#     up -d otel-collector tempo prometheus loki promtail grafana
+#     up -d otel-collector tempo prometheus loki alloy grafana
 #   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
 #     -f docker-compose.observability.yml --env-file .env \
 #     up -d --no-deps backend
@@ -26,6 +26,14 @@
 # backend (docker-compose.dev.yml honors it via the .env file) and
 # Grafana auto-provisions Tempo + Prometheus + Loki datasources plus
 # the "Tenant traces + logs" dashboard.
+
+# Exposure (2026-11 security audit): every port below binds to
+# INFRA_BIND_ADDRESS (default 127.0.0.1), like the infra consoles. Before that
+# they bound to 0.0.0.0 -- a Docker-published port bypasses the host firewall,
+# so Loki, Prometheus, Tempo and the OTLP receivers (no auth) and Grafana
+# (admin/admin, anonymous viewer) were reachable by anyone who could reach the
+# host. Grafana now needs GRAFANA_ADMIN_PASSWORD and keeps anonymous access off
+# unless GRAFANA_ANONYMOUS_ENABLED=true.
 
 services:
   # Merge trusted preview destinations into the app stack's backend. Loki is
@@ -42,7 +50,7 @@ services:
   # collector rather than at Tempo directly so swapping backends (Tempo
   # → Jaeger, or prod cloud exporter) is a one-file change.
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.96.0
+    image: otel/opentelemetry-collector-contrib:0.163.2@sha256:7f22d2a6748110ffb6a59bc0df448bccbf501cdb667d610ede4c61d3863d5849
     container_name: ${APP_NAME}-otel-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -51,9 +59,9 @@ services:
     volumes:
       - ./otel/otel-collector.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "${OTEL_OTLP_HTTP_PORT:-4318}:4318"   # OTLP/HTTP receiver
-      - "${OTEL_OTLP_GRPC_PORT:-4317}:4317"   # OTLP/gRPC receiver
-      - "${OTEL_METRICS_PORT:-8889}:8889"     # Prometheus exporter of collected metrics
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${OTEL_OTLP_HTTP_PORT:-4318}:4318"   # OTLP/HTTP receiver
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${OTEL_OTLP_GRPC_PORT:-4317}:4317"   # OTLP/gRPC receiver
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${OTEL_METRICS_PORT:-8889}:8889"     # Prometheus exporter of collected metrics
     depends_on:
       - tempo
     # The opentelemetry-collector-contrib image is distroless (no shell,
@@ -68,7 +76,7 @@ services:
   # users are expected to point at an S3-backed Tempo or swap in Grafana
   # Cloud via the collector config.
   tempo:
-    image: grafana/tempo:2.4.1
+    image: grafana/tempo:2.10.10@sha256:12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38
     container_name: ${APP_NAME}-tempo-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -78,19 +86,19 @@ services:
       - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/var/tempo
     ports:
-      - "${TEMPO_HTTP_PORT:-3200}:3200"
-      - "${TEMPO_OTLP_GRPC_PORT:-4327}:4317"  # non-standard host port so it does not clash with the collector's OTLP/gRPC
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${TEMPO_HTTP_PORT:-3200}:3200"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${TEMPO_OTLP_GRPC_PORT:-4327}:4317"  # non-standard host port so it does not clash with the collector's OTLP/gRPC
+    # This image ships no wget/curl (distroless since the 2026-11 bump), so a
+    # wget healthcheck could only ever report unhealthy. Liveness is the
+    # restart policy, as for the collector.
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3200/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      disable: true
 
   # Prometheus — scrapes the OTEL collector's exported metrics and (from
   # Phase 5.3) the backend's /metrics endpoint. Keeps 15 days of data
   # locally; long-term storage is out of scope for this phase.
   prometheus:
-    image: prom/prometheus:v2.51.2
+    image: prom/prometheus:v3.13.5@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9
     container_name: ${APP_NAME}-prometheus-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -104,7 +112,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
       interval: 10s
@@ -117,7 +125,7 @@ services:
   # swap the filesystem store for S3/GCS without touching the rest of
   # the compose.
   loki:
-    image: grafana/loki:3.0.0
+    image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
     container_name: ${APP_NAME}-loki-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -127,54 +135,56 @@ services:
       - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
       - loki-data:/loki
     ports:
-      - "${LOKI_PORT:-3100}:3100"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${LOKI_PORT:-3100}:3100"
+    # This image ships no wget/curl (distroless since the 2026-11 bump), so a
+    # wget healthcheck could only ever report unhealthy. Liveness is the
+    # restart policy, as for the collector.
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      disable: true
 
-  # Grafana Promtail — log shipper (ADR-0005 Phase D). Tails Docker
-  # container stdout via the daemon's labels API, parses each JSON
-  # line, and pushes to Loki. The docker socket mount is read-only
-  # (Promtail never starts/stops containers; it only enumerates them
-  # and reads their log files). On shared/production hosts, front the
-  # socket with tecnativa/docker-socket-proxy restricted to the
-  # /containers/* read endpoints.
-  promtail:
-    image: grafana/promtail:3.0.0
-    container_name: ${APP_NAME}-promtail-${ENV}
+  # Grafana Alloy — log shipper (ADR-0005 Phase D). Replaced Promtail, which
+  # reached end of life on 2026-03-02 (config translated with
+  # `alloy convert --source-format=promtail`, see alloy/config.alloy). Reads
+  # the stack's container logs through the Docker API, parses each JSON
+  # line, and pushes to Loki with the same labels Promtail set. The docker
+  # socket mount is read-only, but the Docker API behind it is not: on
+  # shared/production hosts, front it with tecnativa/docker-socket-proxy
+  # restricted to the /containers/* read endpoints.
+  alloy:
+    image: grafana/alloy:v1.21.2@sha256:89a5a320168387336b9ac3c850609c3ba7757eadd4ae5f1d819deb35e9854b18
+    container_name: ${APP_NAME}-alloy-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
     environment:
       STACK: ${APP_NAME}-${ENV}
-    command: ["-config.file=/etc/promtail/promtail.yaml", "-config.expand-env=true"]
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --disable-reporting
+      - /etc/alloy/config.alloy
     volumes:
-      - ./promtail/promtail.yaml:/etc/promtail/promtail.yaml:ro
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - promtail-positions:/tmp
-    # Join the host Docker group so the mounted socket is usable —
-    # Promtail's default UID is 10001 and the socket is root:docker
-    # mode 660. Override DOCKER_GID in docker/.env if the host's
-    # docker group GID is not 1001. Mirrors the backend container's
-    # solution to the same problem.
+      - alloy-data:/var/lib/alloy/data
+    # Join the host Docker group so the mounted socket is usable — the
+    # socket is root:docker mode 660. Override DOCKER_GID in docker/.env if
+    # the host's docker group GID is not 1001. Mirrors the backend
+    # container's solution to the same problem.
     group_add:
       - "${DOCKER_GID:-1001}"
     # Required when the Docker daemon runs with userns-remap (the
     # default on rootless Docker). Without it, group_add maps to a
     # remapped GID that doesn't match the host docker group, and
-    # Promtail's docker_sd_configs probe fails with "permission
-    # denied" against the socket.
+    # discovery.docker fails with "permission denied" against the socket.
     userns_mode: "host"
     depends_on:
       - loki
+    # The Alloy image ships no wget/curl: liveness is the restart policy,
+    # readiness is GET /-/ready on 12345 from inside the stack network.
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9080/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      disable: true
 
   # Grafana — provisions the Tempo + Prometheus + Loki datasources at
   # boot plus the "Tenant traces + logs" dashboard (ADR-0005 Phase D).
@@ -183,22 +193,25 @@ services:
   # is wired with derivedFields so clicking trace_id in a log line
   # jumps back to Tempo.
   grafana:
-    image: grafana/grafana-oss:10.4.2
+    image: grafana/grafana:13.2.5@sha256:9f7aa1e1e3246aade5792d35a738049f7f32f89cd51d1956cf426a4e86268a84
     container_name: ${APP_NAME}-grafana-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      # Applied when grafana-data is first initialised only: an install that
+      # booted with the old admin/admin keeps it until
+      # `docker exec <grafana> grafana cli admin reset-admin-password <new>`.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is not set — run make init or set it in docker/.env}
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED:-false}
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
       GF_USERS_DEFAULT_THEME: "dark"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "${GRAFANA_PORT:-3010}:3000"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3010}:3000"
     depends_on:
       - tempo
       - prometheus
@@ -218,5 +231,5 @@ volumes:
     driver: local
   loki-data:
     driver: local
-  promtail-positions:
+  alloy-data:
     driver: local

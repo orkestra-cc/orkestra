@@ -12,15 +12,19 @@ import (
 	"github.com/orkestra/backend/internal/core/notification/repository"
 	"github.com/orkestra/backend/internal/core/notification/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/jobs"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 type NotificationModule struct {
 	module.BaseModule
-	svc        *services.NotificationService
-	drivers    *services.DriverRegistry
-	handler    *handlers.NotificationHandler
-	reconciler *services.OptoutReconciler
+	svc         *services.NotificationService
+	drivers     *services.DriverRegistry
+	pushDrivers *services.PushDriverFactory // per-send push driver
+	pushHandler *handlers.PushHandler       // device registry + admin test push
+	pushCleanup *services.PushCleanup       // push_tokens_cleanup job body
+	handler     *handlers.NotificationHandler
+	reconciler  *services.OptoutReconciler
 
 	// configService is kept for livePolicy (config_validation.go), which
 	// re-reads the one-click requirement on every marketing send rather
@@ -39,7 +43,17 @@ func (m *NotificationModule) Description() string {
 func (m *NotificationModule) Category() module.ModuleCategory { return module.CategoryCore }
 
 func (m *NotificationModule) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceNotificationSender, module.ServiceNotificationTemplateSeeder}
+	return []module.ServiceKey{module.ServiceNotificationSender, module.ServiceNotificationTemplateSeeder, module.ServiceMarketingOptoutManager, module.ServiceEmailSuppressionManager}
+}
+
+// NavItems adds the delivery log page to the operator console. The page
+// reads GET /v1/notifications, gated by notification.log.read, a system
+// permission: administrator (and developer outside production) hold it by
+// role, which is why the item asks for administrator.
+func (m *NotificationModule) NavItems() []module.NavItemSpec {
+	return []module.NavItemSpec{
+		{Realm: "platform", Tier: "internal", Name: "Delivery Log", Icon: "envelope-open-text", Path: "/admin/delivery-log", MinRole: "administrator", Active: true},
+	}
 }
 
 func (m *NotificationModule) Permissions() []iface.PermissionSpec {
@@ -66,6 +80,19 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"idempotencyKey": 1}},
 				{Keys: map[string]int{"senderSlug": 1}, Sparse: true},
 				{Keys: map[string]int{"createdAt": 1}, TTL: day90},
+				// The delivery log page reads newest first with an _id
+				// tiebreak (repository.Page), unfiltered or by status
+				// (suppressed, failed): without _id in the key Mongo would
+				// sort the whole log in memory on every page.
+				{OrderedKeys: []module.IndexKey{
+					{Field: "createdAt", Direction: -1},
+					{Field: "_id", Direction: -1},
+				}},
+				{OrderedKeys: []module.IndexKey{
+					{Field: "status", Direction: 1},
+					{Field: "createdAt", Direction: -1},
+					{Field: "_id", Direction: -1},
+				}},
 			},
 		},
 		{
@@ -146,6 +173,24 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 			// itself idempotent, not just the stored state.
 			{OrderedKeys: []module.IndexKey{{Field: "address", Direction: 1}}, Unique: true},
 		}},
+		{Name: models.DeviceTokensCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tier", Direction: 1},
+				{Field: "userUuid", Direction: 1},
+				{Field: "deviceId", Direction: 1},
+			}, Unique: true},
+			// A push token belongs to the device: at most one ACTIVE row per
+			// token (Upsert disables the previous owner's row first).
+			{Keys: map[string]int{"token": 1}, Unique: true, PartialFilter: map[string]any{"active": true}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tier", Direction: 1},
+				{Field: "userUuid", Direction: 1},
+				{Field: "active", Direction: 1},
+			}},
+			{Keys: map[string]int{"lastSeenAt": 1}},
+			{Keys: map[string]int{"disabledAt": 1}, Sparse: true},
+		}},
 	}
 }
 
@@ -165,6 +210,8 @@ func (m *NotificationModule) ConfigGroups() []module.ConfigGroup {
 			Description: "The addresses recipients see when the default transport is used."},
 		{Key: "branding", Label: "Branding & templates", Order: 4,
 			Description: "Values injected into every templated email."},
+		{Key: "push", Label: "Push", Order: 5,
+			Description: "Mobile and web push delivery. With the noop provider pushes are logged (token prefix only) instead of sent; choose fcm to deliver through Firebase Cloud Messaging (HTTP v1)."},
 	}
 }
 
@@ -172,6 +219,7 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 	// The five SMTP connection settings are only meaningful when the provider
 	// dials a real server. Shared read-only condition — never mutated.
 	smtpOnly := []module.FieldCondition{{Key: "email.provider", In: []string{"smtp"}}}
+	fcmOnly := []module.FieldCondition{{Key: services.PushProviderField, In: []string{"fcm"}}}
 	return []module.ConfigField{
 		{Key: "email.provider", Label: "Email provider", Group: "delivery", Type: module.FieldEnum, Options: []string{"noop", "smtp"}, Required: true, Default: "noop", EnvVar: "NOTIFICATION_EMAIL_PROVIDER"},
 		// Required composes with DependsOn as required-when-visible: the admin
@@ -194,6 +242,11 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
 		{Key: services.SendersField, Label: "Sender profiles", Group: "senders", Type: module.FieldRecordList, Items: services.SenderItems(),
 			Description: "Each profile is a transport and an identity. Patterns decide which categories it carries; the most specific pattern wins and * is the default. A profile without patterns is a draft and receives no mail. Once any profile declares a pattern, exactly one must declare *."},
+		{Key: services.PushProviderField, Label: "Push provider", Group: "push", Type: module.FieldEnum, Options: []string{"noop", "fcm"}, Default: "noop", EnvVar: "NOTIFICATION_PUSH_PROVIDER"},
+		{Key: services.PushFCMSAField, Label: "FCM service account JSON", Group: "push", Type: module.FieldSecret, DependsOn: fcmOnly, EnvVar: "FCM_SERVICE_ACCOUNT_JSON",
+			Description: "The Firebase service-account key (JSON) with the Firebase Cloud Messaging API enabled."},
+		{Key: services.PushFCMProjectField, Label: "FCM project ID", Group: "push", Type: module.FieldString, DependsOn: fcmOnly,
+			Description: "Optional; defaults to the project_id inside the service-account JSON."},
 		{Key: "app.name", Label: "App name (in templates)", Group: "branding", Type: module.FieldString, Default: "Orkestra", EnvVar: "APP_NAME"},
 		{Key: "app.support_email", Label: "Support email (in templates)", Group: "branding", Type: module.FieldString, EnvVar: "SUPPORT_EMAIL"},
 		{Key: "app.default_locale", Label: "Default template locale", Group: "branding", Type: module.FieldEnum, Options: models.SupportedLocales, Default: "en", EnvVar: "NOTIFICATION_DEFAULT_LOCALE",
@@ -262,6 +315,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		return deps.ConfigService.GetConfig(ctx, "notification")
 	}
 	loader := services.NewSnapshotLoader(snapshot)
+	m.pushDrivers = services.NewPushDriverFactory(snapshot, deps.Logger, services.FCMOptions{})
 
 	m.drivers = services.NewDriverRegistry(services.CoreDrivers(deps.Logger)...)
 	resolver := services.NewSenderResolver(loader)
@@ -318,13 +372,64 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		},
 	)
 	m.svc.SetOptouts(optoutRepo)
+	suppressionRepo := repository.NewSuppressionRepository(deps.DB)
+	m.svc.SetSuppressions(suppressionRepo)
+	// Auth inits after notification, so the per-tier session readers are
+	// looked up lazily on every send.
+	registry := deps.Services
+	sessionReader := func(tier string) iface.SessionActivityReader {
+		key := module.ServiceAuthService
+		if tier == iface.PushTierClient {
+			key = module.ServiceClientAuthService
+		}
+		r, _ := registry.Get(key).(iface.SessionActivityReader)
+		return r
+	}
+	m.svc.SetPush(services.NewPushService(services.PushDeps{
+		LogRepo:  logRepo,
+		Prefs:    m.svc.PreferenceService(),
+		Devices:  repository.NewDeviceTokenRepository(deps.DB),
+		Drivers:  m.pushDrivers,
+		Sessions: sessionReader,
+		Logger:   deps.Logger,
+	}))
+	m.pushCleanup = &services.PushCleanup{
+		Devices:  repository.NewDeviceTokenRepository(deps.DB),
+		Sessions: sessionReader,
+	}
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
+	m.pushHandler = handlers.NewPushHandler(repository.NewDeviceTokenRepository(deps.DB), m.svc, deps.Logger)
 
 	deps.Services.Register(module.ServiceNotificationSender, m.svc)
+	deps.Services.Register(module.ServiceMarketingOptoutManager,
+		iface.MarketingOptoutManager(services.NewOptoutManager(optoutRepo, unsubRepo, deps.Services, deps.Logger)))
+	deps.Services.Register(module.ServiceEmailSuppressionManager,
+		services.NewSuppressionManager(suppressionRepo, deps.Services, deps.Logger))
 	deps.Services.Register(module.ServiceNotificationTemplateSeeder,
 		module.NotificationTemplateSeeder(m.svc.TemplateService()))
 	return nil
+}
+
+// Jobs declares the daily push-token cleanup (jobs framework, key
+// notification.push_tokens_cleanup).
+func (m *NotificationModule) Jobs() []jobs.Definition {
+	return []jobs.Definition{{
+		Name:        "push_tokens_cleanup",
+		Title:       "Clean up push device tokens",
+		Description: "Disables push tokens whose auth session ended or that were not seen for 60 days, and deletes tokens disabled for more than 90 days. Does nothing when the session readers are unavailable.",
+		Schedule:    jobs.Every(24 * time.Hour),
+		Timeout:     15 * time.Minute,
+		Run:         m.runPushCleanup,
+	}}
+}
+
+func (m *NotificationModule) runPushCleanup(ctx context.Context, run *jobs.Run) error {
+	res, err := m.pushCleanup.Run(ctx)
+	run.Detail("sessionEnded", res.SessionEnded)
+	run.Detail("stale", res.Stale)
+	run.Detail("deleted", res.Deleted)
+	return err
 }
 
 func (m *NotificationModule) Start(ctx context.Context) error {
@@ -357,10 +462,30 @@ func (m *NotificationModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.handler.RegisterUserRoutes(api)
 	})
 
+	// Push device registry: self-service on both tiers. The tier is fixed by
+	// the mount, never read from the request.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.pushHandler.RegisterDeviceRoutes(api, iface.PushTierOperator, "")
+	})
+	if ri.Client != nil && ri.Client.ProtectedRouter != nil {
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			api := humachi.New(r, ri.APIConfig)
+			m.pushHandler.RegisterDeviceRoutes(api, iface.PushTierClient, "client-")
+		})
+	}
+
 	// Admin endpoints: platform-level (delivery log, templates, test email).
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireSystemPermission("notification.log.read"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterAdminRoutes(api)
+		// The test push needs its own permission on top of the group's.
+		r.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireSystemPermission("notification.test"))
+			m.pushHandler.RegisterAdminTestRoute(humachi.New(r, ri.APIConfig))
+		})
 	})
 }

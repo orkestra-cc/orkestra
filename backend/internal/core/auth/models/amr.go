@@ -30,7 +30,31 @@ const (
 	// (audit finding M-1), and it is not a property of the session, so
 	// it never survives a token refresh.
 	AMRReauth = "reauth"
+
+	// AMRPIN is a WEAK base marker: the session began with a short
+	// numeric PIN. It proves neither a second
+	// factor nor presence for step-up, it is never epoch-bound, and unlike
+	// pwd/oauth it is re-asserted on every refresh from the refresh row's
+	// LoginMethod, so a refreshed PIN session can never pass for a
+	// password one. Gates that must refuse a PIN session test HasPINAMR.
+	AMRPIN = "pin"
 )
+
+// LoginMethodPIN is the AuthSessionDoc/RefreshTokenDoc LoginMethod of a
+// session started with a PIN.
+const LoginMethodPIN = "pin"
+
+// HasPINAMR reports whether the token's session began with a PIN. A PIN
+// session stays a PIN session for its whole life: neither a password
+// reconfirm nor a refresh removes the marker.
+func HasPINAMR(amr []string) bool {
+	for _, v := range amr {
+		if v == AMRPIN {
+			return true
+		}
+	}
+	return false
+}
 
 // IsSecondFactorAMR reports whether the marker names a real second
 // factor. This is the set RequireMFA and Cedar's principal.mfa_enrolled

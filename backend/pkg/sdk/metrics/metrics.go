@@ -90,6 +90,18 @@
 //     permissions at all, which is a louder condition than the one
 //     above and deserves its own alert.
 //
+// The core jobs module (spec J20) adds three, labelled by job, the catalog
+// key "<module>.<name>" (closed: the set of jobs registered at boot):
+//
+//   - orkestra_jobs_runs_total — finished runs by job and status
+//     (succeeded / failed / timed_out / interrupted / abandoned / skipped;
+//     anything else collapses to "unknown").
+//   - orkestra_jobs_run_duration_seconds — wall time of the runs this
+//     replica executed. Abandoned and skipped runs never executed here and
+//     are counted only.
+//   - orkestra_jobs_lease_lost_total — runs cancelled because this replica
+//     lost the lease (or could not renew it until it expired).
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -127,18 +139,30 @@ type Collector struct {
 	// oauthCompensationFailures counts failed backwards compensations on the
 	// OAuth signup reservation (auth spec §4.8 D32 item 5). Unlabelled: the
 	// value is a rate of residue the next callback heals, nothing to slice.
-	oauthCompensationFailures      prometheus.Counter
-	sessionAnchorAnomalies         *prometheus.CounterVec
-	attemptStoreFailures           *prometheus.CounterVec
-	authLockouts                   *prometheus.CounterVec
-	authMailDropped                *prometheus.CounterVec
-	tokenSweepDeleted              *prometheus.CounterVec
+	oauthCompensationFailures prometheus.Counter
+	sessionAnchorAnomalies    *prometheus.CounterVec
+	attemptStoreFailures      *prometheus.CounterVec
+	authLockouts              *prometheus.CounterVec
+	authMailDropped           *prometheus.CounterVec
+	tokenSweepDeleted         *prometheus.CounterVec
+	// llmRequests / llmTokens: the llm gateway's logical calls and token
+	// consumption. Closed label sets (ADR-0002): never a tenant or model id.
+	llmRequests *prometheus.CounterVec
+	llmTokens   *prometheus.CounterVec
+	// llmSIWCLinks: Sign in with ChatGPT link completions by outcome
+	// (closed set, see llmSIWCOutcomes).
+	llmSIWCLinks                   *prometheus.CounterVec
 	authzCacheInvalidationFailures prometheus.Counter
 	authzCacheInvalidationRefusals prometheus.Counter
 	logMaskingPanics               prometheus.Counter
 	compliancePolicySnapshotAge    prometheus.Gauge
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
+
+	// jobs*: the core jobs scheduler (spec J20). job is a catalog key.
+	jobsRuns        *prometheus.CounterVec
+	jobsRunDuration *prometheus.HistogramVec
+	jobsLeaseLost   *prometheus.CounterVec
 
 	// entitlementLag is a GaugeFunc that reads lastApply on every scrape;
 	// the map is keyed by tenant kind ("internal" | "external"). Stored
@@ -300,6 +324,39 @@ func (c *Collector) buildMetrics() {
 		[]string{"template"},
 	)
 
+	c.llmRequests = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "llm",
+			Name:      "requests_total",
+			Help:      "Logical llm gateway calls (Chat/Embed) by provider and outcome: ok, fallback (answered by a later candidate), error, budget_blocked (refused by the org's monthly budget before any provider call).",
+		},
+		// Closed label sets: provider is one of the six adapter kinds,
+		// outcome one of llmOutcomes; anything else collapses to unknown.
+		[]string{"provider", "outcome"},
+	)
+
+	c.llmTokens = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "llm",
+			Name:      "tokens_total",
+			Help:      "Tokens charged by the llm gateway per provider and direction (input|output), as written to the usage ledger, including the conservative charge of attempts that failed after partial output.",
+		},
+		[]string{"provider", "direction"},
+	)
+
+	c.llmSIWCLinks = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "llm",
+			Name:      "siwc_link_total",
+			Help:      "Sign in with ChatGPT link completions (loopback callback or pasted URL) by outcome: linked, plan_disabled (linked without plan usage), denied, state_invalid, exchange_failed, id_token_invalid.",
+		},
+		// outcome one of llmSIWCOutcomes; anything else collapses to unknown.
+		[]string{"outcome"},
+	)
+
 	c.tokenSweepDeleted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "orkestra",
@@ -330,6 +387,38 @@ func (c *Collector) buildMetrics() {
 			Buckets:   prometheus.DefBuckets,
 		},
 		[]string{"tier"},
+	)
+
+	c.jobsRuns = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "jobs",
+			Name:      "runs_total",
+			Help:      "Finished background-job runs by job key and status: succeeded, failed, timed_out, interrupted, abandoned (its replica died), skipped (a missed slot of a SkipMissed job).",
+		},
+		// job is a catalog key (closed at boot); status one of jobStatuses.
+		[]string{"job", "status"},
+	)
+
+	c.jobsRunDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "orkestra",
+			Subsystem: "jobs",
+			Name:      "run_duration_seconds",
+			Help:      "Wall time of the background-job runs this replica executed, by job key. Abandoned and skipped runs are not observed.",
+			Buckets:   []float64{0.1, 0.5, 1, 5, 15, 30, 60, 300, 900, 1800, 3600},
+		},
+		[]string{"job"},
+	)
+
+	c.jobsLeaseLost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "jobs",
+			Name:      "lease_lost_total",
+			Help:      "Background-job runs cancelled because this replica lost the job's lease, or could not renew it before it expired.",
+		},
+		[]string{"job"},
 	)
 
 	c.authzCacheInvalidationFailures = prometheus.NewCounter(
@@ -415,7 +504,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.llmRequests, c.llmTokens, c.llmSIWCLinks, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge, c.jobsRuns, c.jobsRunDuration, c.jobsLeaseLost} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -581,6 +670,71 @@ var (
 		"auth.mfa_factor_added": {},
 	}
 )
+
+var (
+	llmProviders    = map[string]struct{}{"openai": {}, "anthropic": {}, "gemini": {}, "ollama": {}, "openai_compatible": {}, "mock": {}, "tei": {}}
+	llmOutcomes     = map[string]struct{}{"ok": {}, "fallback": {}, "error": {}, "budget_blocked": {}}
+	llmDirections   = map[string]struct{}{"input": {}, "output": {}}
+	llmSIWCOutcomes = map[string]struct{}{
+		"linked": {}, "denied": {}, "state_invalid": {}, "exchange_failed": {}, "id_token_invalid": {}, "plan_disabled": {},
+	}
+)
+
+// RecordLLMSIWCLink counts one Sign in with ChatGPT link completion by
+// outcome (closed set; anything else collapses to "unknown").
+func (c *Collector) RecordLLMSIWCLink(outcome string) {
+	if c == nil || c.llmSIWCLinks == nil {
+		return
+	}
+	c.llmSIWCLinks.WithLabelValues(collapse(outcome, llmSIWCOutcomes)).Inc()
+}
+
+// RecordLLMRequest counts one llm gateway call by provider and outcome.
+// Both labels are closed sets (ADR-0002): unknown values collapse to
+// "unknown", never a tenant or model id.
+func (c *Collector) RecordLLMRequest(provider, outcome string) {
+	if c == nil || c.llmRequests == nil {
+		return
+	}
+	c.llmRequests.WithLabelValues(collapse(provider, llmProviders), collapse(outcome, llmOutcomes)).Inc()
+}
+
+// RecordLLMTokens adds n tokens charged to provider in direction
+// (input|output). A non-positive n is ignored.
+func (c *Collector) RecordLLMTokens(provider, direction string, n int64) {
+	if c == nil || c.llmTokens == nil || n <= 0 {
+		return
+	}
+	c.llmTokens.WithLabelValues(collapse(provider, llmProviders), collapse(direction, llmDirections)).Add(float64(n))
+}
+
+// jobStatuses are the terminal run statuses of the jobs module.
+var jobStatuses = map[string]struct{}{
+	"succeeded": {}, "failed": {}, "timed_out": {}, "interrupted": {}, "abandoned": {}, "skipped": {},
+}
+
+// RecordJobRun counts one finished run of job (a catalog key) with status
+// and, unless the run never executed in this process (abandoned, skipped),
+// observes its duration. An unknown status collapses to "unknown".
+func (c *Collector) RecordJobRun(job, status string, d time.Duration) {
+	if c == nil || c.jobsRuns == nil {
+		return
+	}
+	s := collapse(status, jobStatuses)
+	c.jobsRuns.WithLabelValues(job, s).Inc()
+	if s == "abandoned" || s == "skipped" {
+		return
+	}
+	c.jobsRunDuration.WithLabelValues(job).Observe(d.Seconds())
+}
+
+// RecordJobLeaseLost counts one run of job cancelled for a lost lease.
+func (c *Collector) RecordJobLeaseLost(job string) {
+	if c == nil || c.jobsLeaseLost == nil {
+		return
+	}
+	c.jobsLeaseLost.WithLabelValues(job).Inc()
+}
 
 func collapse(v string, allowed map[string]struct{}) string {
 	if _, ok := allowed[v]; ok {

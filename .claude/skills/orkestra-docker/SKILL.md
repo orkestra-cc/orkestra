@@ -15,7 +15,7 @@ Every checkout × environment combination is **one Compose project**: `STACK=${A
 
 - **Containers**: `${APP_NAME}-<svc>-${ENV}` — e.g. `orkestra-backend-development`.
 - **Network**: `${STACK}_default` — Compose's own per-project default network. There is no shared `orkestra-network` bridge anymore.
-- **Service names are uniform** across dev/staging/prod: `backend`, `frontend-admin`, `client-frontend` (app), `mongodb`, `redis`, `rustfs` (infra), `grafana`/`loki`/`tempo`/`promtail`/`prometheus`/`otel-collector` (observability). There is no dev-only service-name variant anymore.
+- **Service names are uniform** across dev/staging/prod: `backend`, `frontend-admin`, `client-frontend` (app), `mongodb`, `redis`, `rustfs` (infra), `grafana`/`loki`/`tempo`/`alloy`/`prometheus`/`otel-collector` (observability). There is no dev-only service-name variant anymore.
 - **One project spans multiple files**: a stack's project is `docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml` + (opt-in) `docker-compose.observability.yml`, all under the same `${STACK}` project — not separate `orkestra-infra` / `orkestra-observability` projects.
 
 ## Why detection is non-trivial
@@ -123,7 +123,7 @@ Compose files that exist: `dev`, `staging`, `prod`, `infra`, `observability`. (A
 | `mongodb` | `${APP_NAME}-mongodb-${ENV}` | `${MONGO_PORT}`→27017 | infra |
 | `redis` | `${APP_NAME}-redis-${ENV}` | `${REDIS_PORT}`→6379 | infra |
 | `rustfs` | `${APP_NAME}-rustfs-${ENV}` | `${RUSTFS_API_PORT}`/`${RUSTFS_CONSOLE_PORT}` | infra |
-| `grafana`/`loki`/`tempo`/`promtail`/`prometheus`/`otel-collector` | `${APP_NAME}-<svc>-${ENV}` | per `.env` (observability block) | observability (opt-in overlay) |
+| `grafana`/`loki`/`tempo`/`alloy`/`prometheus`/`otel-collector` | `${APP_NAME}-<svc>-${ENV}` | per `.env` (observability block) | observability (opt-in overlay) |
 
 Detection is always authoritative over this table — the running stack is ground truth (files drift, see above).
 
@@ -141,7 +141,7 @@ Label detection has nothing to read when no container exists. Then:
 | `docker-compose.staging.yml` | Staging — on this repo also runs AIR + source mount |
 | `docker-compose.prod.yml` | Production (real image build) |
 | `docker-compose.infra.yml` | This stack's own MongoDB + Redis + RustFS (isolated per stack, not shared) |
-| `docker-compose.observability.yml` | Grafana + Loki + Tempo + Promtail + Prometheus + OTel, layered into the same stack project |
+| `docker-compose.observability.yml` | Grafana + Loki + Tempo + Alloy + Prometheus + OTel, layered into the same stack project |
 
 Prefer `orkestra.sh deploy` (the `orkestra-stack` skill) for bring-up so `ORKESTRA_VERSION` is injected and `COMPOSE_PROJECT_NAME` is set correctly.
 

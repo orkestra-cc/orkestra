@@ -123,7 +123,8 @@ func TestRetentionPreviewAndRunOnce(t *testing.T) {
 	// so RunOnce counts every expired tombstone it processes.
 	dsr := NewDSRService(iface.NewPIIProducerRegistry(), nil, slog.Default())
 	cfg := func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} }
-	svc := NewRetentionService(db, dsr, slog.Default(), cfg)
+	erasures := NewErasureRequestService(repository.NewErasureRequestRepo(db), dsr, nil, slog.Default())
+	svc := NewRetentionService(db, erasures, slog.Default(), cfg)
 
 	ids, cutoff, err := svc.Preview(ctx)
 	if err != nil {
@@ -142,6 +143,55 @@ func TestRetentionPreviewAndRunOnce(t *testing.T) {
 	}
 	if purged != 2 {
 		t.Fatalf("RunOnce purged %d; want 2", purged)
+	}
+	rows, err := erasures.repo.ListByStatus(ctx, models.ErasureRequestCompleted)
+	if err != nil {
+		t.Fatalf("ListByStatus: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 completed erasure rows, got %d: %+v", len(rows), rows)
+	}
+	for _, r := range rows {
+		if r.Source != models.ErasureSourceRetention {
+			t.Fatalf("row source = %q; want retention", r.Source)
+		}
+	}
+}
+
+// TestRetentionSkipsSubjectWithIncompleteErasure pins that the retry worker
+// owns a subject whose erasure is still incomplete: retention records no new
+// run for it.
+func TestRetentionSkipsSubjectWithIncompleteErasure(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	old := time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "u-a", "deletedAt": old})
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "u-b", "deletedAt": old})
+
+	dsr := NewDSRService(iface.NewPIIProducerRegistry(), nil, slog.Default())
+	repo := repository.NewErasureRequestRepo(db)
+	erasures := NewErasureRequestService(repo, dsr, nil, slog.Default())
+	if err := repo.Insert(ctx, &models.ErasureRequest{
+		UUID: "pre-a", UserUUID: "u-a", Status: models.ErasureRequestIncomplete,
+		Source: models.ErasureSourceRequest, RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	svc := NewRetentionService(db, erasures, slog.Default(), func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} })
+
+	n, err := svc.RunOnce(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("RunOnce = %d, %v; want 1 (u-b only), nil", n, err)
+	}
+	has, err := repo.HasIncomplete(ctx, "u-a")
+	if err != nil || !has {
+		t.Fatalf("u-a incomplete row should remain: %v %v", has, err)
+	}
+	done, err := repo.ListByStatus(ctx, models.ErasureRequestCompleted)
+	if err != nil || len(done) != 1 || done[0].UserUUID != "u-b" {
+		t.Fatalf("only u-b should have a completed run: %+v %v", done, err)
 	}
 }
 
@@ -203,6 +253,110 @@ func TestCreateKeyLiveMongoBarrier(t *testing.T) {
 		}
 		if count != 1 {
 			t.Fatalf("iteration %d: expected exactly one persisted key for tenant, got %d", i, count)
+		}
+	}
+}
+
+// staleIncompleteView makes HasIncomplete miss every row, as a replica does
+// when another replica's retention run inserts its request between this
+// replica's HasIncomplete and its insert.
+type staleIncompleteView struct {
+	*repository.ErasureRequestRepository
+}
+
+func (staleIncompleteView) HasIncomplete(context.Context, string) (bool, error) { return false, nil }
+
+// TestRetentionTwoReplicasRecordOneRequestPerSubject: two replicas run
+// retention for the same expired tombstone and both miss the other's request
+// in HasIncomplete. The partial unique index declared by the module refuses
+// the second insert, so the subject gets one request and one purge.
+func TestRetentionTwoReplicasRecordOneRequestPerSubject(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := db.Collection(models.ErasureRequestsCollection).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "userUuid", Value: 1}},
+		Options: options.Index().SetUnique(true).SetPartialFilterExpression(models.ActiveRetentionErasurePartialFilter()),
+	}); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "u-a", "deletedAt": time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)})
+
+	// The producer stays pending, so the first request remains incomplete.
+	crm := &stubProducer{subject: "crm", purgeResult: iface.PurgeResult{Pending: true}}
+	reg := iface.NewPIIProducerRegistry()
+	reg.Register(crm)
+	dsr := NewDSRService(reg, nil, slog.Default())
+	cfg := func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} }
+	repo := repository.NewErasureRequestRepo(db)
+	for replica := 0; replica < 2; replica++ {
+		erasures := NewErasureRequestService(staleIncompleteView{repo}, dsr, nil, slog.Default())
+		if n, err := NewRetentionService(db, erasures, slog.Default(), cfg).RunOnce(ctx); err != nil || n != 0 {
+			t.Fatalf("replica %d RunOnce = %d, %v; want 0, nil", replica, n, err)
+		}
+	}
+	rows, err := repo.ListByStatus(ctx)
+	if err != nil || len(rows) != 1 || rows[0].Source != models.ErasureSourceRetention || rows[0].Status != models.ErasureRequestIncomplete {
+		t.Fatalf("rows = %+v, %v; want one incomplete retention request", rows, err)
+	}
+	if crm.purgeCalls != 1 {
+		t.Fatalf("purge calls = %d; want 1", crm.purgeCalls)
+	}
+}
+
+// TestRetentionGateFloorFromUserRowsAndReaperSkips pins the platform floor
+// against the real user collections (client tier included) and that the reaper
+// skips a gated tombstone without recording a request, while one past its floor
+// is reaped.
+func TestRetentionGateFloorFromUserRowsAndReaperSkips(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	old := time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)
+	twoYears := time.Now().UTC().AddDate(-2, 0, 0)
+	insertDoc(t, db, "client_users", bson.M{"uuid": "gated", "deletedAt": old, "createdAt": twoYears})
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "free", "deletedAt": old, "createdAt": old})
+
+	reg := iface.NewPIIProducerRegistry()
+	gate := NewRetentionGate(db, reg, func() int { return 5 })
+	got, err := gate.Evaluate(ctx, "gated")
+	if err != nil || got == nil || got.Reasons[0] != "platform_minimum" {
+		t.Fatalf("Evaluate(gated) = %+v, %v", got, err)
+	}
+	if got, err := gate.Evaluate(ctx, "free"); err != nil || got != nil {
+		t.Fatalf("Evaluate(free) = %+v, %v", got, err)
+	}
+	if got, err := gate.Evaluate(ctx, "nobody"); err != nil || got != nil {
+		t.Fatalf("Evaluate(nobody) = %+v, %v", got, err)
+	}
+
+	dsr := NewDSRService(reg, nil, slog.Default())
+	dsr.SetRetentionGate(gate)
+	erasures := NewErasureRequestService(repository.NewErasureRequestRepo(db), dsr, nil, slog.Default())
+	svc := NewRetentionService(db, erasures, slog.Default(), func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} })
+	purged, err := svc.RunOnce(ctx)
+	if err != nil || purged != 1 {
+		t.Fatalf("RunOnce = %d, %v; want 1 (only the subject past its floor)", purged, err)
+	}
+	rows, _ := erasures.repo.ListByStatus(ctx, models.ErasureRequestCompleted, models.ErasureRequestIncomplete)
+	if len(rows) != 1 || rows[0].UserUUID != "free" {
+		t.Fatalf("rows = %+v; want only the free subject", rows)
+	}
+}
+
+func TestSubjectLookupFindsEveryTierAndTombstones(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "op-live"})
+	insertDoc(t, db, "client_users", bson.M{"uuid": "cl-live"})
+	insertDoc(t, db, "client_users", bson.M{"uuid": "cl-gone", "deletedAt": time.Now()}) // soft-deleted tombstone
+	lookup := NewSubjectLookup(db)
+	ctx := context.Background()
+	for id, want := range map[string]bool{"op-live": true, "cl-live": true, "cl-gone": true, "nobody": false, "": false} {
+		got, err := lookup(ctx, id)
+		if err != nil || got != want {
+			t.Errorf("lookup(%q) = %v, %v; want %v", id, got, err, want)
 		}
 	}
 }

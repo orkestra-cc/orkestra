@@ -137,7 +137,6 @@ type User struct {
 	// every user row.
 	AvatarObjectKey string `bson:"avatarObjectKey,omitempty" json:"-"`
 	Phone           string `bson:"phone" json:"phone" validate:"omitempty,e164"`
-	PIN             string `bson:"pin,omitempty" json:"-"` // Encrypted, never exposed
 	Role            string `bson:"role" json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
 	// Kind discriminates a human user (empty) from a machine principal
 	// (UserKindService). Immutable after creation — see repository.Update's
@@ -155,6 +154,17 @@ type User struct {
 	PasswordUpdatedAt *time.Time `bson:"passwordUpdatedAt,omitempty" json:"-"`
 	FailedLoginCount  int        `bson:"failedLoginCount,omitempty" json:"-"`
 	LockedUntil       *time.Time `bson:"lockedUntil,omitempty" json:"-"`
+
+	// PIN authentication (argon2id hash, the same encoding as PasswordHash).
+	// A weak, opt-in sign-in method for field staff: written and verified
+	// only by the auth module through PINCredentialStore, never through
+	// CreateUserInput/UpdateUserInput, and never serialized. The failure
+	// counter and lock are separate from the password ones so PIN guesses
+	// cannot lock the password method and vice versa.
+	PINHash        string     `bson:"pinHash,omitempty" json:"-"`
+	PINUpdatedAt   *time.Time `bson:"pinUpdatedAt,omitempty" json:"-"`
+	PINFailedCount int        `bson:"pinFailedCount,omitempty" json:"-"`
+	PINLockedUntil *time.Time `bson:"pinLockedUntil,omitempty" json:"-"`
 
 	// MFAGraceStartedAt is set when a privileged user logs in without an
 	// enrolled MFA factor. They have a bounded window from this timestamp
@@ -210,7 +220,6 @@ type CreateUserInput struct {
 	FullName      string                 `json:"fullName" validate:"required,min=1,max=100"`
 	Avatar        string                 `json:"avatar,omitempty"`
 	Phone         string                 `json:"phone" validate:"omitempty,e164"`
-	PIN           string                 `json:"pin" validate:"omitempty,len=4,numeric"`
 	PasswordHash  string                 `json:"-"` // set by auth service, never from external input
 	Role          string                 `json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
 	OAuthProvider OAuthProvider          `json:"oauthProvider,omitempty" validate:"omitempty,oneof=google apple discord github"`
@@ -235,7 +244,6 @@ type UpdateUserInput struct {
 	FullName string `json:"fullName,omitempty" validate:"omitempty,min=1,max=100"`
 	Avatar   string `json:"avatar,omitempty"`
 	Phone    string `json:"phone,omitempty" validate:"omitempty,e164"`
-	PIN      string `json:"pin,omitempty" validate:"omitempty,len=4,numeric"`
 	Role     string `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
 	IsActive *bool  `json:"isActive,omitempty"`
 	// Language is the user's preferred BCP-47 language tag. The oneof

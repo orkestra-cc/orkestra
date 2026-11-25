@@ -659,6 +659,11 @@ export const modulesRoutes: RouteGroup = {
           active: true
         },
         {
+          name: 'Searchable Paged Table',
+          to: paths.refComponentsSearchablePagedTable,
+          active: true
+        },
+        {
           name: 'Carousel',
           active: true,
           children: [
@@ -1282,6 +1287,11 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Secret Once Display',
           to: paths.refComponentsSecretOnceDisplay,
+          active: true
+        },
+        {
+          name: 'Searchable Paged Table',
+          to: paths.refComponentsSearchablePagedTable,
           active: true
         },
         {

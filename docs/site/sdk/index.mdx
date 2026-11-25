@@ -13,6 +13,7 @@ sidebar_position: 1
 - The [`ConfigService`](/sdk/config-service) — DB-backed + Redis-cached config with AES-256-GCM-encrypted secrets.
 - The [`pkg/sdk/iface`](/sdk/shared-iface) consumer-facing interfaces (`UserProvider`, `NotificationSender`, `TenantProvider`, `AuthzProvider`, `AuditSink`, …) that prevent direct cross-module imports.
 - [Object storage](/sdk/object-storage) — the presigned-upload seam a module uses to store user-uploaded blobs.
+- [Offline sync](/sdk/offline-sync) — idempotency keys, delta cursors with tombstones and the conflict contract for clients that queue operations offline.
 
 ## It is in-tree, not a published module
 

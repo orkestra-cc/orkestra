@@ -29,6 +29,9 @@ type Service struct {
 	bindOwner       OwnerRoleBinder
 	unbindMember    MemberUnbinder
 	postDeleteHooks []TenantPostDeleteHook
+	// purgeHooks run after a hard purge with the purged tenant's UUID only
+	// (iface.TenantPurgeHooks).
+	purgeHooks []func(context.Context, string) error
 	// userDisplay is the lazy lookup the unified-clients refactor (Phase 1)
 	// uses to seed a personal tenant's Name from the owner User's FullName
 	// (EnsureTenantForUser) and to render the FatturaPA CedentePrestatore
@@ -223,6 +226,18 @@ func (s *Service) RegisterPostDeleteHook(fn TenantPostDeleteHook) {
 	s.postDeleteHooks = append(s.postDeleteHooks, fn)
 }
 
+var _ iface.TenantPurgeHooks = (*Service)(nil)
+
+// RegisterTenantPurgeHook implements iface.TenantPurgeHooks: fn runs once per
+// PurgeTenant (never DeleteTenant), after the post-delete hooks, with the
+// purged tenant's UUID. A nil fn is ignored.
+func (s *Service) RegisterTenantPurgeHook(fn func(ctx context.Context, tenantUUID string) error) {
+	if fn == nil {
+		return
+	}
+	s.purgeHooks = append(s.purgeHooks, fn)
+}
+
 // emitAudit forwards to the compliance sink when wired; no-op otherwise.
 func (s *Service) emitAudit(ctx context.Context, event iface.AuditEvent) {
 	if s.auditSink == nil {
@@ -341,15 +356,19 @@ func (s *Service) ListUserMemberships(ctx context.Context, userUUID string) ([]i
 	return out, nil
 }
 
+// IsMember reports whether userUUID holds a current membership of tenantUUID.
+// A membership past its ExpiresAt does not count, as in ListUserMemberships;
+// GetMembership itself still returns it, since its other callers check
+// whether the row exists.
 func (s *Service) IsMember(ctx context.Context, userUUID, tenantUUID string) (bool, error) {
-	_, err := s.repo.GetMembership(ctx, userUUID, tenantUUID)
+	m, err := s.repo.GetMembership(ctx, userUUID, tenantUUID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
 	}
-	return true, nil
+	return m.ExpiresAt == nil || m.ExpiresAt.After(time.Now()), nil
 }
 
 // --- Platform default tenant ---
@@ -1176,16 +1195,42 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 	// the key row stays active and can be shredded manually. Without
 	// crypto-shred the row is still marked purged and downstream
 	// reads are blocked by status gating.
-	if s.kms != nil && lookupErr == nil && existing != nil && existing.KMSKeyID != nil && *existing.KMSKeyID != "" {
-		if err := s.kms.DeleteKey(ctx, *existing.KMSKeyID); err != nil {
-			// The audit row below still fires so auditors see the
-			// attempt; a retry pathway is tracked as tech debt.
-			_ = err
+	if s.kms != nil {
+		if keyID := s.purgeKeyID(ctx, tenantUUID, existing, lookupErr); keyID != "" {
+			if err := s.kms.DeleteKey(ctx, keyID); err != nil {
+				// The audit row below still fires so auditors see the
+				// attempt; a retry pathway is tracked as tech debt.
+				_ = err
+			}
 		}
 	}
 	s.runPostDeleteHooks(ctx, cascadeCtx)
+	// tenantUUID, not cascadeCtx.TenantUUID: the latter is empty when the row
+	// lookup above failed.
+	s.runPurgeHooks(ctx, tenantUUID)
 	s.emitLifecycle(ctx, "tenant.lifecycle.purged", tenantUUID)
 	return nil
+}
+
+// purgeKeyID names the KMS key PurgeTenant must crypto-shred. The stamped
+// KMSKeyID wins when the row carries one. When it does not — a tenant created
+// before KMS was wired, whose key a consumer (the llm vault, for one) later
+// minted lazily through CreateKey and recorded only in its own envelopes —
+// the key is resolved with the same CreateKey, which is idempotent per tenant
+// and returns the existing key rather than minting a second one. Skipping
+// that case would leave the lazily sealed data recoverable after a purge.
+// For a tenant that never had a key this mints one only for it to be shredded
+// at once, which is harmless. A resolution error is treated like a DeleteKey
+// error: best-effort, the purge still completes ("" = nothing to shred).
+func (s *Service) purgeKeyID(ctx context.Context, tenantUUID string, existing *models.Tenant, lookupErr error) string {
+	if lookupErr == nil && existing != nil && existing.KMSKeyID != nil && *existing.KMSKeyID != "" {
+		return *existing.KMSKeyID
+	}
+	keyID, err := s.kms.CreateKey(ctx, tenantUUID)
+	if err != nil {
+		return ""
+	}
+	return keyID
 }
 
 // emitLifecycle is shared boilerplate for the status-transition emits.
@@ -1364,6 +1409,27 @@ func (s *Service) runPostDeleteHooks(ctx context.Context, c TenantPostDeleteCont
 	}
 }
 
+// runPurgeHooks fans out a hard purge to iface.TenantPurgeHooks subscribers.
+// Best-effort like runPostDeleteHooks: an error is audited and never aborts
+// the remaining hooks or the purge.
+func (s *Service) runPurgeHooks(ctx context.Context, tenantUUID string) {
+	for _, hook := range s.purgeHooks {
+		if hook == nil {
+			continue
+		}
+		if err := hook(ctx, tenantUUID); err != nil {
+			s.emitAudit(ctx, iface.AuditEvent{
+				TenantID:     tenantUUID,
+				Action:       "tenant.cascade.hook_failed",
+				ResourceType: "tenant",
+				ResourceID:   tenantUUID,
+				Outcome:      "failure",
+				Metadata:     map[string]any{"error": err.Error(), "hook": "purge"},
+			})
+		}
+	}
+}
+
 // TenantAdminView is a tenant plus its current member count, used by the
 // platform-admin list endpoint to avoid an N+1. When the caller passed a Q
 // filter, MatchedMembers carries up to repository.MaxMatchedMembersPerTenant
@@ -1476,6 +1542,26 @@ var ErrAttachInput = errors.New("tenant: attach requires non-empty tenantUUID, u
 
 func (s *Service) ListMembers(ctx context.Context, tenantUUID string) ([]models.TenantMembership, error) {
 	return s.repo.ListMembershipsByTenant(ctx, tenantUUID)
+}
+
+// ListTenantMembers implements iface.TenantDirectoryReader: the tenant's
+// memberships projected to the SDK summary, roles copied so callers cannot
+// alias the stored slice.
+func (s *Service) ListTenantMembers(ctx context.Context, tenantUUID string) ([]iface.TenantMemberSummary, error) {
+	members, err := s.ListMembers(ctx, tenantUUID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]iface.TenantMemberSummary, 0, len(members))
+	for _, member := range members {
+		result = append(result, iface.TenantMemberSummary{
+			UserUUID: member.UserUUID,
+			Roles:    append([]string(nil), member.Roles...),
+			IsOwner:  member.IsOwner,
+			JoinedAt: member.JoinedAt,
+		})
+	}
+	return result, nil
 }
 
 func (s *Service) RemoveMember(ctx context.Context, tenantUUID, userUUID string) error {

@@ -10,7 +10,7 @@
 #   2. CI parity (further down) — single source of truth for "what is a
 #      passing build." Both `make ci` and GitHub Actions invoke these.
 
-.PHONY: help up down status logs
+.PHONY: help up down status logs retrieval-bench
 .PHONY: mongo-shell redis-cli
 .PHONY: backend-build backend-test backend-deps backend-clean
 .PHONY: frontend-admin-build frontend-admin-test frontend-admin-deps
@@ -44,6 +44,9 @@ help:
 	@echo "  make frontend-admin-*    - build / test / preview / type-check / deps / clean"
 	@echo "  make frontend-client-*   - build / typecheck / clean"
 	@echo ""
+	@echo "Retrieval benchmark (needs ./orkestra.sh retrieval up; backend running from the checkout):"
+	@echo "  make retrieval-bench     - Benchmark keyword/dense/hybrid/rerank (RETRIEVAL_BENCH_ARGS=\"-k 5\")"
+	@echo ""
 	@echo "Database shells (require infra running):"
 	@echo "  make mongo-shell         - mongosh into orkestra-mongodb"
 	@echo "  make redis-cli           - redis-cli into orkestra-redis"
@@ -75,6 +78,13 @@ logs:
 	fi
 	@./orkestra.sh logs $(SVC) -f
 
+# Retrieval benchmark (ADR-0023 D14). Needs the retrieval overlay
+# (./orkestra.sh retrieval up) on a development or staging stack; it runs
+# inside the backend container. Pass flags with RETRIEVAL_BENCH_ARGS, e.g.
+# RETRIEVAL_BENCH_ARGS="-json /tmp/retrieval-bench.json".
+retrieval-bench:
+	@./orkestra.sh retrieval bench $(RETRIEVAL_BENCH_ARGS)
+
 # Database access (requires infra running) -------------------------------
 
 mongo-shell:
@@ -86,12 +96,19 @@ redis-cli:
 	docker exec -it orkestra-redis redis-cli -a $${REDIS_PASSWORD:-orkestra_redis_secure_2024}
 
 # Plain-bash tests for the env helpers and the validator's secret-hygiene
-# rules (scripts/test-env-file.sh, scripts/test-env-validate.sh). Part of
-# `make ci-backend`: the validator is what gates a staging/production deploy.
+# rules (scripts/test-env-file.sh, scripts/test-env-validate.sh), the
+# orkestra.sh helpers (scripts/test-orkestra-helpers.sh) and the dev
+# frontends' dependency install (docker/tests/dev-frontend-deps.test.sh). Part
+# of `make ci-backend`: the validator is what gates a staging/production deploy.
 backend-script-tests:
-	@bash -n scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh
+	@bash -n scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh \
+	    scripts/ci-stamp.sh scripts/test-ci-stamp.sh \
+	    orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh docker/tests/dev-frontend-deps.test.sh
 	@./scripts/test-env-file.sh
 	@./scripts/test-env-validate.sh
+	@./scripts/test-ci-stamp.sh
+	@bash scripts/test-orkestra-helpers.sh
+	@bash docker/tests/dev-frontend-deps.test.sh
 
 # Backend (host toolchain escape hatches) --------------------------------
 #
@@ -136,7 +153,7 @@ frontend-admin-deps:
 	@cd frontend-admin && npm install
 
 frontend-admin-clean:
-	@rm -rf frontend-admin/dist/ frontend-admin/node_modules/.vite/
+	@rm -rf frontend-admin/dist/ frontend-admin/node_modules/.vite/ frontend-admin/.docker/node_modules/.vite/
 
 # Frontend client (host npm escape hatches) ------------------------------
 
@@ -147,7 +164,7 @@ frontend-client-typecheck:
 	@cd frontend-client && npm run typecheck
 
 frontend-client-clean:
-	@rm -rf frontend-client/dist/ frontend-client/node_modules/.vite/
+	@rm -rf frontend-client/dist/ frontend-client/node_modules/.vite/ frontend-client/.docker/node_modules/.vite/
 
 # ============================================================================
 # CI parity — single source of truth for "what is a passing build."
@@ -156,9 +173,9 @@ frontend-client-clean:
 # ============================================================================
 
 .PHONY: install install-hooks fmt ci-help
-.PHONY: ci ci-all ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+.PHONY: ci ci-all ci-surfaces ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test agents-check agents-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening backend-retrieval-hardening backend-frontend-nginx
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
@@ -168,11 +185,12 @@ frontend-client-clean:
 BASE_REF ?= origin/dev
 SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
 CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
-BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/%,$(CI_CHANGED)),1,)
+BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/cloudflared/% docker/tests/% docker/frontend-admin/% frontend-admin/Dockerfile frontend-client/Dockerfile scripts/ci-stamp.sh scripts/test-ci-stamp.sh orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
 MCP_CHANGED     := $(if $(filter .mcp.json .codex/config.toml .github/workflows/mcp-config.yml scripts/check-mcp-sync.py scripts/test-mcp-sync.py,$(CI_CHANGED)),1,)
+CI_SURFACES     := $(strip $(if $(BACKEND_CHANGED),backend) $(if $(ADMIN_CHANGED),frontend-admin) $(if $(CLIENT_CHANGED),frontend-client) $(if $(MOBILE_CHANGED),mobile) $(if $(MCP_CHANGED),mcp))
 
 # ---- Setup ----
 
@@ -261,9 +279,18 @@ ci:
 	@# No path filter: agents-check is sub-second, and a filter would miss the
 	@# untracked CLAUDE.md that /init writes in a new directory.
 	@$(MAKE) --no-print-directory agents-check
+	@# Reached only when everything above passed: lets the pre-push hook skip
+	@# a second gate on the same tree (scripts/ci-stamp.sh).
+	@./scripts/ci-stamp.sh write $(CI_SURFACES)
+
+# The surfaces `make ci` would check now, one word each (read by
+# scripts/ci-stamp.sh prepush to match a stamp).
+ci-surfaces:
+	@echo $(CI_SURFACES)
 
 ci-all: ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 	@echo "All surface checks passed."
+	@./scripts/ci-stamp.sh write backend frontend-admin frontend-client mobile mcp
 
 # ---- Shared MCP configuration ----
 
@@ -292,7 +319,7 @@ agents-test:
 
 # ---- Backend ----
 
-ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-cloudflare-tunnel backend-retrieval-hardening backend-frontend-nginx backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -313,6 +340,29 @@ backend-credential-fallbacks:
 # and IP flags on. See docker/tests/gotenberg-hardening.test.sh.
 backend-gotenberg-hardening:
 	@bash docker/tests/gotenberg-hardening.test.sh
+
+# Cloudflare Tunnel <-> direct switch (`./orkestra.sh tunnel`) against a fake
+# Cloudflare API on loopback and a fake docker, plus the compose contract of
+# the cloudflared service (profile `tunnel`, read-only, pinned, no port). See
+# docker/tests/cloudflare-tunnel.test.sh and docs/runbooks/cloudflare-tunnel.md.
+.PHONY: backend-cloudflare-tunnel
+backend-cloudflare-tunnel:
+	@bash docker/tests/cloudflare-tunnel.test.sh
+
+# Live gate: the console nginx config answers with the cache contract —
+# index.html (every SPA route) no-cache, hashed /assets/ immutable,
+# /config.js no-store — and keeps its security headers. Runs nginx:alpine on
+# a fake build; see docker/tests/frontend-nginx-cache.test.sh.
+backend-frontend-nginx:
+	@bash docker/tests/frontend-nginx-cache.test.sh
+
+# Static gate: the retrieval overlay (Qdrant + TEI, ADR-0023) keeps its
+# hardening — no published port, retrieval-net only (egress only for the weight
+# seeds), digest-pinned images, API keys on every sidecar, and the endpoints
+# JSON matching the model each TEI serves. See
+# docker/tests/retrieval-hardening.test.sh.
+backend-retrieval-hardening:
+	@bash docker/tests/retrieval-hardening.test.sh
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
 # from the routes in the current source — same gate as policycoverage but for
@@ -448,8 +498,13 @@ ci-frontend-admin: admin-lockcheck admin-typecheck admin-lint admin-test admin-a
 admin-lockcheck:
 	@$(call npm-lockcheck,frontend-admin)
 
+# tsc peaks above Node's default heap on a CI runner (about 2 GB there, more
+# on a large host): pin 4 GB for the targets that run it (typecheck, and build
+# through `tsc && vite build`) so they behave the same on both.
+ADMIN_TSC_NODE_OPTIONS = NODE_OPTIONS="--max-old-space-size=4096 $${NODE_OPTIONS:-}"
+
 admin-typecheck:
-	@cd frontend-admin && npm run typecheck
+	@cd frontend-admin && $(ADMIN_TSC_NODE_OPTIONS) npm run typecheck
 
 admin-lint:
 	@cd frontend-admin && npx eslint src/ --ext .js,.jsx,.ts,.tsx --max-warnings 0
@@ -465,7 +520,7 @@ admin-audit:
 	@cd frontend-admin && npm audit --omit=dev --audit-level=high
 
 admin-build:
-	@cd frontend-admin && npm run build
+	@cd frontend-admin && $(ADMIN_TSC_NODE_OPTIONS) npm run build
 
 # ---- Frontend Client ----
 

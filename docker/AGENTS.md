@@ -10,7 +10,7 @@ _Parent: [../AGENTS.md](../AGENTS.md)_
 <!-- /Navigation -->
 
 > ## ⚠️ ADR-0006 — core-only base
-> This file predates the [core-only collapse](../docs/adr/0006-collapse-to-core-only-base.md) and still contains sections describing **removed** features. The current Docker topology is: **`docker-compose.infra.yml`** (MongoDB + Redis + RustFS + the optional Gotenberg PDF-renderer sidecar) + **one app file per environment** (`docker-compose.{dev,staging,prod}.yml`) + an opt-in **`docker-compose.observability.yml`** overlay. Removed: the `minimal`/`full`/`dev-public`/`ai-sidecar` compose files, `ORKESTRA_PROFILE`, `DEV_COMPOSE_VARIANT`, the `/var/run/docker.sock` mount + `CONTAINER_CONTROL_ENABLED`, and the Memgraph/Hindsight addon-infra services. Where a section below still describes those, treat it as **a fork's responsibility**, not the base. (Gotenberg itself was removed with that same generation of addon infra and has since returned as base-level `iface.PDFRenderer` plumbing — see "Gotenberg (PDF renderer sidecar)" under Infrastructure Services.)
+> This file predates the [core-only collapse](../docs/adr/0006-collapse-to-core-only-base.md) and still contains sections describing **removed** features. The current Docker topology is: **`docker-compose.infra.yml`** (MongoDB + Redis + RustFS + the optional Gotenberg PDF-renderer sidecar) + **one app file per environment** (`docker-compose.{dev,staging,prod}.yml`) + two opt-in overlays, **`docker-compose.observability.yml`** and **`docker-compose.retrieval.yml`** (Qdrant + TEI, ADR-0023). Removed: the `minimal`/`full`/`dev-public`/`ai-sidecar` compose files, `ORKESTRA_PROFILE`, `DEV_COMPOSE_VARIANT`, the `/var/run/docker.sock` mount + `CONTAINER_CONTROL_ENABLED`, and the Memgraph/Hindsight addon-infra services. Where a section below still describes those, treat it as **a fork's responsibility**, not the base. (Gotenberg itself was removed with that same generation of addon infra and has since returned as base-level `iface.PDFRenderer` plumbing — see "Gotenberg (PDF renderer sidecar)" under Infrastructure Services.)
 
 ## Multi-Stack Model
 
@@ -21,6 +21,7 @@ Every checkout × environment combination is **one Compose project**: `STACK=${A
 - **Network**: `${STACK}_default` — Compose's own per-project default network. There is no shared `orkestra-network` bridge to create; nothing joins another stack's network.
 - **Ports**: explicit values in `docker/.env`, seeded non-colliding by `scripts/init.sh` on first run (no arithmetic or shared defaults baked into compose).
 - **Observability**: a per-stack overlay (`docker-compose.observability.yml`) layered **into** the same `${STACK}` project when opted in (`./orkestra.sh observability up`) — not a separate `orkestra-observability` project.
+- **Retrieval**: the same model for `docker-compose.retrieval.yml` (`./orkestra.sh retrieval up`) — one Qdrant and one TEI per model **per stack** (ADR-0023 D3), never shared across stacks. See [Retrieval overlay](#retrieval-overlay-docker-composeretrievalyml).
 - **Service names** (`backend`, `frontend-admin`, `client-frontend`, `mongodb`, `redis`, `rustfs`, plus the observability services) are uniform across dev/staging/prod — only the container/volume/network layer is stack-namespaced. `docker compose ... <cmd> <service>` always takes the bare service name; `docker exec`/`docker inspect`/`docker logs` on a raw container need the full `${APP_NAME}-<svc>-${ENV}` name.
 
 ### ⚠️ A running container does not belong to the checkout you are standing in
@@ -138,6 +139,18 @@ ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./scripts/env-validate.sh
 ```
 
+### Cloudflare Tunnel (staging/production)
+
+`./orkestra.sh tunnel status | reload | switch tunnel|direct [--yes]` moves a stack's public hostnames between the direct path (Cloudflare → origin IP → reverse proxy → the ports on `HOST_BIND_ADDRESS`) and the stack's own `cloudflared` service, same URLs in both modes. Runbook, setup and troubleshooting: [docs/runbooks/cloudflare-tunnel.md](../docs/runbooks/cloudflare-tunnel.md).
+
+- **Routes**: `docker/cloudflared/<ENV>.json` is cloudflared's config and the list of hostnames the switch moves. The base ships only `*.json.example`; a fork commits its own `<ENV>.json` (service names, catch-all `http_status:404` last, `_tunnel_id` of that environment's tunnel). The tunnel is created in the dashboard **without public hostnames**.
+- **Service**: `cloudflared` in `docker-compose.prod.yml` and, with the same definition, `docker-compose.staging.yml` (the test compares them), compose profile `tunnel`, pinned image, `read_only`, `no-new-privileges`, `cap_drop: ALL`, no published port, container `${APP_NAME}-cloudflared-${ENV}`, mounts the `docker/cloudflared/` directory read-only. The switch addresses it only by that exact name and only with this stack's compose project label — never a glob, never another cloudflared on the host.
+- **State**: `CLOUDFLARE_TUNNEL=true` in `docker/.env` (set by the switch) makes `deploy` add `--profile tunnel` and keep cloudflared up, `status` list it, and `stop --with-infra` remove it. The direct records it replaced are in `docker/cloudflared/state/<ENV>-direct-dns.json` (gitignored); a name served only by a wildcard (`*.<zone>`) gets its own tunnel CNAME, and going back deletes it — the wildcard itself is never written.
+- **Inputs** (`docker/.env`): `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_API_TOKEN` (Zone › DNS › Edit only), `CLOUDFLARE_ZONE_ID` (recommended), optional `CLOUDFLARE_DIRECT_ORIGIN`, `CLOUDFLARE_DIRECT_CHECK_IP`. Readiness is `cloudflared tunnel ready` in cloudflared's namespace, never the tunnels API.
+- **Safety**: each name's DNS change is one all-or-nothing batch call; snapshot entries are never overwritten and `switch direct` reconciles every name to them; the DNS moves only towards a path proved to work (routes probed from cloudflared, origin checked with Cloudflare bypassed), a name failing its smoke test goes back by itself, and cloudflared is removed only once drained. Deploys with `CLOUDFLARE_TUNNEL=true` check the token's tunnel id and wait for readiness; every staging/production deploy pre-pulls the switch's images while routes exist.
+- **Trusted proxies**: through the tunnel the backend sees one hop fewer than through Cloudflare + a reverse proxy; a stack that switches needs `TRUSTED_PROXY_CIDRS` covering the reverse proxy and the compose network, not a hop count.
+- Tests: `docker/tests/cloudflare-tunnel.test.sh` (`make backend-cloudflare-tunnel`, fake Cloudflare API, fake docker, compose contract).
+
 ### What belongs in `.env` / compose vs `/admin/modules`
 
 After the architecture-modernization refactor, **module-level configuration lives in MongoDB** (`module_configs`), is edited at `/admin/modules`, and secrets are AES-256-GCM-encrypted with `OAUTH_TOKEN_ENCRYPTION_KEY`. The `EnvVar` field on each module's `ConfigSchema()` is consulted **only on first-boot seeding** (`pkg/sdk/module/config_service.go::buildInitialConfig`); after that the document is authoritative and editing the env var has no effect.
@@ -149,12 +162,17 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | Boot identity (`APP_NAME`, `ENV`, `PORT`, host/port mappings) | process | ✅ yes |
 | Database connections (`MONGO_URI`, `REDIS_URL`, credentials) | process | ✅ yes |
 | JWT keys, cookies, CORS, rate limits, observability | process | ✅ yes |
+| `COOKIE_NAME_PREFIX` | process — prefix of every cookie name (default `orkestra_`): refresh (`cookie`), device (`did`), OAuth state (`oauth_state`) and, through `config.js` `cookiePrefix`, the console's language cookie (`admin_lang`). Cookies are shared by name across ports on one host, so stacks sharing a host set distinct prefixes. Letters, digits, `.`, `_` and `-` only, or `config.Validate()` refuses to boot. | ✅ yes |
+| `COOKIE_NAME_REFRESH` / `DEVICE_COOKIE_NAME` | process — single-cookie overrides; empty means the prefix + `cookie` / `did`. An explicit value wins over the prefix, so a `docker/.env` that still carries the old example's `COOKIE_NAME_REFRESH=orkestra_cookie` keeps that name when `COOKIE_NAME_PREFIX` is set: delete the line. `DEVICE_COOKIE_NAME` must be an RFC 6265 token or `config.Validate()` refuses to boot. | ✅ yes |
 | `LOKI_QUERY_URL` / `GRAFANA_URL` | process — trusted Tier-1 log-preview upstream + optional browser deep-link base; never derived from request data | ✅ yes |
-| Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService | ✅ yes |
+| Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, `LLM_SECRET_ENCRYPTION_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService; the LLM key seals provider credentials when no KMS is wired (ADR-0022); the backend boots without it (a missing/malformed key only disables secret writes, WARN) but staging/production `env-validate` refuses a missing, placeholder or non-64-hex key | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |
 | `ORKESTRA_VERSION` | process — application version surfaced in the SPA footer (frontend-admin + frontend-client) and embedded in the dev `/health` JSON. `orkestra.sh` auto-exports this from `git describe --tags --always --dirty`, and docker-compose substitutes it into both frontend `environment:` blocks (dev/staging dev-server) and the `args:` block in `docker-compose.prod.yml` (production image build). CI overrides it with `--build-arg ORKESTRA_VERSION=${{ github.ref_name }}` on tag pushes. The container has no git binary and no `.git`, so this host-side env var is the only path that delivers a real version — without it the SPA falls back to `"dev"`. | ✅ yes |
 | `STORAGE_ENDPOINT` / `STORAGE_PUBLIC_ENDPOINT` / `STORAGE_REGION` / `STORAGE_BUCKET_PREFIX` / `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` / `STORAGE_FORCE_PATH_STYLE` / `STORAGE_ENSURE_BUCKET` | process — S3-compatible object storage consumed by `internal/shared/blob` for user-uploaded blobs. One connection vends **per-domain buckets** `<STORAGE_BUCKET_PREFIX>-<domain>` (e.g. `orkestra-avatars`, `orkestra-crm-photos`) through `blob.Provider` / `iface.ObjectStoreProvider` (ADR-0011). `STORAGE_ENDPOINT` is the endpoint the backend uses for its own ops; `STORAGE_PUBLIC_ENDPOINT` (optional) is the browser-reachable host baked into presigned PUT/GET URLs — set it when RustFS sits behind a proxy the SPA must reach while the backend keeps using the internal endpoint (see RustFS reachability gotcha) — and `https://` only in staging/production (`scripts/env-validate.sh` refuses plain HTTP there: the presigned URLs it hosts are fetched by browsers, and by anonymous visitors for public images). `STORAGE_BUCKET` is **deprecated** (superseded by the prefix; a custom value is ignored with a boot WARN). Process-scoped because rotating credentials at runtime would invalidate every in-flight presigned URL. **The presign endpoint must be browser-reachable** for upload PUTs to succeed (RustFS gotcha in Infrastructure Services). **Production**: point `STORAGE_ENDPOINT` at a managed S3, pre-provision the per-domain buckets, set `STORAGE_ENSURE_BUCKET=false` (IAM rarely grants CreateBucket) + `STORAGE_FORCE_PATH_STYLE=false`, and apply per-bucket lifecycle (expire orphaned uncommitted uploads) + backup policies. **Credentials**: `STORAGE_SECRET_KEY` is generated by `make init` and, on the bundled RustFS, *is* the store's root secret — `docker-compose.infra.yml` derives `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` from the `STORAGE_*` pair unless `RUSTFS_ROOT_USER` / `RUSTFS_ROOT_PASSWORD` override it. No compose file gives a credential a literal fallback (`docker/tests/credential-fallbacks.test.sh` is the gate), `scripts/env-validate.sh` refuses a placeholder or a secret under 16 characters in staging/production, and `config.Validate()` refuses to boot on one. Rotation recipe under "RustFS credentials" in Infrastructure Services. | ✅ yes |
 | `PDF_RENDERER_URL` / `PDF_RENDERER_USER` / `PDF_RENDERER_PASSWORD` | process — the optional Gotenberg sidecar behind `iface.PDFRenderer` (`module.ServicePDFRenderer`, `pkg/sdk/pdf/gotenberg`), consumed by core (notification attachments) and, in a fork, any addon compositing a printable document. `PDF_RENDERER_URL` defaults to `http://gotenberg:3000` (the compose service name); empty disables PDF features, which degrade rather than fail. `_USER`/`_PASSWORD` are the sidecar's own HTTP Basic Auth pair — see "Gotenberg (PDF renderer sidecar)" in Infrastructure Services, including the fail-closed `PDF_RENDERER_PASSWORD` requirement on an existing stack. Process-scoped, the same category as `STORAGE_*`: this is core-level SDK plumbing, not a module `ConfigSchema`, so it is never edited at `/admin/modules`. | ✅ yes |
+| `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION_PREFIX` | process — read by `retrieval` `Init` (ADR-0023 D3). The app files pass all three with empty defaults (empty URL = retrieval "not configured", search answers `retrieval.not_configured`); `docker-compose.retrieval.yml` overrides the URL with `http://qdrant:6333` and fails closed without `QDRANT_API_KEY` (`${…:?}`). `make init` fills the key (`openssl rand -hex 32`); `env-validate` checks it whenever it is set (placeholder/short refused in staging/production), refuses `QDRANT_URL` with an empty key, and warns on a prefix outside `^[a-z][a-z0-9-]{0,31}$` | ✅ yes |
+| `RETRIEVAL_INFERENCE_ENDPOINTS` / `RETRIEVAL_INFERENCE_API_KEY` / `RETRIEVAL_INFERENCE_*` | process — read by `llm` `Init` (ADR-0023 D4/D9); a JSON array of named TEI endpoints with `url`, `kind`, `boundary`, `model`, `revision`, …; operator-declared only, so they may sit on the stack's internal network (the private-address rule applies to organization endpoints, not to these); an invalid entry is a WARN, never a boot failure. The app files pass the list and the shared key (empty defaults); the retrieval overlay sets both (two `local` endpoints, `embed` and `rerank`). `env-validate` re-applies the parser's element rules with `jq` and refuses a list the backend would drop (error in staging/production). **An endpoint's `apiKeyEnv` variable is not passed by any compose file**: a fork that uses one adds `RETRIEVAL_INFERENCE_<X>: ${RETRIEVAL_INFERENCE_<X>:-}` to the backend in its app file (Compose cannot pass variables by pattern; the backend drops an endpoint whose key is empty) | ✅ yes |
+| `RETRIEVAL_SKIP_SEED` / `RETRIEVAL_SEED_TIMEOUT` / `QDRANT_MEM_LIMIT` / `TEI_EMBED_MEM_LIMIT` / `TEI_RERANK_MEM_LIMIT` / `TEI_MAX_BATCH_TOKENS` | compose + `orkestra.sh` only — the retrieval overlay's knobs, never read by the backend; commented stubs in `.env.example`. See [Retrieval overlay](#retrieval-overlay-docker-composeretrievalyml) | ✅ yes |
 | OAuth provider credentials (`OAUTH_GOOGLE/APPLE/GITHUB/DISCORD_*`) | ConfigService (auth module) | ❌ admin UI |
 | AI provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OLLAMA_BASE_URL`) | ConfigService (auth/notification, shared) | ❌ admin UI |
 | SMTP / notification settings (`SMTP_*`, `NOTIFICATION_EMAIL_*`) | ConfigService (notification module) | ❌ admin UI |
@@ -180,11 +198,11 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 | HTTPS Required | No | Yes | Yes |
 | Observability | Disabled | Enabled | Enabled |
 
-> **`COOKIE_SAME_SITE` is a dead key.** `config.go:339` reads it into
+> **`COOKIE_SAME_SITE` is a dead key.** `config.go:383` reads it into
 > `CookieConfig.SameSite` and nothing ever reads it back — every mint path writes
-> `http.SameSiteLaxMode` as a Go literal (`utils/http.go:62,77,127,150`,
-> `middleware/device.go:68`, `setup/routes.go:442`,
-> `oauth_state_binding.go:56,71`, `password_handler.go:421`). So the SameSite row
+> `http.SameSiteLaxMode` as a Go literal (`utils/http.go:62,77`,
+> `middleware/device.go:75`, `setup/routes.go:440`,
+> `oauth_state_binding.go:70,85`, `password_handler.go:532`). So the SameSite row
 > above is `lax` in all three columns, and there is **no configuration path to
 > `SameSite=None`** without a code change. Do not reach for this key to fix a
 > cross-site cookie problem — fix the host layout instead (below).
@@ -203,7 +221,8 @@ Separate infrastructure from applications. One infra compose + one app compose p
 2. **`docker-compose.dev.yml`** — development stack (hot reload). The backend builds `Dockerfile.dev-backend` (public `golang:alpine`, AIR pre-baked; `GO_BASE` build-arg for a Chainguard base); frontends use `node:24-alpine`.
 3. **`docker-compose.staging.yml`** — application services in staging mode (staging-like env + AIR/Vite hot reload).
 4. **`docker-compose.prod.yml`** — application services in production mode.
-5. **`docker-compose.observability.yml`** — opt-in OTEL overlay (Tempo, Prometheus, Loki, Promtail, Grafana). Runs alongside any app stack.
+5. **`docker-compose.observability.yml`** — opt-in OTEL overlay (Tempo, Prometheus, Loki, Alloy, Grafana). Runs alongside any app stack.
+6. **`docker-compose.retrieval.yml`** — opt-in retrieval overlay (Qdrant + two TEI CPU inference servers, ADR-0023). Runs alongside any app stack, on the internal `retrieval-net`.
 
 ### File Organization
 
@@ -218,6 +237,7 @@ Separate infrastructure from applications. One infra compose + one app compose p
     ├── docker-compose.staging.yml # Staging: AIR/Vite hot reload + staging-like env
     ├── docker-compose.prod.yml    # Production: optimized backend + frontends
     ├── docker-compose.observability.yml # Opt-in OTEL overlay
+    ├── docker-compose.retrieval.yml # Opt-in retrieval overlay: Qdrant + TEI (ADR-0023)
     ├── .env.example               # Template for environment files
     ├── .env                       # Active env (gitignored) - contains ENV=development|staging|production
     ├── keys/                      # JWT and OAuth keys (gitignored)
@@ -230,6 +250,7 @@ Separate infrastructure from applications. One infra compose + one app compose p
 - **Staging**: `docker-compose.infra.yml` + `docker-compose.staging.yml` + `.env` (with `ENV=staging`)
 - **Production**: `docker-compose.infra.yml` + `docker-compose.prod.yml` + `.env` (with `ENV=production`)
 - **+ Observability** (any env): add `-f docker-compose.observability.yml` or `./orkestra.sh observability up`
+- **+ Retrieval** (any env): `./orkestra.sh retrieval up` (it also seeds the model weights; a bare `-f docker-compose.retrieval.yml` skips that step)
 
 **IMPORTANT**: All Docker files must remain in `/docker` directory for proper build contexts.
 
@@ -264,6 +285,8 @@ ENV=development ./orkestra.sh deploy [--scope all|backend|frontend-admin|fronten
 ./orkestra.sh logs <service> [-f] [-n N] [-t]
 ./orkestra.sh observability {up|down|reset|status|info|logs}
 ```
+
+**Image rebuilds pull their bases.** A deploy with rebuild runs `compose build --no-cache --pull`: `--no-cache` alone kept every `FROM` at the host's cached copy, which for a minor-pinned tag such as `dhi.io/golang:1.27` means months without security patches. Consequences: the deploy host needs a valid `docker login dhi.io` for the backend (a cached base is no longer enough), and a registry outage now stops a rebuild deploy — roll back by redeploying an existing image tag without `--rebuild`. No Dockerfile builds `FROM` a locally built image, so `--pull` has nothing local to miss.
 
 ### Manual Docker Compose (Alternative)
 
@@ -314,7 +337,7 @@ depending on the advertised member name. Changing an existing stack requires
 entrypoint needs while dropping the entrypoint itself, leaving a standalone
 mongod whose only symptom was a failure at setup-finalization time.
 
-**RustFS status note**: the compose file pins RustFS **1.0.0** (GA) by digest — bump it deliberately, never via `:latest`. Single-node S3-API mode is fine for avatars. Production deploys running at scale should swap `STORAGE_ENDPOINT` to a managed S3 (AWS / Backblaze B2 / etc.) and drop `STORAGE_FORCE_PATH_STYLE`. The backend's `internal/shared/blob` package speaks the S3 API uniformly via AWS SDK v2, so swapping is an env-var change.
+**RustFS status note**: the compose file pins RustFS **1.0.6** by tag and digest (1.0.0 until the 2026-11 security audit: 1.0.2 fixed the Object Lock and alternate-listener policy advisories, 1.0.5 restricts service accounts derived from root) — bump it deliberately, never via `:latest`. Single-node S3-API mode is fine for avatars. Production deploys running at scale should swap `STORAGE_ENDPOINT` to a managed S3 (AWS / Backblaze B2 / etc.) and drop `STORAGE_FORCE_PATH_STYLE`. The backend's `internal/shared/blob` package speaks the S3 API uniformly via AWS SDK v2, so swapping is an env-var change.
 
 **RustFS credentials**: the store's root pair is `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` — `docker-compose.infra.yml` maps them onto RustFS's documented `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` (the `RUSTFS_ROOT_USER` / `RUSTFS_ROOT_PASSWORD` spellings it used to set are undocumented aliases), and `RUSTFS_ROOT_*` in `docker/.env` override the derivation for a deployment whose backend must not be root. No compose file carries a literal fallback for any credential any more: the base once shipped `changeme-rustfs` as both the example `STORAGE_SECRET_KEY` and the RustFS fallback, which made every un-edited checkout a browser-facing S3 API whose root password was printed in this repository. `make init` generates the secret, `scripts/env-validate.sh` refuses a placeholder (or anything under 16 characters) before a staging/production deploy, `config.Validate()` refuses to boot on one, and `docker/tests/credential-fallbacks.test.sh` keeps the fallbacks out. A deployment with object storage disabled (both `STORAGE_*` keys empty) still starts the bundled rustfs container with the infra stack, so it needs a `RUSTFS_ROOT_*` pair of its own — the infra file refuses to render without any credential, and the validator says so first. RustFS reads the pair from the environment on every start and does not persist it in the volume, so **rotation** is: set the new values, recreate `rustfs` then `backend`, then `redis-cli --scan --pattern 'blob:url:*' | xargs redis-cli DEL` — presigned GET URLs cached under the old signature otherwise 403 for up to an hour. The key id rides in every presigned URL and is not secret. **Least privilege** on the bundled store: RustFS serves the MinIO-compatible admin API, so a dedicated backend user with a policy scoped to `arn:aws:s3:::<STORAGE_BUCKET_PREFIX>-*` (`s3:CreateBucket`, `s3:ListBucket`, `s3:GetBucketLocation`, `s3:GetBucketCORS`, `s3:PutBucketCORS` on the buckets; `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on their objects) can be created with `mc admin user add` / `mc admin policy attach` against the root pair; `STORAGE_*` then names that user and `RUSTFS_ROOT_*` keeps the root.
 
@@ -350,6 +373,36 @@ mongod whose only symptom was a failure at setup-finalization time.
 | **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `localhost`; consumes the operator API on `localhost:3000` (same site — see below) |
 | **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes the client API on `client.localhost:3000` (same site — see below) |
 
+Frontend dependencies, the same for both dev servers:
+
+- **Where.** `<app>/.docker/node_modules` (gitignored) is bound over
+  `/app/node_modules`, so the Alpine (musl) install never touches the host's
+  `<app>/node_modules`: host tests, lint and the git hooks keep their glibc
+  native bindings. The path contains a `node_modules` segment, so Vite's
+  watcher, ESLint, Prettier and Vitest skip it with their defaults.
+  `orkestra.sh` (`prepare_dev_frontend_dirs`, development deploys only) and
+  `make init` create it, the `node_modules` mount point and the
+  `.npm-cache`/`.vite-cache` bind sources before `up` (`.docker/` is ignored
+  by the root `.gitignore`; the images' `.dockerignore` files keep it out of
+  the production build context). Docker would create a missing one as root,
+  or under a userns-remap daemon as the remapped root (uid 100000), which the
+  uid-1000 container cannot write: a fresh checkout's frontends then looped on
+  an unwritable `.npm-cache`. A dependency or npm cache directory Docker
+  already created stops the deploy with its path: delete it and deploy again.
+- **Install.** `docker/frontend-deps.sh`, mounted read-only, runs before
+  `npm run dev`: `npm ci`, never a plain `npm install` (which would rewrite a
+  lockfile that is behind `package.json`), and only when `package.json` or
+  `package-lock.json` changed since the last install (a stamp in
+  `node_modules`) or `node_modules/.bin/vite` is missing, so a restart skips
+  it. If ci refuses because the two are out of sync, it logs
+  `orkestra dev: package.json and package-lock.json are out of sync …`,
+  installs without reading or writing the lockfile and starts anyway; run
+  `npm install` on the host and commit the lockfile. Any other failure exits,
+  and Docker restarts the container: see `docker logs <container>`.
+  `docker/tests/dev-frontend-deps.test.sh` covers both.
+- **Older checkouts.** Before this layout both containers installed into the
+  host's `node_modules`: run `npm ci` there once on the host.
+
 #### Staging (`docker-compose.staging.yml`)
 
 **Hot-reload stack with staging-like behavior (cookie strict, JWT, CORS, rate limits).** Used as the primary development environment on long-lived VMs that mirror production-style URLs/cookies but still need fast iteration.
@@ -359,6 +412,7 @@ mongod whose only symptom was a failure at setup-finalization time.
 | **backend**                  | 3000      | Go API server                        | Hot reload (AIR), staging-like env, RS256 JWT                   |
 | **frontend-admin**           | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
 | **client-frontend**          | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `app.orkestra.cc`; consumes `staging-api.*` |
+| **cloudflared**              | none      | Cloudflare Tunnel connector (profile `tunnel`) | Same service as production; see [Cloudflare Tunnel](#cloudflare-tunnel-stagingproduction). Through the tunnel the console and the client SPA are these Vite dev servers (port 5173 on the stack network) |
 
 Service names are uniform across dev/staging/prod (`backend`/`frontend-admin`/`client-frontend`); only the `container_name:` is stack-namespaced (`${APP_NAME}-<svc>-${ENV}`), e.g. `orkestra-backend-development` on the shipped defaults.
 
@@ -370,7 +424,7 @@ GOMODCACHE=$PWD/.go-mod-cache go mod download
 GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse/air@v1.67.1
 ```
 
-**AIR is pinned, never `@latest`.** A release that raises its `go` directive above the project's toolchain (`go.mod`, `.mise.toml`, CI) refuses to build under `GOTOOLCHAIN=local` — air v1.67.2 did exactly that on Go 1.25, and `@latest` would have broken every dev-image build the day it was tagged. The pin lives in `Dockerfile.dev-backend` (`ARG AIR_VERSION`), `backend/Dockerfile`, `backend/Makefile` and `scripts/install-air.sh`; bump all four together with the Go version (currently Go 1.26.9 / air v1.67.4).
+**AIR is pinned, never `@latest`.** A release that raises its `go` directive above the project's toolchain (`go.mod`, `.mise.toml`, CI) refuses to build under `GOTOOLCHAIN=local` — air v1.67.2 did exactly that on Go 1.25, and `@latest` would have broken every dev-image build the day it was tagged. The pin lives in `Dockerfile.dev-backend` (`ARG AIR_VERSION`), `backend/Dockerfile`, `backend/Makefile` and `scripts/install-air.sh`; bump all four together with the Go version (currently Go 1.27.4 / air v1.67.4).
 
 `userns_mode: "host"` is required when the Docker daemon runs with `userns-remap` (otherwise `group_add` for the docker GID is rewritten and the mounted socket stays unreadable). DNS is inherited from the daemon (`/etc/docker/daemon.json` → `dns: [...]`); the staging compose deliberately does **not** set per-service `dns:`, because public resolvers (8.8.8.8, 1.1.1.1) may be blocked on UDP/53 in restricted networks.
 
@@ -382,6 +436,7 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 | ------------ | --------- | ------------- | ------------------------------ |
 | **backend**  | `${BACKEND_PORT:-3000}`  | Go API server | Optimized build, health checks, `read_only` rootfs |
 | **frontend-admin** | `${FRONTEND_PORT:-8080}` | React web app | Nginx static serving           |
+| **cloudflared** | none | Cloudflare Tunnel connector (profile `tunnel`) | Started only by `./orkestra.sh tunnel switch tunnel` or a deploy with `CLOUDFLARE_TUNNEL=true`; see [Cloudflare Tunnel](#cloudflare-tunnel-stagingproduction) |
 
 Both bind to `${HOST_BIND_ADDRESS:-127.0.0.1}` — closed by default; `docker/.env` opens them to the address the reverse proxy reaches. See [Container hardening](#container-hardening) for the capability/rootfs contract.
 
@@ -397,6 +452,13 @@ Both bind to `${HOST_BIND_ADDRESS:-127.0.0.1}` — closed by default; `docker/.e
 ### `pdf-net` — the Gotenberg sidecar's network
 
 A second, `internal: true` Compose network layered onto `${STACK}_default`, declared identically in `docker-compose.infra.yml` (where `gotenberg` joins it) and in each app compose file (where `backend` also joins it, alongside its `default` network membership). `internal: true` means the network has no gateway to the outside — a container on `pdf-net` alone (`gotenberg`) cannot reach the internet or be reached from the host, only from another container that also joins it. `backend` is the only such container, so `gotenberg` is reachable from exactly one place. This is deliberate defense in depth on top of the Chromium-level restrictions described under "Gotenberg (PDF renderer sidecar)" — a document the sidecar renders could otherwise try to reach `169.254.169.254` (cloud metadata) or another internal service by URL, and the deny-list flags are the primary control, `pdf-net`'s isolation the second. A stack without `PDF_RENDERER_URL` set still starts `gotenberg` and joins `pdf-net` — the network costs nothing idle; only the backend's own use of it is conditional.
+
+### `retrieval-net` and `retrieval-egress` — the retrieval overlay's networks
+
+`docker-compose.retrieval.yml` declares two more networks, created only when the overlay runs:
+
+- **`retrieval-net`** (`internal: true`): `qdrant`, `tei-embed`, `tei-rerank` and the `backend` (the overlay adds it to the backend's networks; Compose merges network lists as a union, so `default` and `pdf-net` stay). No gateway to the outside and no published port, in development included: tenant text sent for embedding never leaves it, and only the backend reaches the engine and the inference servers.
+- **`retrieval-egress`** (a plain bridge): joined **only** by the two weight seeds (`tei-embed-seed`, `tei-rerank-seed`), which need huggingface.co. No other service joins it, so the seeds cannot reach MongoDB, Redis or the backend, and the serving containers never get egress. `retrieval up` removes the seeds; the network itself stays (Compose `rm` does not remove networks) until a project `down`.
 
 ### Host split (ADR-0003)
 
@@ -416,9 +478,9 @@ The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) indexes
 
 `CLIENT_API_HOST` is not a free choice. Every client-tier cookie the backend mints
 is `SameSite=Lax` with an **empty `Domain`** (host-only) — the refresh cookie
-(`password_handler.go:411-424`, `utils/http.go:53-64`), the OAuth state cookie
-(`oauth_state_binding.go:56,71`) and the device cookie
-(`middleware/device.go:61-69`). A `SameSite=Lax` cookie is neither stored from nor
+(`password_handler.go:522-535`, `utils/http.go:53-64`), the OAuth state cookie
+(`oauth_state_binding.go:70,85`) and the device cookie
+(`middleware/device.go:68-76`). A `SameSite=Lax` cookie is neither stored from nor
 sent on a **cross-site** subresource request, and the client SPA reaches its API
 exclusively through `fetch(..., {credentials: "include"})`.
 
@@ -529,6 +591,7 @@ docs, the defaults and the OAuth recipe all prescribe `localhost`.
 |---|---|---|
 | `CONSOLE_HOST` | Hostname the operator mux answers on | `console.localhost:3000` (dev) / unset (prod, operator-set) |
 | `CLIENT_API_HOST` | Hostname the client mux answers on. **Must be same-site with the client SPA's origin** — see "Client tier: the SPA and the client API must be same-site" above. A host under the RFC 2606 `.invalid` TLD (e.g. `client-disabled.invalid`) disables the client tier: no Host can ever match it, and `env-validate` skips the pairing check. | `client.localhost:3000` (dev) / unset (prod) |
+| `OPERATOR_API_URL` | Operator API public origin (scheme + host, no path); fills `Server.Operator.PublicURL`. The llm module's Sign in with ChatGPT loopback mode (`siwc_mode=loopback_local`) builds its redirect from it and needs exactly `http://127.0.0.1:<port>`. A `HOST_BIND_ADDRESS` other than `0.0.0.0` / `127.0.0.1` makes loopback mode unreachable. | `http://127.0.0.1:${BACKEND_PORT:-3000}` (dev) / derived from `CONSOLE_HOST` when unset (prod) |
 | `OPERATOR_CORS_ORIGINS` | CORS allowlist for operator mux | falls back to `CORS_ORIGINS` |
 | `CLIENT_CORS_ORIGINS` | CORS allowlist for client mux | falls back to `CORS_ORIGINS` |
 | `OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
@@ -539,7 +602,7 @@ docs, the defaults and the OAuth recipe all prescribe `localhost`.
 | `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`) used to build verify-email / reset-password links for signups landing on the client API host. | falls back to `FRONTEND_URL` |
 | `TRUSTED_PROXY_CIDRS` | Networks your reverse proxies live in. **Preferred** form — survives a topology change without a recount. | empty |
 | `TRUSTED_PROXY_COUNT` | How many proxy hops sit in front of the backend. Used only when `TRUSTED_PROXY_CIDRS` is empty. | `0` (dev) / `2` (staging: Cloudflare → HAProxy) / `0` (prod — **set this before going live**) |
-| `API_DOCS_ENABLED` | Register `/docs` + `/openapi.json`. The spec is a complete route inventory and the docs page runs a third-party bundle on the API origin (the one holding the refresh cookie) — gate both paths at the edge if you turn this on in prod. | `true` (dev) / `false` (staging, prod) |
+| `API_DOCS_ENABLED` | Serve `/docs` + `/openapi.json`. When off, huma's own spec routes (`/openapi.*`, `/openapi-3.0.*`, `/schemas/*`) answer 404 too. The spec is a complete route inventory and the docs page runs a third-party bundle on the API origin (the one holding the refresh cookie) — gate `/docs`, `/openapi*` and `/schemas/*` at the edge if you turn this on in prod. | `true` (dev) / `false` (staging, prod) |
 
 **Trusted proxies are a security control, not a logging nicety.** `X-Forwarded-For` is an ordinary request header, so with no policy configured the backend ignores it entirely and attributes every request to its direct peer. Behind a proxy that means all callers collapse onto the proxy's address — they share one login rate-limit bucket, the operator IP allowlist matches nothing real, and geo-blocking sees the proxy's country. Set one of the two vars in any environment that terminates TLS somewhere other than the Go process. A production-like boot with neither set logs a startup warning; a malformed value is fatal at boot. Details in [backend/AGENTS.md](../backend/AGENTS.md#client-ip-resolution-trusted-proxies).
 
@@ -617,7 +680,10 @@ What `docker-compose.prod.yml` and `docker-compose.infra.yml` actually enforce (
 | frontend-admin | ALL | `CHOWN SETGID SETUID NET_BIND_SERVICE` | no | nginx master is root on :80 and drops workers to `nginx`; `10-write-config.sh` rewrites `config.js` inside the docroot at every start, so the rootfs must stay writable |
 | mongodb | ALL | `CHOWN DAC_OVERRIDE SETGID SETUID` | no | `replica-entrypoint.sh` writes the keyfile into the `mongodb`-owned config volume as root, then `docker-entrypoint.sh` chowns and `gosu`s |
 | redis, rustfs | ALL | — | no | Run on unprivileged ports, own their data dirs |
+| qdrant | ALL | — | no | `-unprivileged` image (uid 1000, owns its `qdrant-data` volume); listens on 6333 inside `retrieval-net` only; API key required; web UI off (`QDRANT__SERVICE__ENABLE_STATIC_CONTENT=false`) |
+| tei-embed, tei-rerank (+ seeds) | ALL | — | no | Bind :80 inside `retrieval-net` (verified under `userns-remap`); serving containers mount `tei-weights` **read-only**, seeds read-write; `mem_limit` set (8g / 9g, qdrant 2g) — `docker/tests/retrieval-hardening.test.sh` gates all of it |
 | gotenberg | ALL | — | no | Listens on 3000 inside `pdf-net` only (no published port); hardening leans on network isolation + Chromium flags (deny-list, no JS, no private/public IP fetch) rather than a read-only rootfs — `docker/tests/gotenberg-hardening.test.sh` gates the flags and the network shape |
+| cloudflared (profile `tunnel`) | ALL | — | yes | Outbound-only connections to the Cloudflare edge, metrics on its own loopback (`127.0.0.1:20241`), no published port; image user is non-root, routes directory mounted read-only (verified under `userns-remap` with `ingress validate`) — `docker/tests/cloudflare-tunnel.test.sh` gates the compose contract |
 
 Every service also sets `security_opt: [no-new-privileges:true]`. The backend's mutable paths are named volumes (`backend-uploads`, `backend-logs`) rather than `./backend/*` binds, which used to appear as root-owned untracked files under `docker/`. `backend/Dockerfile` pre-creates both mount points `1777` so an empty named volume inherits a directory a non-root uid can write — Docker never chowns volumes for you.
 
@@ -625,7 +691,7 @@ Every service also sets `security_opt: [no-new-privileges:true]`. The backend's 
 
 **Follow-up**: `read_only` for frontend-admin needs `config.js` relocated out of the docroot (a `tmpfs` dir + an `alias` in the `location = /config.js` block of `frontend-admin/nginx.conf` and the Dockerfile's baked config) — tracked, not done.
 
-**Still aspirational**: resource limits, Trivy scanning, a non-root `USER` in the backend's production stage (the DHI base picks the uid today).
+**Still aspirational**: resource limits (only the retrieval overlay sets `mem_limit` today), Trivy scanning, a non-root `USER` in the backend's production stage (the DHI base picks the uid today).
 
 ## Environment Configuration
 
@@ -729,16 +795,22 @@ AWS_SECRET_ACCESS_KEY=your_secret_key
 
 ### Self-hosted OTEL stack (docker-compose.observability.yml)
 
-Phase 5.2 of the tenancy plan ships a self-hosted observability profile that layers on top of the dev/staging/prod stacks. After ADR-0005 Phase D, six containers, all pinned public images:
+Phase 5.2 of the tenancy plan ships a self-hosted observability profile that layers on top of the dev/staging/prod stacks. After ADR-0005 Phase D, six containers, all public images pinned by tag and digest (bumped by the 2026-11 security audit; Promtail, end of life since 2026-03-02, replaced by Alloy). Every host port binds to `INFRA_BIND_ADDRESS` (default `127.0.0.1`); Grafana requires `GRAFANA_ADMIN_PASSWORD` (filled by `make init`) and keeps anonymous access off unless `GRAFANA_ANONYMOUS_ENABLED=true`:
 
 | Service           | Image                                         | Host port | Purpose                                                                            |
 | ----------------- | --------------------------------------------- | --------- | ---------------------------------------------------------------------------------- |
-| **otel-collector**| `otel/opentelemetry-collector-contrib:0.96.0` | 4318 / 4317 | OTLP receiver; fans traces to Tempo, exposes collected metrics for Prometheus     |
-| **tempo**         | `grafana/tempo:2.4.1`                         | 3200        | Trace backend (local storage, 72 h retention)                                      |
-| **prometheus**    | `prom/prometheus:v2.51.2`                     | 9090        | Metric scraper (15 d retention)                                                    |
-| **loki**          | `grafana/loki:3.0.0`                          | 3100        | Log backend (filesystem store; 14 d info / 30 d warn+ via per-stream retention)   |
-| **promtail**      | `grafana/promtail:3.0.0`                      | —           | Log shipper; tails docker stdout, JSON-parses, ships to Loki                       |
-| **grafana**       | `grafana/grafana-oss:10.4.2`                  | 3010        | UI; Tempo + Prometheus + Loki datasources auto-provisioned with cross-jumping; six dashboards under `Orkestra/` pre-loaded |
+| **otel-collector**| `otel/opentelemetry-collector-contrib:0.163.2` | 4318 / 4317 | OTLP receiver; fans traces to Tempo, exposes collected metrics for Prometheus, OTLP logs to Loki's `/otlp` |
+| **tempo**         | `grafana/tempo:2.10.10`                       | 3200        | Trace backend (local storage, 72 h retention)                                      |
+| **prometheus**    | `prom/prometheus:v3.13.5`                     | 9090        | Metric scraper (15 d retention)                                                    |
+| **loki**          | `grafana/loki:3.7.9`                          | 3100        | Log backend (filesystem store; 14 d info / 30 d warn+ via per-stream retention)   |
+| **alloy**         | `grafana/alloy:v1.21.2`                       | —           | Log shipper (replaced Promtail); reads the stack's container logs via the Docker API, JSON-parses, ships to Loki (`alloy/config.alloy`) |
+| **grafana**       | `grafana/grafana:13.2.5`                      | 3010        | UI; Tempo + Prometheus + Loki datasources auto-provisioned with cross-jumping; six dashboards under `Orkestra/` pre-loaded |
+
+**Upgrading a host that ran the 2024 overlay** (Promtail, Tempo 2.4, Grafana 10):
+
+- Add `GRAFANA_ADMIN_PASSWORD` to `docker/.env` (`openssl rand -hex 16`); `observability up` and every deploy of a stack whose overlay is running refuse an empty or placeholder value. The overlay is detected from its containers' Compose labels, so a missing password fails loudly instead of dropping the overlay from the deploy.
+- `observability up` cleans up the leftovers once: it removes the retired `promtail` container and the `promtail-positions` volume, and when it finds them it chowns `tempo-data` to uid 10001 (Tempo 2.4 ran as root, so 2.10 would crash-loop on the old volume). Alloy starts without Promtail's positions: log lines younger than Loki's 168 h `reject_old_samples_max_age` may be ingested twice once.
+- Grafana keeps the password stored in `grafana-data` at its first boot: on an install that started with `admin/admin`, run `docker exec <APP_NAME>-grafana-<ENV> grafana cli admin reset-admin-password "$GRAFANA_ADMIN_PASSWORD"`.
 
 Boot it alongside the dev stack. Easiest path via `orkestra.sh`:
 
@@ -756,7 +828,7 @@ docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml --env-file 
 docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml -f docker-compose.observability.yml --env-file .env up -d
 ```
 
-The orkestra.sh launcher also exposes `observability {down,reset,status,info,logs}`. Observability is a **per-stack overlay** layered into the same `${STACK}` project (see [Multi-Stack Model](#multi-stack-model)) — `docker-compose.observability.yml` contains a partial `backend` override and is deliberately invalid as a standalone Compose project. The launcher validates the merged infra + app + overlay graph before acting and fails closed if that graph cannot be resolved. Lifecycle ownership is explicit: `down`/`reset` target only `otel-collector`, `tempo`, `prometheus`, `loki`, `promtail`, and `grafana`; reset removes only their five named data volumes. App and infra containers/volumes are never widened into an observability reset.
+The orkestra.sh launcher also exposes `observability {down,reset,status,info,logs}`. Observability is a **per-stack overlay** layered into the same `${STACK}` project (see [Multi-Stack Model](#multi-stack-model)) — `docker-compose.observability.yml` contains a partial `backend` override and is deliberately invalid as a standalone Compose project. The launcher validates the merged infra + app + overlay graph before acting and fails closed if that graph cannot be resolved. Lifecycle ownership is explicit: `down`/`reset` target only `otel-collector`, `tempo`, `prometheus`, `loki`, `alloy`, and `grafana`; reset removes only their five named data volumes. App and infra containers/volumes are never widened into an observability reset.
 
 The base app compose files pass `LOKI_QUERY_URL` and `GRAFANA_URL` through with empty defaults, so the logging workspace degrades cleanly without the overlay. `observability up` applies the overlay's `LOKI_QUERY_URL=http://loki:3100` and default `GRAFANA_URL=http://localhost:3010` to an already-running backend through the valid merged graph; `down` and `reset` restore the app-only backend configuration. Later full-stack deploys retain the override while observability containers are active. Set `GRAFANA_URL` explicitly when the browser reaches Grafana through another hostname, scheme, or host port; it is a browser link, whereas the Loki URL remains internal to the stack network.
 
@@ -787,7 +859,7 @@ Six pre-provisioned dashboards ship under the `Orkestra/` folder in Grafana (`do
 
 All six cross-link by `trace_id` — clicking a span jumps to filtered Loki logs, and clicking `trace_id` in any log line jumps back to Tempo. Backing evidence: `backend/internal/shared/middleware/tenant_baggage.go`, `backend/internal/shared/middleware/request_logger.go` (ADR-0005 Phase A), and `backend/internal/shared/utils/per_module_level_handler.go` (ADR-0005 Phase C).
 
-Phase 5.3 landed `/metrics` on the backend (`GET http://backend:3000/metrics`), scraped automatically by Prometheus. The handler is mounted on both the operator mux (for in-product browsing under the audience host) AND on the `lanOpsHandler` so a scrape against the `backend` service (`backend:3000` by service-name DNS within the stack's network) works without spoofing a Host header — Prometheus has no per-scrape Host override. The hostMux `opsPaths` allowlist (`/health`, `/ready`, `/metrics`) is the single source of truth for paths that escape the audience gate; the client mux still does not mount `/metrics`, so a browser hitting `api.orkestra.com/metrics` continues to 404 through the reverse proxy. Four metric families ship today — Cedar shadow divergence, capability denial, entitlement projection lag, and (ADR-0005 Phase B) `orkestra_http_request_duration_seconds` — with the label schema frozen in [ADR-0002](../docs/adr/0002-metrics-label-schema.md). Disable the endpoint by setting `METRICS_ENABLED=false`.
+Phase 5.3 landed `/metrics` on the backend (`GET http://backend:3000/metrics`), scraped automatically by Prometheus. The handler is mounted on the `lanOpsHandler`, so a scrape against the `backend` service (`backend:3000` by service-name DNS within the stack's network) works without spoofing a Host header — Prometheus has no per-scrape Host override. The hostMux `opsPaths` allowlist (`/health`, `/ready`, `/metrics`) is the single source of truth for paths that escape the audience gate. Outside development no audience host serves `/metrics`: the operator and client hosts are internet-facing origins, and behind a tunnel or a proxy that forwards every path the endpoint would publish route templates, job names and auth counters (`mountOperatorMetrics`, `cmd/server/health.go`; `TestOperatorMetrics_OnTheOperatorHostInDevelopmentOnly`). In development the operator mux serves it too, because there the host mux sends an unmatched host to the operator mux before the ops handler. Four metric families ship today — Cedar shadow divergence, capability denial, entitlement projection lag, and (ADR-0005 Phase B) `orkestra_http_request_duration_seconds` — with the label schema frozen in [ADR-0002](../docs/adr/0002-metrics-label-schema.md). Disable the endpoint by setting `METRICS_ENABLED=false`.
 
 Prometheus scrapes two endpoints on the OTel collector — `:8889` (the Prometheus exporter for OTLP-received customer metrics, populated only when a sender sets `OTEL_METRICS_ENABLED=true`) and `:8888` (the collector's own self-telemetry — `otelcol_receiver_*`, `otelcol_exporter_*`, `otelcol_processor_dropped_*`). The latter is what the Pipeline Health dashboard reads to surface drops, failures, and signal-throughput regressions.
 
@@ -801,6 +873,49 @@ The HTTP latency histogram is labelled `{audience, method, route, status_class}`
 - `LOG_HTTP_SLOW_THRESHOLD_MS` — integer milliseconds; default `1000`. Slower requests get `slow=true` stamped so `{slow=true}` is a one-liner in Loki.
 
 The request-log payload is **allowlist-only** by ADR contract — bodies, the `Authorization` header, and raw query strings never reach the log surface.
+
+### Retrieval overlay (docker-compose.retrieval.yml)
+
+Opt-in Qdrant + local inference for the core `retrieval` module (ADR-0023 D3, D4, D9). Operator guide (sizing, offline seeding, model inventory, benchmark, troubleshooting): [`docs/site/operating/retrieval-overlay.mdx`](../docs/site/operating/retrieval-overlay.mdx). Same overlay model as observability: layered into the stack's own `${STACK}` project, a partial `backend` override, **invalid as a standalone Compose file**.
+
+| Service | Image (pinned by digest) | Networks | Notes |
+| --- | --- | --- | --- |
+| `qdrant` | `qdrant/qdrant:v1.20.2-unprivileged@sha256:f60765…5277` | `retrieval-net` | Volume `qdrant-data`; `QDRANT__SERVICE__API_KEY` from `QDRANT_API_KEY`; telemetry and web UI off; healthcheck via bash `/dev/tcp` on `/readyz` (the image has no curl/wget); `mem_limit ${QDRANT_MEM_LIMIT:-2g}` |
+| `tei-embed` | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea…c78d` (linux/amd64 only) | `retrieval-net` | `BAAI/bge-m3` @ `5617a9f…`, `--pooling cls`; `tei-weights:/data:ro`; `mem_limit ${TEI_EMBED_MEM_LIMIT:-8g}` |
+| `tei-rerank` | same TEI image | `retrieval-net` | `BAAI/bge-reranker-v2-m3` @ `953dc6f…`; `tei-weights:/data:ro`; `mem_limit ${TEI_RERANK_MEM_LIMIT:-9g}` |
+| `tei-embed-seed`, `tei-rerank-seed` | same image, command and volume as the serving twin | `retrieval-egress` only | Profile `retrieval-seed`, `restart: "no"`, `tei-weights:/data` read-write, healthcheck `start_period ${RETRIEVAL_SEED_TIMEOUT:-1800}s`; same `mem_limit` variable as the twin |
+| `backend` (override) | — | adds `retrieval-net` | Sets `QDRANT_URL=http://qdrant:6333`, `QDRANT_API_KEY`, `RETRIEVAL_INFERENCE_ENDPOINTS` (two `local` endpoints, `embed` → `http://tei-embed:80`, `rerank` → `http://tei-rerank:80`, each naming its TEI's model and revision) and `RETRIEVAL_INFERENCE_API_KEY` |
+
+Every TEI command carries `--auto-truncate`, `--payload-limit 16777216` (32 × 64 KiB inputs plus JSON escaping; the TEI default of 2 MB answers 413), `--max-batch-tokens ${TEI_MAX_BATCH_TOKENS:-2048}` and `--port 80`; `API_KEY` comes from `RETRIEVAL_INFERENCE_API_KEY`. Both keys are `${…:?}`: the overlay refuses to render without them, which is also how emptying them opts out.
+
+**Seed vs serve (the egress rule).** Model weights come from huggingface.co, but a serving TEI processes tenant text and must have no egress (D9) — nor reach MongoDB/Redis on `default`. So the seeds, and only the seeds, fetch the weights over `retrieval-egress`; TEI is healthy only after it has loaded the model, so "seed healthy" means "weights complete". `orkestra.sh` runs them **one after the other** (embed, then rerank), each with its own `up -d --wait --wait-timeout` and removed as soon as it is healthy, and removes them on every path (success, failure of either, timeout, Ctrl-C, SIGTERM, SIGHUP: the trap covers `INT TERM HUP` and only sets a flag, so a signal sent to the script alone, e.g. by `timeout`, still ends the `up` after the cleanup with "Interrupted: …" and starts nothing) before starting the serving containers. Sequential on purpose: a re-run of `retrieval up` on a live overlay holds one seed next to the serving pair, a peak of ≈ 22 GiB (21.6 GiB `docker stats` sum over all retrieval containers, measured 2026-10-30: rerank seed 8.32 + tei-embed 6.37 + tei-rerank 6.82 GiB + qdrant) instead of ≈ 27 GB with both seeds, just inside the ≥ 24 GB guidance; a tight host runs `retrieval down` first. `HF_HUB_OFFLINE=1` on the serving containers is **declared intent only** — TEI 1.9.x does not read it; offline serving is guaranteed by `retrieval-net` being internal plus the cached weights under the pinned revision. Offline hosts import a seeded `tei-weights` volume and set `RETRIEVAL_SKIP_SEED=true`.
+
+**TEI memory and logs (measured, keep).** `--max-batch-tokens` is the memory lever (embed ≈ 6.5 GB at 2048, 8.1 GB at 4096, 14.5 GB at 8192; rerank 7.0–7.7 GB at 2048; embed floor ≈ 6 GB even at 512, so 4g never works on CPU) and it also caps the max input length (the backend reads it from `/info`; chunks ≤ 1024 tokens at 2048). `--max-batch-requests` is not a knob (TEI forces 8 on ORT, 4 on candle). CPU rerank is slow (smoke run under contention: median 15.9 s per 20-candidate call, ~14 cores): interactive budgets need a GPU/external reranker or no rerank. TEI prints its parsed `Args`, **`api_key` included**, at INFO: every TEI service sets the literal `LOG_LEVEL: info,text_embeddings_router=warn,text_embeddings_router::http=info`. Never turn it into `${LOG_LEVEL}` (`docker/.env` carries `LOG_LEVEL=info` for the backend, which would bring the key line back, and Alloy would ship it to Loki); `RUST_LOG` has no effect on TEI 1.9.x. An external TEI needs the same filter. The reranker's offline start logs `Could not download …` WARNs and two ERRORs (`Model ONNX files not found`, `Could not start ORT backend`) before falling back to candle — expected.
+
+**CLI** (`orkestra.sh`, section "Retrieval stack"):
+
+```bash
+./orkestra.sh retrieval up       # validate the merged graph, refuse REPLACE_WITH_* keys, seed one model at a time (unless RETRIEVAL_SKIP_SEED=true), start qdrant/tei-*, recreate the backend with the override
+./orkestra.sh retrieval down     # rm -sf the 3 services + both seeds, recreate the backend without the override; volumes kept
+./orkestra.sh retrieval status   # ps -a of the 3 services + both seeds (a leftover seed is flagged: it has egress; cleanup = retrieval down) + docker stats MemUsage against each limit (the sizing source)
+./orkestra.sh retrieval info     # internal URLs, variable NAMES (never values), opt-out, offline notes
+./orkestra.sh retrieval logs <svc> [-f] [-n N] [-t]   # one of the 5 services, through the merged stack files of THIS project
+./orkestra.sh retrieval bench [flags]                 # = make retrieval-bench; backend running from the checkout only (dev, hot-reload staging)
+```
+
+- **One base `-f` list** (`compose_base_files`: infra + the ENV's app file + its overlays, `COMPOSE_OVERLAY_FILES`, empty in every ENV of this base) is used by `compose_stack`, which every compose command of the stack goes through, and by `stack_compose_files`, which adds observability and retrieval while their containers exist for every overlay's apply/restore. `deploy` adds the same active overlays to its `compose_stack` calls, the production rolling update of backend **and** admin frontend included, so changing one overlay never drops the other's backend override. Never pass a shell function other than `compose_stack` to `with_spinner`: `gum spin` cannot run one (a function takes the bash spinner instead), and that spinner's subshell loses any global the function sets, such as `STACK_COMPOSE_FILES`.
+- Ownership is explicit (`RET_SERVICES`, `RET_SEED_SERVICES`, `RET_VOLUMES`): no project-wide `down`, no volume removal. After `down`, `docker volume rm <project>_tei-weights` is safe (`retrieval up` downloads it again); `<project>_qdrant-data` is the index and is **not rebuilt until delivery step 2** (Mongo keeps `retrieval_corpus_state` / `retrieval_tenant_progress`, so only items enqueued again are re-indexed) — see the operating page, which also has the backup recipe (`backup.sh` does not cover it).
+- **Rotating a key or bumping a pin → `./orkestra.sh retrieval up`, never `deploy` alone**: a production `deploy` recreates only the backend (`--no-deps`), which then holds a key Qdrant/TEI do not know or declares a revision the running TEI does not serve; `retrieval up` re-seeds and recreates Qdrant, TEI and the backend together.
+- `retrieval logs` does not go through `view_logs`: that would parse the overlay alone (invalid) and fall back to a host-wide label match, which on a shared host can read another stack's `qdrant`.
+- **Order matters.** Opt out with `retrieval down` **first**, then empty `QDRANT_API_KEY` / `RETRIEVAL_INFERENCE_API_KEY` (without the keys the overlay cannot render, so `down` cannot run and the containers are stranded while a deploy unwires the backend). `./orkestra.sh stop --with-infra` leaves the overlay running (as it does observability): run `retrieval down` before it.
+
+**Variables** (all optional, read from `docker/.env`; the shell wins): `QDRANT_API_KEY` and `RETRIEVAL_INFERENCE_API_KEY` (required by the overlay, `make init`), `QDRANT_MEM_LIMIT` (2g), `TEI_EMBED_MEM_LIMIT` (8g), `TEI_RERANK_MEM_LIMIT` (9g), `TEI_MAX_BATCH_TOKENS` (2048; raise the limits with it), `RETRIEVAL_SKIP_SEED` (false; `orkestra.sh` reads only an active line, never a commented stub), `RETRIEVAL_SEED_TIMEOUT` (1800 s **per seed**, they run one after the other; one value drives both the seeds' `start_period` and each seed's `up --wait` bound, validated as a positive integer before any compose call). A host for the defaults needs ≈ 19 GB of limits — plan ≥ 24 GB RAM free; a re-`up` on a live overlay peaks at ≈ 22 GiB, measured (see the seed paragraph).
+
+**Hardening gate.** `docker/tests/retrieval-hardening.test.sh` (`make backend-retrieval-hardening`, part of `make ci-backend`; `backend.yml` path filters include the overlay) renders infra + each app file + the overlay with `--profile retrieval-seed` and fails unless: images are digest-pinned (Qdrant ≥ 1.20 `-unprivileged`, TEI `cpu-*`) and each seed runs its twin's image and command; no service publishes a port; every service has `no-new-privileges`, `cap_drop: ALL`, a healthcheck, the `orkestra.stack` label, a `container_name` and a `mem_limit`; serving services sit on `retrieval-net` only, seeds on `retrieval-egress` only, the backend on `default` + `pdf-net` + `retrieval-net`; the seeds' `start_period` follows `RETRIEVAL_SEED_TIMEOUT`; Qdrant, every TEI and the backend carry the keys; `tei-weights` is at `/data`, read-only when serving; `HF_HUB_OFFLINE` is on the serving side only; `--payload-limit` ≥ 13,000,000; `--max-batch-tokens` defaults to 2048; `LOG_LEVEL` is the literal filter (even with `LOG_LEVEL` exported) and no `RUST_LOG`; the default limits are 8g / 9g / 2g; the endpoints JSON names exactly the model and revision of each TEI command and the URL host/port of each service, with `boundary: local`; the base app files alone render retrieval empty or from `.env`; and the overlay refuses to render without either key. Renders run under `env -u` for the retrieval variables, so an exported developer shell cannot make it pass.
+
+**Benchmark.** `make retrieval-bench` → `./orkestra.sh retrieval bench` → `docker compose … exec [-T] backend go run ./cmd/retrieval-bench -fixture internal/core/retrieval/bench/testdata/smoke-it-en.jsonl [flags]` (`-T` only when stdin or stdout is not a TTY: with a TTY, Ctrl-C reaches the bench, which then drops its scratch collection; without one the bench may keep running in the container, check with `docker top <app>-backend-<env>`); it checks Docker and the overlay file, needs the overlay up and refuses production (the image has no sources; the binary refuses `ENV=production` too). Before the `go run` it probes the container (`exec -T backend sh -c 'command -v go && test -f cmd/retrieval-bench/main.go'`, stdin closed) and dies when that fails, appending any Compose or Docker error: only a backend running from the checkout (development, the base's hot-reload staging) has the sources, and a fork's staging on the production image has none (the image ships Go but not the source tree, `go.mod` or the fixture, on a read-only root), whatever `ENV` says. See `backend/internal/core/retrieval/AGENTS.md` ("Benchmark (D14)").
+
+**Out of scope here:** dev-slot wiring (one overlay per parallel worktree) lives in the octolabs-worktree kit, a separate repository.
 
 ### Legacy: External monitoring integrations
 

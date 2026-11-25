@@ -641,6 +641,7 @@ func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 		"sessionRevocation": {},
 		"sessionRiskLookup": {},
 		"mfaEnrollment":     {},
+		"passwordSet":       {},
 		// mfaEpochLookup (spec §4.3 D16) satisfies the bar this tripwire
 		// sets: it is a read-only func(ctx, audience, userUUID) (int,
 		// error) over the user document's mfaEpoch. It carries no auth
@@ -1183,5 +1184,28 @@ func TestRequireAuth_VerifiableRejections_CarryNoUnavailableCode(t *testing.T) {
 				t.Errorf("body = %s, want %s untouched", body, tc.wantInBody)
 			}
 		})
+	}
+}
+
+func TestRequireAuth_StampsCtxauthSessionID(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	var got string
+	var ok bool
+	h := f.mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok = ctxauth.GetSessionID(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+f.issueTokenWithSID("u-1", "sid-xyz"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	resp.Body.Close()
+	if !ok || got != "sid-xyz" {
+		t.Fatalf("ctxauth.GetSessionID = %q,%v want sid-xyz", got, ok)
 	}
 }

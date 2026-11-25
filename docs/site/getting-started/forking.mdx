@@ -78,7 +78,7 @@ cd docker
 docker compose -f docker-compose.dev.yml --env-file .env up -d
 ```
 
-This builds `docker/Dockerfile.dev-backend` (public `golang:1.26.9-alpine`, AIR pre-baked — no registry auth) and boots the backend (AIR hot-reload) plus both frontends (Vite HMR). First boot takes ~30 s while it builds the image and runs `go mod download`; subsequent restarts are instant. A fork with a Chainguard subscription can swap the base image via the `GO_BASE` build-arg — see [dev-images](/architecture/dev-images).
+This builds `docker/Dockerfile.dev-backend` (public `golang:1.27.4-alpine`, AIR pre-baked — no registry auth) and boots the backend (AIR hot-reload) plus both frontends (Vite HMR). First boot takes ~30 s while it builds the image and runs `go mod download`; subsequent restarts are instant. A fork with a Chainguard subscription can swap the base image via the `GO_BASE` build-arg — see [dev-images](/architecture/dev-images).
 
 If you've pushed your own backend image to a registry, override `BACKEND_IMAGE_REPO` — see the README "Forking the image registry" section.
 
@@ -99,7 +99,7 @@ Roles, highest to lowest: `super_admin` → `administrator` → `developer` → 
 
 ## Step 7 — Add and enable modules
 
-Once logged in, navigate to `/admin/modules`. The core-only base ships **only the eight core modules** — there are no optional modules to toggle yet. To add one, create `backend/internal/addons/<name>/` plus a `cmd/server/catalog_<name>.go` in your fork; it appears here and the registry hot-loads it (no restart, transitive dependencies auto-resolved). See [Build your first addon](/sdk/build-your-first-addon).
+Once logged in, navigate to `/admin/modules`. The core-only base ships **only the eleven core modules** — there are no optional modules to toggle yet. To add one, create `backend/internal/addons/<name>/` plus a `cmd/server/catalog_<name>.go` in your fork; it appears here and the registry hot-loads it (no restart, transitive dependencies auto-resolved). See [Build your first addon](/sdk/build-your-first-addon).
 
 See [Enabling Modules](/getting-started/enabling-modules) for the per-module configuration UI.
 

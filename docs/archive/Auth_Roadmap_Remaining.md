@@ -375,7 +375,7 @@ Pick one track at a time; don't interleave.
 
 **Track 1 — Close open confirmed issues** (1–2 weeks, low risk, high value)
 - localStorage fix (CRITICAL)
-- Docs rewrite (F2)
+- Docs rewrite
 - Revoked-token reaper (E4)
 - Rate-limit tunables
 - Permissions loading race
@@ -399,7 +399,7 @@ Pick one track at a time; don't interleave.
 - BYO OIDC/SAML (D2)
 
 **Track 5 — DX (Section F)** (can run in parallel)
-- Test harness (F1)
+- Test harness
 - Docs rewrite already in Track 1
 
 Each track's items are small enough to land as individual commits. Track 2 is the highest-leverage next step — it activates work that's already shipped but currently inert.

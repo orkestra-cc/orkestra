@@ -14,8 +14,8 @@ import {
   type ChangeRequestFilter
 } from 'store/api/complianceApi';
 import ChangeRequestModal from './ChangeRequestModal';
-import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceTable from './ComplianceTable';
+import EmptyState from 'components/common/EmptyState';
+import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { formatDateTime } from './complianceFormat';
 
 const FILTERS: ChangeRequestFilter[] = [
@@ -156,13 +156,13 @@ const ChangeRequestsTab = () => {
       {isLoading ? (
         <Spinner animation="border" size="sm" className="mt-2" />
       ) : items.length === 0 ? (
-        <ComplianceEmptyState
+        <EmptyState
           icon={faUserCheck}
           message={t('adminCompliance.changeRequests.emptyMessage')}
           hint={t('adminCompliance.changeRequests.emptyHint')}
         />
       ) : (
-        <ComplianceTable
+        <SearchablePagedTable
           data={items}
           columns={columns}
           searchPlaceholder={t(

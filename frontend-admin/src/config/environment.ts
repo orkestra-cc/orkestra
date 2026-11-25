@@ -30,6 +30,8 @@ interface RuntimeConfig {
   buildCommit?: string;
   /** UTC instance-start timestamp, e.g. "2026-07-13 10:22Z". */
   startedAt?: string;
+  /** Prefix of the console's cookie names (COOKIE_NAME_PREFIX). */
+  cookiePrefix?: string;
 }
 
 declare global {
@@ -57,6 +59,8 @@ interface EnvironmentConfig {
   buildCommit: string;
   /** UTC instance-start timestamp; empty string when unset. */
   startedAt: string;
+  /** Language-preference cookie name: the cookie prefix + "admin_lang". */
+  langCookieName: string;
   /** True if running in production */
   isProduction: boolean;
   /** True if running in staging */
@@ -85,6 +89,11 @@ function pickString(
   }
   return undefined;
 }
+
+// Cookie-name characters only, so a bad value can never inject attributes;
+// the same set the backend validates COOKIE_NAME_PREFIX against.
+const COOKIE_PREFIX = /^[A-Za-z0-9._-]{1,128}$/;
+const DEFAULT_COOKIE_PREFIX = 'orkestra_';
 
 function createConfig(): EnvironmentConfig {
   const runtime = readRuntime();
@@ -120,6 +129,15 @@ function createConfig(): EnvironmentConfig {
   const cloneVersion = pickString(runtime.cloneVersion) ?? 'dev';
   const buildCommit = pickString(runtime.buildCommit) ?? '';
   const startedAt = pickString(runtime.startedAt) ?? '';
+  // Cookies ignore the port, so two consoles on one host (two stacks)
+  // would share the preference by name; each stack's config.js carries the
+  // backend's COOKIE_NAME_PREFIX.
+  const cookiePrefix =
+    typeof runtime.cookiePrefix === 'string' &&
+    COOKIE_PREFIX.test(runtime.cookiePrefix)
+      ? runtime.cookiePrefix
+      : DEFAULT_COOKIE_PREFIX;
+  const langCookieName = `${cookiePrefix}admin_lang`;
 
   return {
     env,
@@ -131,6 +149,7 @@ function createConfig(): EnvironmentConfig {
     cloneVersion,
     buildCommit,
     startedAt,
+    langCookieName,
     isProduction: env === 'production',
     isStaging: env === 'staging',
     isDevelopment: env === 'development',

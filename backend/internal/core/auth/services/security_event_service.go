@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -96,7 +97,7 @@ func NewSecurityEventService(db *mongo.Database) (SecurityEventService, error) {
 }
 
 func (s *securityEventService) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
-	res, err := s.collection.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := s.collection.DeleteMany(ctx, repository.ByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

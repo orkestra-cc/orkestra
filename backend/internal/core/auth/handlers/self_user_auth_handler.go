@@ -30,7 +30,12 @@ import (
 type SelfUserAuthHandler struct {
 	auth services.AuthService
 	mfa  services.MFAService
+	// pin adds the PIN slice to the aggregator.
+	pin *services.PINAuthService
 }
+
+// SetPINService wires the tier's PIN service into the aggregator.
+func (h *SelfUserAuthHandler) SetPINService(pin *services.PINAuthService) { h.pin = pin }
 
 // NewSelfUserAuthHandler wires the dependencies. Both must be the
 // **same tier** as the route mount — mounting an operator handler
@@ -58,6 +63,9 @@ func (h *SelfUserAuthHandler) GetAuthMethods(ctx context.Context, _ *struct{}) (
 	view, err := h.auth.GetUserAuthMethods(ctx, userUUID)
 	if err != nil {
 		return nil, mapSelfAuthError(err)
+	}
+	if h.pin != nil {
+		view.PIN = h.pin.ViewByUUID(ctx, userUUID)
 	}
 	return &selfAuthMethodsResponse{Body: *view}, nil
 }

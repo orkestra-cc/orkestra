@@ -129,10 +129,23 @@
       "suppliers": "Fornitori",
       "invoicesIssued": "Fatture emesse",
       "invoicesReceived": "Fatture ricevute",
-      "sdiNotifications": "Notifiche SDI"
+      "sdiNotifications": "Notifiche SDI",
+      "deliveryLog": "Registro delle consegne"
     }
   },
   "errors": {
+    "jobs": {
+      "not_found": "Nessun job registrato con questa chiave.",
+      "revision_conflict": "Il job è cambiato dopo il caricamento. È stato ricaricato: riprova.",
+      "already_running": "Il job è in esecuzione: attendi la fine dell'esecuzione.",
+      "already_requested": "Un'esecuzione di questo job è già in attesa di una replica libera.",
+      "module_stopped": "Il modulo del job non è avviato, quindi i suoi job non vengono eseguiti.",
+      "invalid_schedule": "La pianificazione non è valida",
+      "manual_schedule_locked": "Questo job parte solo su richiesta: la pianificazione non è modificabile.",
+      "invalid_timezone": "Il fuso orario non è un nome di zona IANA.",
+      "invalid_query": "Il filtro dello storico non è valido.",
+      "persistence_failed": "Impossibile leggere o scrivere lo stato del job. Riprova."
+    },
     "401": {
       "insufficientPermissions": "Permessi insufficienti",
       "accessDenied": "Accesso negato",
@@ -183,7 +196,9 @@
       "login_disabled": "L'accesso è temporaneamente disabilitato per questa superficie. Contatta un amministratore.",
       "country_blocked": "L'accesso dal tuo paese non è consentito.",
       "password_confirm_unavailable": "Questo account non può riconfermare con una password. Usa l'MFA o autenticati nuovamente tramite OAuth.",
-      "oauth_provider_disabled": "Questo provider OAuth non è abilitato per questa superficie. Contatta un amministratore."
+      "oauth_provider_disabled": "Questo provider OAuth non è abilitato per questa superficie. Contatta un amministratore.",
+      "recipient_suppressed": "l'email non è partita perché l'indirizzo dell'utente è segnato non valido (lista di soppressione). Rendilo di nuovo valido prima di riprovare.",
+      "suppression_unavailable": "non è stato possibile leggere la lista degli indirizzi non validi, quindi l'email non è partita. Riprova tra poco."
     },
     "compliance": {
       "policy_not_found": "La policy di conformità non esiste.",
@@ -200,7 +215,54 @@
       "policy_reason_required": "Serve una motivazione da 1 a 500 caratteri.",
       "policy_unavailable": "Le policy si stanno caricando: riprova fra qualche secondo.",
       "policy_persistence_failed": "Non è stato possibile completare la richiesta."
-    }
+    },
+    "retrieval": {
+      "not_configured": "Il motore vettoriale non è configurato su questa installazione.",
+      "unavailable": "Il motore vettoriale non è raggiungibile in questo momento. Riprova fra poco.",
+      "corpus_not_found": "Non esiste alcuno stato di retrieval per questo corpus.",
+      "corpus_registered": "Il corpus è ancora registrato. Annulla la registrazione prima di eliminarne lo stato.",
+      "corpus_unavailable": "Il modulo che possiede questo corpus non è in esecuzione. Riprova quando lo sarà.",
+      "forbidden": "Non puoi accedere a questo corpus.",
+      "invalid_filter": "Il filtro non è adatto a questo corpus.",
+      "invalid_request": "La richiesta di ricerca non è valida.",
+      "locality_violation": "Un endpoint di inferenza viola la regola di località di questo corpus.",
+      "visibility_check_failed": "Non è stato possibile eseguire il controllo di visibilità delle fonti, quindi nessun risultato viene mostrato. Riprova fra poco.",
+      "internal": "La richiesta di retrieval non è stata completata."
+    },
+    "llm": {
+      "not_configured": "Nessun modello o credenziale attivi in questa organizzazione.",
+      "provider_unavailable": "Il provider non è raggiungibile in questo momento. Riprova più tardi.",
+      "no_eligible_model": "Nessun modello che puoi usare è configurato per questo scopo.",
+      "model_access_denied": "Non puoi usare questo modello.",
+      "capability_mismatch": "Il modello non offre ciò che serve alla richiesta.",
+      "invalid_request": "Alcuni campi non sono validi.",
+      "not_found": "La credenziale, il modello o l'account collegato non esiste più.",
+      "name_in_use": "Un'altra credenziale o un altro modello ha già questo nome.",
+      "credential_in_use": "Un modello attivo usa ancora questa credenziale. Eliminalo o collegalo a un'altra credenziale prima.",
+      "secret_key_missing": "Questa installazione non ha una chiave di cifratura dei segreti, quindi le chiavi non possono essere salvate.",
+      "endpoint_not_allowed": "Questo endpoint non è consentito in questo ambiente.",
+      "hosted_disabled": "I provider in cloud sono disattivati nelle impostazioni del modulo llm.",
+      "mock_not_allowed": "Il provider mock è disponibile solo fuori dalla produzione.",
+      "grant_not_member": "Ogni utente autorizzato deve essere membro di questa organizzazione.",
+      "budget_exceeded": "Il budget LLM mensile dell'organizzazione non ha spazio per questa chiamata.",
+      "plan_quota_exhausted": "La quota del piano dell'account collegato è esaurita. Riprova più tardi.",
+      "credential_rejected": "Il provider ha rifiutato la credenziale. Controlla o ruota la chiave API.",
+      "rate_limited": "Troppe richieste. Attendi un minuto e riprova.",
+      "partial_output": "Il provider si è fermato prima di completare la risposta.",
+      "user_account_required": "Questo modello è addebitato al tuo account: collegalo prima.",
+      "user_account_reauth_required": "L'account collegato deve essere autorizzato di nuovo.",
+      "plan_usage_disabled": "L'account collegato non ha consentito l'uso del piano.",
+      "request_canceled": "La richiesta è stata annullata prima di essere completata.",
+      "siwc_config_invalid": "Accedi con ChatGPT non è configurato correttamente su questa installazione. Chiedi a un amministratore di controllare le impostazioni del modulo llm.",
+      "siwc_disabled": "Accedi con ChatGPT è disattivato su questa installazione.",
+      "siwc_unsupported_deployment": "Accedi con ChatGPT non può completarsi automaticamente qui: l'API deve essere raggiunta come http://127.0.0.1. Chiedi a un amministratore di usare il flusso con incolla.",
+      "siwc_callback_invalid": "Non è l'indirizzo che il browser ha mostrato dopo l'accesso. Copia l'URL completo dalla barra degli indirizzi e incollalo di nuovo.",
+      "siwc_state_invalid": "Questo tentativo di accesso è scaduto o è già stato usato. Ricomincia il collegamento.",
+      "siwc_denied": "L'autorizzazione è stata rifiutata su OpenAI. Non è stato collegato nulla.",
+      "siwc_exchange_failed": "OpenAI non ha completato l'accesso. Riprova a collegare più tardi.",
+      "siwc_id_token_invalid": "L'identità restituita da OpenAI non è verificabile, oppure appartiene a un altro account. Non è stato modificato nulla."
+    },
+    "mfa_enrollment_required": "Questa azione richiede una verifica recente con un secondo fattore. Configura un'app di autenticazione o una passkey nelle impostazioni di sicurezza, poi riprova."
   },
   "banner": {
     "impersonation": {
@@ -713,6 +775,17 @@
         "toastCopied": "Token copiato negli appunti",
         "errorUnknown": "errore sconosciuto"
       }
+    },
+    "modulePreferences": {
+      "title": "Preferenze dei moduli",
+      "description": "Impostazioni che ogni modulo conserva per te. Seguono il tuo account, non l'organizzazione.",
+      "save": "Salva",
+      "saving": "Salvataggio…",
+      "saved": "Preferenze salvate",
+      "saveFailed": "Impossibile salvare le preferenze: {{error}}",
+      "empty": "Nessun modulo dichiara preferenze.",
+      "lastSaved": "Ultimo salvataggio {{when}}",
+      "unknownError": "Errore sconosciuto"
     }
   },
   "adminTenants": {
@@ -997,7 +1070,8 @@
       "toastResendFailed": "Reinvio fallito: {{error}}",
       "toastPasswordResetSent": "Email di reset password inviata",
       "toastSendFailed": "Invio fallito: {{error}}",
-      "errorUnknown": "errore sconosciuto"
+      "errorUnknown": "errore sconosciuto",
+      "actionManagePin": "Gestisci PIN"
     },
     "attachMember": {
       "title": "Collega membro",
@@ -1221,7 +1295,9 @@
       "oauth": "Accessi collegati",
       "sessions": "Sessioni",
       "devices": "Dispositivi attendibili",
-      "backupCodes": "Codici di backup"
+      "backupCodes": "Codici di backup",
+      "ai": "Account AI",
+      "pin": "PIN"
     },
     "stats": {
       "mfaTitle": "Due fattori",
@@ -1269,7 +1345,12 @@
       "errorTooShort": "La nuova password deve avere almeno {{count}} caratteri.",
       "errorRequiredNew": "Inserisci una nuova password.",
       "errorRequiredConfirm": "Conferma la nuova password.",
-      "errorGeneric": "Aggiornamento della password non riuscito."
+      "errorGeneric": "Aggiornamento della password non riuscito.",
+      "forgotCurrent": "Non ricordi la password attuale?",
+      "resetLinkSend": "Inviami un link per reimpostarla",
+      "resetLinkSending": "Invio…",
+      "resetLinkSent": "Link di reimpostazione richiesto per {{email}}. Se non arriva entro qualche minuto, richiedilo di nuovo. Impostando la nuova password da quel link verrai disconnesso da tutti i dispositivi.",
+      "resetLinkError": "Non è stato possibile inviare il link di reimpostazione. Riprova tra qualche minuto."
     },
     "backupCodesTab": {
       "title": "Codici di backup",
@@ -1378,6 +1459,93 @@
       "modalCancel": "Annulla",
       "modalSubmit": "Scollega",
       "modalSubmitting": "Scollegamento…"
+    },
+    "aiAccounts": {
+      "intro": "Collega il tuo account ChatGPT perché i modelli che l'organizzazione addebita al tuo piano ChatGPT lo usino. I token di accesso restano sul server: questa pagina non li vede mai.",
+      "link": "Collega un account ChatGPT",
+      "linkStarting": "Avvio…",
+      "pasteInstead": "Incolla invece un indirizzo di accesso",
+      "disabled": "Accedi con ChatGPT non è abilitato su questa installazione.",
+      "disabledHint": "Un amministratore può attivarlo nelle impostazioni del modulo llm.",
+      "disabledWithAccounts": "Accedi con ChatGPT non è abilitato su questa installazione. Puoi comunque scollegare gli account qui sotto.",
+      "empty": "Nessun account ChatGPT collegato.",
+      "emptyHint": "Collegane uno per usare i modelli addebitati al tuo piano ChatGPT.",
+      "loadError": "Non è stato possibile caricare i tuoi account collegati.",
+      "retry": "Riprova",
+      "linked": "Account collegato.",
+      "linkedNamed": "Account collegato: {{label}}.",
+      "selectedNow": "{{label}} è ora l'account usato dai modelli addebitati al tuo piano.",
+      "unlinked": "{{label}} è stato scollegato.",
+      "neverUsed": "Mai",
+      "selectedBadge": "In uso",
+      "columns": {
+        "account": "Account",
+        "status": "Stato",
+        "selected": "In uso",
+        "linked": "Collegato",
+        "lastUsed": "Ultimo uso",
+        "actions": "Azioni"
+      },
+      "status": {
+        "active": "Attivo",
+        "plan_disabled": "Uso del piano non concesso",
+        "needs_reauth": "Accesso richiesto",
+        "revoked": "Revocato"
+      },
+      "remedies": {
+        "plan_disabled": "Accedi di nuovo e consenti l'uso del piano quando OpenAI lo chiede.",
+        "needs_reauth": "Accedi di nuovo per continuare a usare questo account.",
+        "revoked": "OpenAI non accetta più questo accesso. Scollega l'account e collegalo di nuovo."
+      },
+      "actions": {
+        "select": "Seleziona",
+        "reauthorize": "Autorizza di nuovo",
+        "unlink": "Scollega"
+      },
+      "unlinkTitle": "Scollegare {{label}}?",
+      "unlinkBody": "I modelli addebitati al tuo piano smettono di usare questo account e il suo accesso viene revocato presso OpenAI. Puoi ricollegarlo in seguito.",
+      "wizard": {
+        "title": "Collega un account ChatGPT",
+        "reauthTitle": "Accedi di nuovo a {{label}}",
+        "stepOf": "Passo {{step}} di {{total}}",
+        "step1Title": "Accedi su OpenAI",
+        "step1": "OpenAI si apre in una nuova scheda. Accedi con l'account ChatGPT che vuoi usare e consenti l'uso del piano quando richiesto. Tieni aperta questa finestra: concludi qui.",
+        "open": "Apri OpenAI",
+        "step2Title": "Incolla l'indirizzo",
+        "step2": "Dopo l'accesso, la scheda di OpenAI prova ad aprire un indirizzo che inizia con http://127.0.0.1 e mostra un errore di connessione. È previsto: copia l'indirizzo completo dalla barra degli indirizzi di quella scheda.",
+        "pasteLabel": "Incolla l'indirizzo della scheda di OpenAI",
+        "pastePlaceholder": "http://127.0.0.1:…/v1/llm/accounts/openai/callback?…",
+        "pasteHint": "Includi tutto ciò che segue il punto interrogativo. L'indirizzo vale una sola volta, per dieci minuti.",
+        "complete": "Completa il collegamento",
+        "completing": "Collegamento…",
+        "back": "Indietro",
+        "cancel": "Annulla",
+        "validation": {
+          "required": "Incolla prima l'indirizzo.",
+          "invalid": "Non è un indirizzo web. Copialo dalla barra degli indirizzi.",
+          "tooLong": "L'indirizzo è troppo lungo."
+        }
+      },
+      "myModels": {
+        "title": "Modelli addebitati al tuo piano",
+        "note": "Quali puoi usare dipende dal catalogo dell'account selezionato.",
+        "empty": "Nessun modello addebitato al tuo piano ChatGPT è disponibile per te.",
+        "loadError": "Non è stato possibile caricare i modelli.",
+        "columns": {
+          "name": "Modello",
+          "modelId": "ID modello"
+        }
+      },
+      "myUsage": {
+        "title": "Il mio consumo questo mese",
+        "org": "Addebitato all'organizzazione",
+        "orgSubtitle": "Token sulle credenziali dell'organizzazione",
+        "userAccount": "Addebitato al tuo piano",
+        "userAccountSubtitle": "Token sul tuo account ChatGPT collegato"
+      }
+    },
+    "pinTab": {
+      "intro": "Il PIN ti fa accedere dai dispositivi di campo con il tuo username. Gestiscilo qui; le modifiche richiedono un accesso forte recente."
     }
   },
   "operatorProfile": {
@@ -1668,6 +1836,143 @@
       "validation": "Controlla il nome dell'account di servizio e riprova.",
       "generic": "Qualcosa è andato storto. Riprova.",
       "credentialCap": "Questo account di servizio ha già due credenziali attive. Revocane una prima di emetterne un'altra."
+    }
+  },
+  "adminJobs": {
+    "title": "Job in background",
+    "subtitle": "I job dichiarati dai moduli: pianificazione, stato e storico delle esecuzioni.",
+    "loading": "Caricamento dei job…",
+    "loadingAria": "Caricamento dell'area job",
+    "loadingJobs": "Caricamento dei job…",
+    "loadFailed": "Impossibile caricare i job. Riprova tra poco.",
+    "empty": "Nessun modulo ha dichiarato un job.",
+    "moduleSettings": "Impostazioni del modulo",
+    "backToJobs": "Torna ai job",
+    "overridden": "Modificato",
+    "columns": {
+      "job": "Job",
+      "module": "Modulo",
+      "schedule": "Pianificazione",
+      "status": "Stato",
+      "lastRun": "Ultima esecuzione",
+      "nextRun": "Prossima esecuzione",
+      "actions": "Azioni"
+    },
+    "schedule": {
+      "every": "ogni {{value}} {{unit}}",
+      "cron": "cron {{expr}} ({{zone}})",
+      "cronShort": "cron {{expr}}",
+      "manual": "manuale",
+      "units": {
+        "s": "s",
+        "min": "min",
+        "h": "h",
+        "d": "g"
+      }
+    },
+    "status": {
+      "disabled": "Disabilitato",
+      "moduleStopped": "Modulo fermo",
+      "running": "In esecuzione",
+      "retryPending": "Nuovo tentativo in attesa",
+      "lastOk": "Ultima esecuzione riuscita",
+      "lastFailed": "Ultima esecuzione fallita",
+      "lastSkipped": "Ultima esecuzione saltata",
+      "neverRun": "Mai eseguito"
+    },
+    "actions": {
+      "enableAria": "Abilita {{title}}",
+      "editSchedule": "Modifica pianificazione",
+      "editScheduleAria": "Modifica la pianificazione di {{title}}",
+      "runNow": "Esegui ora",
+      "runNowAria": "Esegui {{title}} ora",
+      "reset": "Ripristina predefinito",
+      "resetAria": "Ripristina {{title}} al predefinito"
+    },
+    "tabs": {
+      "overview": "Panoramica",
+      "schedule": "Pianificazione",
+      "runs": "Esecuzioni"
+    },
+    "overview": {
+      "key": "Chiave",
+      "declared": "Pianificazione dichiarata",
+      "offByDefault": "disattivato di default",
+      "retryAt": "Nuovo tentativo",
+      "attempt_one": "tentativo {{count}}",
+      "attempt_other": "tentativo {{count}}",
+      "runRequested": "Esecuzione richiesta",
+      "timeout": "Timeout",
+      "maxAttempts": "Tentativi massimi",
+      "revision": "Revisione",
+      "lastRun": "Ultima esecuzione"
+    },
+    "editor": {
+      "declaredDefault": "Il modulo dichiara: {{schedule}}.",
+      "kind": "Tipo di pianificazione",
+      "kindEvery": "Ogni N minuti",
+      "kindCron": "Espressione cron",
+      "everyMinutes": "Ogni (minuti)",
+      "cron": "Espressione cron",
+      "cronHelp": "Cinque campi: minuto ora giorno-del-mese mese giorno-della-settimana.",
+      "timezone": "Fuso orario",
+      "timezoneHelp": "Nome di zona IANA. Lascia vuoto per seguire il fuso del modulo.",
+      "preview": "Prossime esecuzioni",
+      "nextRuns": "Prossime esecuzioni",
+      "previewIdle": "Inserisci una pianificazione valida per vedere le prossime esecuzioni.",
+      "previewLoading": "Calcolo in corso…",
+      "save": "Salva pianificazione",
+      "manualLocked": "Questo job parte solo su richiesta: non ha una pianificazione da modificare.",
+      "overriddenNote": "La pianificazione o lo stato di abilitazione di questo job differisce da quanto dichiara il suo modulo.",
+      "restoreDefaults": "Ripristina i valori dichiarati",
+      "errors": {
+        "minutes": "Inserisci un numero intero di minuti tra 1 e 527040.",
+        "cron": "Inserisci un'espressione cron.",
+        "timezone": "Il nome del fuso orario è troppo lungo."
+      }
+    },
+    "runs": {
+      "filterLabel": "Stato",
+      "filterAria": "Filtra per stato",
+      "allStatuses": "Tutti gli stati",
+      "loading": "Caricamento delle esecuzioni…",
+      "loadFailed": "Impossibile caricare lo storico delle esecuzioni.",
+      "empty": "Nessuna esecuzione registrata.",
+      "loadMore": "Carica altre",
+      "showDetails": "Mostra dettagli",
+      "hideDetails": "Nascondi dettagli",
+      "dropped": "{{count}} valore/i non registrato/i",
+      "columns": {
+        "started": "Avvio",
+        "status": "Stato",
+        "trigger": "Origine",
+        "attempt": "Tentativo",
+        "duration": "Durata",
+        "details": "Dettagli"
+      },
+      "status": {
+        "running": "In esecuzione",
+        "succeeded": "Riuscita",
+        "failed": "Fallita",
+        "timed_out": "Scaduta",
+        "abandoned": "Abbandonata",
+        "interrupted": "Interrotta",
+        "skipped": "Saltata"
+      },
+      "trigger": {
+        "schedule": "Pianificazione",
+        "manual": "Manuale",
+        "retry": "Nuovo tentativo",
+        "catchup": "Recupero"
+      }
+    },
+    "toasts": {
+      "runRequested": "{{title}} verrà eseguito dalla prima replica libera.",
+      "reset": "{{title}} ripristinato ai valori dichiarati.",
+      "scheduleSaved": "Pianificazione di {{title}} salvata."
+    },
+    "errors": {
+      "generic": "Operazione non riuscita. Riprova."
     }
   },
   "adminObservability": {
@@ -2057,7 +2362,8 @@
         "toastUnlocked": "Account sbloccato con successo",
         "toastFailure": "Impossibile modificare lo stato dell'account",
         "errorGeneric": "Errore durante l'operazione"
-      }
+      },
+      "dataSubjectRequests": "Richieste dell'interessato (DSR)"
     }
   },
   "adminUsers": {
@@ -2075,16 +2381,13 @@
       "labelEmail": "Email",
       "labelPhone": "Telefono",
       "labelUsername": "Username",
-      "labelPin": "PIN",
       "labelRole": "Ruolo",
       "requiredMark": "*",
       "placeholderFullName": "es. Mario Rossi",
       "placeholderEmail": "mario.rossi@esempio.com",
       "placeholderPhone": "+39 333 1234567",
       "placeholderUsername": "mariorossi",
-      "placeholderPin": "12345",
       "helpUsername": "L'username verrà usato per l'accesso al sistema",
-      "helpPin": "Codice numerico di 5 cifre per l'accesso",
       "cancel": "Annulla",
       "submit": "Crea utente",
       "submitting": "Creazione…",
@@ -2220,12 +2523,13 @@
       "retention": "Conservazione",
       "auditEvents": "Eventi di audit",
       "policies": "Policy",
-      "changeRequests": "Richieste"
+      "changeRequests": "Richieste",
+      "subject": "Interessato"
     },
     "stats": {
       "pendingErasures": {
         "title": "Cancellazioni in attesa",
-        "subtitle": "In attesa di revisione",
+        "subtitle": "In attesa di revisione o di un nuovo tentativo",
         "badge": "Richiede attenzione"
       },
       "activeHolds": {
@@ -2249,6 +2553,8 @@
       "completed": "Completata",
       "executed": "Eseguita",
       "rejected": "Rifiutata",
+      "incomplete": "Incompleta",
+      "closed_partial": "Chiusa (parziale)",
       "active": "Attivo",
       "released": "Revocato",
       "success": "Riuscito",
@@ -2261,7 +2567,8 @@
         "reason": "Motivo",
         "status": "Stato",
         "requested": "Data richiesta",
-        "actions": "Azioni"
+        "actions": "Azioni",
+        "approvals": "Approvazioni"
       },
       "execute": "Esegui",
       "reject": "Rifiuta",
@@ -2269,9 +2576,115 @@
       "executeError": "Esecuzione non riuscita (o bloccata da un vincolo legale)",
       "rejectSuccess": "Richiesta rifiutata",
       "rejectError": "Rifiuto non riuscito",
-      "emptyMessage": "Nessuna richiesta di cancellazione in attesa.",
-      "emptyHint": "Le richieste di cancellazione degli interessati in attesa di revisione appariranno qui.",
-      "searchPlaceholder": "Cerca per soggetto o motivo"
+      "rejectTitle": "Rifiuta questa richiesta di cancellazione",
+      "rejectBody": "La richiesta viene chiusa senza cancellare nulla. Indica il motivo (viene conservato, con i dati personali mascherati).",
+      "close": "Chiudi",
+      "closeTitle": "Chiudi una cancellazione parziale",
+      "closeBody": "Questi produttori non sono più installati e non finiranno mai: {{keys}}. Chiudere registra la cancellazione come parziale; non si può annullare.",
+      "closeSuccess": "Richiesta di cancellazione chiusa come parziale",
+      "closeError": "Chiusura non riuscita",
+      "retry": "Riprova",
+      "executeIncomplete": "Cancellazione avviata: alcuni produttori non hanno ancora finito e verranno ritentati",
+      "progress": "{{done}} produttori su {{total}} completati",
+      "nextRetry": "Prossimo tentativo {{date}}",
+      "retriesExhausted": "Tentativi automatici esauriti",
+      "lastError": {
+        "legal_hold_active": "Bloccata da un blocco legale",
+        "run_failed": "Ultima esecuzione non riuscita",
+        "retention_minimum": "Bloccata dalla conservazione minima"
+      },
+      "busy": "È in corso un'altra esecuzione; riprova tra qualche minuto",
+      "source": {
+        "self_service": "Self-service",
+        "retention": "Conservazione",
+        "admin": "Amministratore"
+      },
+      "emptyMessage": "Nessuna richiesta di cancellazione aperta.",
+      "emptyHint": "Le richieste di cancellazione in attesa di revisione o di un nuovo tentativo appariranno qui.",
+      "searchPlaceholder": "Cerca per soggetto o motivo",
+      "approvalsNeeded": "Approvazioni {{have}}/{{need}}: servono altri approvatori prima di procedere",
+      "loadMore": "Carica altre",
+      "loadMoreError": "Impossibile caricare altre richieste",
+      "emptyFiltered": "Nessuna richiesta di cancellazione con questo stato.",
+      "filter": {
+        "label": "Filtro stato",
+        "open": "Aperte",
+        "completed": "Completate",
+        "rejected": "Rifiutate",
+        "closed_partial": "Chiuse (parziali)",
+        "all": "Tutte"
+      },
+      "mode": {
+        "hard_delete": "Cancellazione definitiva",
+        "anonymize": "Anonimizzazione"
+      },
+      "open": {
+        "button": "Nuova richiesta",
+        "title": "Apri una richiesta di cancellazione",
+        "subject": "userUuid del soggetto",
+        "mode": "Modalità",
+        "reason": "Motivo",
+        "required": "Obbligatorio",
+        "submit": "Apri richiesta",
+        "success": "Richiesta di cancellazione aperta",
+        "error": "Impossibile aprire la richiesta"
+      },
+      "approve": {
+        "button": "Approva",
+        "title": "Approva la cancellazione",
+        "note": "Nota",
+        "submit": "Approva",
+        "success": "Approvazione registrata",
+        "error": "Approvazione non riuscita"
+      },
+      "receipt": {
+        "open": "Ricevuta",
+        "title": "Ricevuta di cancellazione",
+        "download": "Scarica JSON",
+        "close": "Chiudi",
+        "completedAt": "Completata",
+        "totals": "Righe",
+        "totalsValue": "{{deleted}} eliminate, {{anonymized}} anonimizzate",
+        "producer": "Produttore",
+        "error": "Ricevuta non disponibile"
+      },
+      "errors": {
+        "erasure_approvals_missing": "Approvazioni insufficienti: {{have}} su {{need}}",
+        "erasure_self_approval": "Non puoi aprire, approvare o eseguire la cancellazione del tuo stesso account",
+        "erasure_already_approved": "Hai già approvato questa richiesta",
+        "erasure_mode_mismatch": "La modalità è diversa da quella già approvata",
+        "erasure_request_exists": "Esiste già una richiesta aperta per questo soggetto ({{requestId}})",
+        "erasure_request_busy": "Un'altra esecuzione è in corso; riprova tra qualche minuto",
+        "legal_hold_active": "Bloccata da un blocco legale",
+        "retention_minimum_not_met": "La cancellazione definitiva non è consentita prima del {{date}} ({{reasons}}); usa l'anonimizzazione",
+        "retention_check_unavailable": "Il controllo di conservazione non è disponibile; riprova più tardi",
+        "reason_required": "Motivo o nota devono avere da 1 a 500 caratteri",
+        "invalid_cursor": "Il cursore di pagina non è più valido; ricarica l'elenco",
+        "erasure_receipt_unavailable": "La ricevuta non è disponibile per questa richiesta",
+        "erasure_request_started": "La richiesta è già avviata e non può più essere rifiutata",
+        "erasure_request_not_closable": "Questa richiesta non può essere chiusa come parziale",
+        "erasure_close_note_required": "Serve una nota per chiudere la richiesta",
+        "legal_hold_expiry_past": "La data di scadenza deve essere futura",
+        "export_storage_unavailable": "L'archivio delle esportazioni non è disponibile; riprova più tardi",
+        "export_erasure_in_progress": "È in corso una cancellazione di questo interessato; le esportazioni sono bloccate",
+        "export_expired": "Questa esportazione è scaduta",
+        "export_not_found": "Esportazione non trovata",
+        "subject_not_found": "Nessun utente corrisponde a questo UUID del soggetto."
+      },
+      "retentionReason": {
+        "platform_minimum": "conservazione minima di piattaforma"
+      },
+      "outcome": {
+        "done": "Completato",
+        "pending": "In attesa",
+        "failed": "Non riuscito"
+      },
+      "execute_modal": {
+        "title": "Esegui la cancellazione",
+        "mode": "Modalità",
+        "locked": "Modalità fissata dalla richiesta",
+        "submit": "Esegui"
+      }
     },
     "holds": {
       "columns": {
@@ -2280,7 +2693,8 @@
         "case": "Caso",
         "status": "Stato",
         "placed": "Data applicazione",
-        "actions": "Azioni"
+        "actions": "Azioni",
+        "dates": "Revisione / scadenza"
       },
       "form": {
         "subjectLabel": "userUuid del soggetto",
@@ -2298,7 +2712,37 @@
       "releaseError": "Revoca non riuscita",
       "emptyMessage": "Nessun vincolo legale attivo.",
       "emptyHint": "Applica un vincolo qui sopra per bloccare la cancellazione di un soggetto in contenzioso.",
-      "searchPlaceholder": "Cerca per soggetto, motivo o caso"
+      "searchPlaceholder": "Cerca per soggetto, motivo o caso",
+      "reviewAt": "Data di revisione",
+      "expiresAt": "Data di scadenza",
+      "reviewDue": "Revisione dovuta",
+      "expired": "Scaduto",
+      "showReleased": "Mostra rilasciati",
+      "releaseModal": {
+        "title": "Rilascia il blocco legale",
+        "body": "Rilasciare il blocco consente di procedere con la cancellazione dell'interessato. Indica il motivo del rilascio."
+      },
+      "edit": {
+        "open": "Modifica",
+        "title": "Modifica il blocco legale",
+        "reviewAt": "Data di revisione",
+        "expiresAt": "Data di scadenza",
+        "clearReviewAt": "Rimuovi la data di revisione",
+        "clearExpiresAt": "Rimuovi la data di scadenza",
+        "expiryHint": "Il blocco viene rilasciato automaticamente in questa data.",
+        "submit": "Salva",
+        "success": "Blocco legale aggiornato",
+        "error": "Aggiornamento non riuscito"
+      },
+      "notes": {
+        "readOnly": "Questo blocco è terminato: non si possono più aggiungere note.",
+        "open": "Note ({{count}})",
+        "title": "Note del blocco",
+        "empty": "Nessuna nota.",
+        "label": "Aggiungi una nota",
+        "add": "Aggiungi nota",
+        "error": "Impossibile aggiungere la nota"
+      }
     },
     "retention": {
       "previewTitle": "Anteprima della pulizia di conservazione (simulazione)",
@@ -2599,6 +3043,60 @@
       "applied": "Policy del tenant aggiornata.",
       "sentForApproval": "Richiesta inviata per approvazione.",
       "error": "Non è stato possibile salvare l'assegnazione."
+    },
+    "subject": {
+      "userUuid": "userUuid dell'interessato",
+      "load": "Carica",
+      "emptyMessage": "Nessun interessato selezionato.",
+      "emptyHint": "Inserisci un UUID utente per vedere l'anteprima di una cancellazione, esportarne i dati o aprire una richiesta di cancellazione.",
+      "loadError": "Impossibile caricare l'anteprima",
+      "previewTitle": "Anteprima della cancellazione",
+      "hardDeleteAllowed": "Cancellazione definitiva consentita",
+      "hardDeleteBlocked": "Cancellazione definitiva bloccata",
+      "anonymizeAllowed": "Anonimizzazione consentita",
+      "anonymizeBlocked": "Anonimizzazione bloccata",
+      "holds": "Blocchi legali",
+      "noHolds": "nessuno",
+      "retention": "Conservazione",
+      "retentionUnavailable": "il controllo di conservazione non è disponibile",
+      "noRetention": "nessun periodo minimo di conservazione",
+      "retainUntil": "da conservare fino al {{date}} ({{reasons}})",
+      "openRequests": "Richieste di cancellazione aperte",
+      "producers": {
+        "title": "Dati personali per produttore",
+        "note": "I conteggi sono per produttore e possono sovrapporsi (alcuni produttori condividono le righe): non vengono sommati in un totale.",
+        "empty": "Nessun produttore segnalato.",
+        "key": "Produttore",
+        "rows": "Righe",
+        "collections": "Collezioni",
+        "notCountable": "non conteggiabile",
+        "search": "Cerca produttori"
+      },
+      "exportJson": "Esporta JSON",
+      "exportCsv": "Esporta CSV",
+      "openErasure": "Apri richiesta di cancellazione",
+      "exportModal": {
+        "title": "Esporta i dati dell'interessato ({{format}})",
+        "body": "L'esportazione resta disponibile per un tempo limitato e si scarica dall'elenco sotto. Indica il motivo.",
+        "submit": "Crea esportazione"
+      },
+      "exportSuccess": "Esportazione creata",
+      "exportError": "Impossibile creare l'esportazione",
+      "downloadError": "Impossibile scaricare l'esportazione",
+      "exports": {
+        "title": "Esportazioni",
+        "empty": "Nessuna esportazione per questo interessato.",
+        "search": "Cerca esportazioni",
+        "format": "Formato",
+        "reason": "Motivo",
+        "created": "Creata",
+        "expires": "Scade",
+        "expired": "Scaduta",
+        "download": "Scarica",
+        "actions": "Azioni"
+      },
+      "invalidUuid": "Inserisci un UUID utente valido",
+      "holdExpired": "Non più bloccante (scaduto)"
     }
   },
   "adminComplianceSoc2": {
@@ -2618,6 +3116,346 @@
       "kms_keys_active": "Chiavi KMS attive",
       "kms_keys_shredded": "Chiavi KMS distrutte",
       "audit_rows_24h": "Righe di audit (24h)"
+    }
+  },
+  "adminLlm": {
+    "pageTitle": "Modelli linguistici",
+    "pageSubtitle": "Le credenziali dei provider, i modelli che le usano e chi nell'organizzazione può usare ciascuno.",
+    "noAccess": "Non hai accesso ai modelli linguistici di questa organizzazione.",
+    "loadError": "Non è stato possibile caricare l'elenco.",
+    "tabs": {
+      "models": "Modelli",
+      "credentials": "Credenziali",
+      "accounts": "Account",
+      "usage": "Utilizzo",
+      "budget": "Budget"
+    },
+    "actions": {
+      "cancel": "Annulla",
+      "save": "Salva",
+      "delete": "Elimina",
+      "retry": "Riprova"
+    },
+    "columns": {
+      "actions": "Azioni"
+    },
+    "status": {
+      "active": "Attivo",
+      "disabled": "Disattivato"
+    },
+    "providers": {
+      "openai": "OpenAI",
+      "anthropic": "Anthropic",
+      "gemini": "Google Gemini",
+      "ollama": "Ollama",
+      "openai_compatible": "Compatibile OpenAI",
+      "mock": "Mock (non per produzione)"
+    },
+    "credentialKind": {
+      "org": "Chiave API dell'organizzazione",
+      "user_account": "Account ChatGPT dell'utente"
+    },
+    "access": {
+      "granted": "Solo utenti autorizzati",
+      "everyone": "Tutta l'organizzazione"
+    },
+    "capabilities": {
+      "chat": "Chat",
+      "streaming": "Streaming",
+      "tools": "Strumenti",
+      "structuredOutput": "Output strutturato",
+      "embeddings": "Embedding"
+    },
+    "effort": {
+      "default": "Predefinito del provider",
+      "low": "Basso",
+      "medium": "Medio",
+      "high": "Alto"
+    },
+    "validation": {
+      "required": "Campo obbligatorio.",
+      "name": "Usa da 1 a 64 lettere, cifre, spazi, punti, trattini bassi o trattini, iniziando con una lettera o una cifra.",
+      "tooLong": "Il valore è troppo lungo.",
+      "url": "Inserisci un URL http o https, ad esempio http://ollama:11434.",
+      "modelId": "Usa da 1 a 128 lettere, cifre, punti, trattini, trattini bassi, due punti o barre.",
+      "purpose": "Usa una chiave minuscola come default o summarize.",
+      "number": "Inserisci un numero.",
+      "integer": "Inserisci un numero intero.",
+      "min": "Il minimo è {{min}}.",
+      "max": "Il massimo è {{max}}."
+    },
+    "errors": {
+      "generic": "L'operazione non è riuscita. Riprova."
+    },
+    "credentials": {
+      "add": "Aggiungi credenziale",
+      "edit": "Modifica",
+      "rotate": "Ruota chiave",
+      "delete": "Elimina",
+      "enable": "Attiva",
+      "disable": "Disattiva",
+      "enabled": "Credenziale attivata",
+      "disabled": "Credenziale disattivata",
+      "search": "Cerca credenziali",
+      "noSecret": "Nessuna chiave",
+      "secretTail": "•••• {{last4}}",
+      "noPermission": "Serve il permesso di gestire le credenziali LLM.",
+      "emptyTitle": "Nessuna credenziale",
+      "emptyHint": "Aggiungi la chiave API di un provider, poi configura un modello che la usa.",
+      "deleteTitle": "Elimina credenziale",
+      "deleteConfirm": "Eliminare la credenziale «{{name}}»? I modelli non potranno più usarla.",
+      "deleteSuccess": "Credenziale eliminata",
+      "saveSuccess": "Credenziale salvata",
+      "secretHint": "Conservata cifrata e mai più mostrata. Sono visibili solo gli ultimi quattro caratteri.",
+      "fixedEndpoint": "Questo provider usa sempre {{url}}.",
+      "hostedDisabledWarning": "I provider in cloud sono disattivati per questa installazione. Attiva «Allow hosted providers» nelle impostazioni del modulo llm prima di usare questa credenziale.",
+      "editorTitle": {
+        "create": "Nuova credenziale",
+        "edit": "Modifica «{{name}}»",
+        "rotate": "Ruota la chiave API di «{{name}}»"
+      },
+      "fields": {
+        "name": "Nome",
+        "provider": "Provider",
+        "baseUrl": "URL di base",
+        "baseUrlPlaceholder": "http://ollama:11434",
+        "secret": "Chiave API"
+      },
+      "columns": {
+        "name": "Nome",
+        "provider": "Provider",
+        "secret": "Chiave",
+        "status": "Stato",
+        "updated": "Aggiornata",
+        "lastTest": "Ultima prova"
+      },
+      "test": "Prova connessione",
+      "testOk": "La credenziale funziona.",
+      "testFailed": "La prova non è riuscita: {{reason}}",
+      "neverTested": "Mai provata",
+      "testStatus": {
+        "ok": "OK",
+        "error": "Fallita"
+      }
+    },
+    "models": {
+      "add": "Aggiungi modello",
+      "edit": "Modifica",
+      "delete": "Elimina",
+      "grants": "Chi può usarlo",
+      "grantsEveryone": "Tutta l'organizzazione può usare questo modello",
+      "search": "Cerca modelli",
+      "emptyTitle": "Nessun modello configurato",
+      "emptyHint": "Definisci un modello, le sue capacità e chi può usarlo.",
+      "needCredential": "Nessuna chiave API dell'organizzazione: aggiungine una in Credenziali, oppure aggiungi un modello addebitato al piano ChatGPT di ciascun utente.",
+      "noPermission": "Serve il permesso di gestire i modelli LLM.",
+      "deleteTitle": "Elimina modello",
+      "deleteConfirm": "Eliminare il modello «{{name}}» e le sue autorizzazioni?",
+      "deleteSuccess": "Modello eliminato",
+      "saveSuccess": "Modello salvato",
+      "grantsSaved": "Elenco degli accessi salvato",
+      "grantsNotSaved": "Il modello è stato salvato, ma il suo accesso e le sue autorizzazioni no. Usa «Chi può usarlo» per riprovare.",
+      "grantsNotSavedReason": "Il modello è stato salvato, ma il suo accesso e le sue autorizzazioni no: {{reason}} Usa «Chi può usarlo» per riprovare.",
+      "addTitle": "Nuovo modello",
+      "editTitle": "Modifica «{{name}}»",
+      "grantsTitle": "Chi può usare «{{name}}»",
+      "userAccountHint": "Questo modello è addebitato al piano ChatGPT di ciascun utente. Embedding, temperatura e token massimi non sono disponibili con questa modalità di addebito, e il modello deve esistere nel catalogo dell'account collegato.",
+      "purposeWithPriority": "{{purpose}} ({{priority}})",
+      "fields": {
+        "name": "Nome",
+        "provider": "Provider",
+        "credentialKind": "Addebitato a",
+        "credential": "Credenziale",
+        "credentialPlaceholder": "Scegli una credenziale",
+        "credentialDisabled": "{{name}} (disattivata)",
+        "noCredentialForProvider": "Nessuna chiave API attiva per questo provider. Aggiungine una in Credenziali, oppure addebita un modello OpenAI all'account ChatGPT di ciascun utente.",
+        "modelId": "ID del modello",
+        "modelIdPlaceholder": "gpt-5.6-terra",
+        "modelIdHint": "Lo slug del modello presso il provider, ad esempio gpt-5.6-terra, claude-opus-5-5, gemini-2.5-pro, llama3.1.",
+        "capabilities": "Capacità",
+        "dimensions": "Dimensioni del vettore",
+        "temperature": "Temperatura",
+        "maxOutputTokens": "Token massimi in uscita",
+        "effort": "Livello di ragionamento",
+        "purposes": "Scopi e priorità",
+        "purposeLabel": "Scopo {{index}}",
+        "priorityLabel": "Priorità dello scopo {{index}}",
+        "purposePlaceholder": "default",
+        "removePurpose": "Rimuovi scopo",
+        "addPurpose": "Aggiungi scopo",
+        "purposesHint": "Gli addon chiedono uno scopo; vince la priorità più bassa. Tieni un modello su «default».",
+        "purposesHelp": "Lo scopo è il compito che chi chiama richiede, per esempio assistant o summarize. A ogni richiesta il gateway usa i modelli attivi che hanno quello scopo e supportano ciò che serve (per esempio i tool), partendo dal numero di priorità più basso; i successivi fanno da riserva, pagati allo stesso modo. Se nessun modello ha lo scopo, si usa default: tieni sempre un modello su default. Lo scopo non dà accesso: chi può usare il modello lo decidono accesso e grant.",
+        "access": "Accesso",
+        "grantees": "Utenti autorizzati",
+        "granteesPlaceholder": "Scegli i membri di questa organizzazione",
+        "granteesHint": "Gestire un modello non dà il diritto di usarlo.",
+        "granteesNoPermission": "Serve il permesso di gestire le autorizzazioni LLM per cambiare questo elenco.",
+        "noMembers": "Nessun membro corrispondente",
+        "membersError": "Non è stato possibile caricare i membri di questa organizzazione.",
+        "formerMember": "{{id}} (non più membro)",
+        "membersForbidden": "Per elencare i membri di questa organizzazione serve l'accesso di amministrazione dei tenant, quindi l'elenco delle autorizzazioni non si può modificare qui.",
+        "accessEveryoneHint": "Ogni membro dell'organizzazione può usare questo modello. Gli utenti autorizzati restano salvati e tornano a valere se reimposti l'accesso."
+      },
+      "columns": {
+        "name": "Nome",
+        "model": "Modello",
+        "billing": "Addebitato a",
+        "purposes": "Scopi",
+        "access": "Autorizzati",
+        "status": "Stato"
+      },
+      "enable": "Attiva",
+      "disable": "Disattiva",
+      "enabled": "Modello attivato",
+      "disabled": "Modello disattivato",
+      "discover": "Recupera dal provider",
+      "discoverFound_one": "{{count}} modello trovato: scegline uno o scrivi qualsiasi slug.",
+      "discoverFound_other": "{{count}} modelli trovati: scegline uno o scrivi qualsiasi slug.",
+      "discoverNone": "Il provider non ha elencato alcun modello.",
+      "discoverNeedCredential": "Scegli prima una credenziale attiva.",
+      "discoverNoPermission": "Per recuperare l'elenco dei modelli serve il permesso di gestire le credenziali LLM."
+    },
+    "usage": {
+      "stats": {
+        "requests": {
+          "title": "Richieste del mese",
+          "subtitle": "Mese UTC {{period}}"
+        },
+        "consumed": {
+          "title": "Token consumati",
+          "subtitle": "Chiavi dell'organizzazione {{org}} · account utente {{user}}"
+        },
+        "reserved": {
+          "title": "Token prenotati",
+          "subtitle": "Trattenuti dalle chiamate ancora in corso"
+        },
+        "budget": {
+          "title": "Budget usato",
+          "none": "Nessun budget",
+          "unlimited": "Nessun limite mensile impostato",
+          "exhausted": "Esaurito",
+          "subtitle": "{{consumed}} consumati · {{reserved}} prenotati · limite {{limit}}"
+        }
+      },
+      "admissionNote": "Il limite è un controllo di ammissione: una chiamata viene ammessa prenotandone la stima, quindi il consumo reale può superare la prenotazione e, per breve tempo, il limite.",
+      "period": "Periodo",
+      "periods": {
+        "30d": "Ultimi 30 giorni",
+        "90d": "Ultimi 90 giorni",
+        "month": "Questo mese (UTC)"
+      },
+      "groupByLabel": "Raggruppa per",
+      "groupBy": {
+        "model": "Modello",
+        "user": "Utente",
+        "caller": "Chiamante"
+      },
+      "noKey": {
+        "model": "Nessun modello",
+        "user": "Nessun utente (chiamata di sistema)",
+        "caller": "Nessun chiamante"
+      },
+      "unknownModel": "{{id}} (modello eliminato)",
+      "columns": {
+        "requests": "Richieste",
+        "inputTokens": "Token in ingresso",
+        "outputTokens": "Token in uscita",
+        "total": "Token totali"
+      },
+      "series": {
+        "input": "Token in ingresso",
+        "output": "Token in uscita"
+      },
+      "chartTitle": "Token in ingresso e in uscita",
+      "search": "Cerca nell'utilizzo",
+      "emptyTitle": "Nessun utilizzo in questo periodo",
+      "emptyHint": "Le chiamate compaiono qui appena un modello ha risposto.",
+      "modelNamesError": "Impossibile caricare i nomi dei modelli: le righe mostrano gli ID dei modelli."
+    },
+    "budget": {
+      "semantics": "Il limite conta i token in ingresso e in uscita di tutti i modelli, sulle chiavi dell'organizzazione e sugli account degli utenti, per mese solare UTC. Ogni chiamata prenota la propria stima prima di partire e alla fine le viene addebitato il consumo reale.",
+      "none": "Questa organizzazione non ha un budget, quindi l'utilizzo LLM è illimitato. Salva un limite per crearne uno.",
+      "lastUpdated": "Ultima modifica il {{date}} da {{user}}.",
+      "saveSuccess": "Budget salvato",
+      "noPermission": "Per modificarlo serve il permesso di gestire il budget LLM.",
+      "fields": {
+        "limit": "Limite mensile di token",
+        "limitHint": "Token in ingresso più token in uscita per mese UTC.",
+        "warnPct": "Soglia di avviso (%)",
+        "warnPctHint": "I destinatari vengono avvisati quando il consumo raggiunge questa quota del limite. 0 disattiva l'avviso.",
+        "action": "Quando una chiamata non rientra",
+        "recipients": "Avvisa anche",
+        "recipientsPlaceholder": "Scegli membri di questa organizzazione",
+        "recipientsHint": "Proprietari e amministratori dell'organizzazione vengono sempre avvisati.",
+        "noMembers": "Nessun membro corrispondente",
+        "membersError": "Impossibile caricare i membri di questa organizzazione.",
+        "membersForbidden": "Per elencare i membri di questa organizzazione serve l'accesso di amministrazione tenant, quindi qui non si possono modificare i destinatari aggiuntivi.",
+        "formerMember": "{{id}} (non più membro)"
+      },
+      "actions": {
+        "block": "Blocca la chiamata",
+        "warn_only": "Avvisa soltanto"
+      },
+      "actionHints": {
+        "block": "Una chiamata che non rientra nel saldo residuo viene rifiutata con «budget superato».",
+        "warn_only": "Ogni chiamata viene ammessa, anche oltre il limite; i destinatari vengono solo avvisati."
+      },
+      "validation": {
+        "maxRecipients": "Al massimo {{max}} destinatari aggiuntivi."
+      }
+    },
+    "prompt": {
+      "action": "Prova un prompt",
+      "title": "Prova «{{name}}»",
+      "field": "Prompt",
+      "hint": "Inviato una sola volta come unico messaggio utente e non salvato da nessuna parte. Le autorizzazioni sono ignorate; la chiamata conta sul budget.",
+      "run": "Esegui",
+      "running": "In esecuzione…",
+      "close": "Chiudi",
+      "answer": "Risposta",
+      "empty": "Il modello non ha restituito testo.",
+      "answeredBy": "Ha risposto {{name}} ({{modelId}}).",
+      "fallback": "Ha risposto un modello di riserva, non {{name}}: il modello scelto ha fallito.",
+      "usage": "{{input}} token in ingresso · {{output}} in uscita",
+      "finishReason": "Motivo di chiusura: {{reason}}",
+      "truncated": "La risposta è stata troncata a 64 KiB.",
+      "tooLong": "Usa al massimo {{max}} caratteri.",
+      "disabledModel": "Attiva il modello per provarlo."
+    },
+    "accounts": {
+      "intro": "Gli account ChatGPT che i membri dell'organizzazione hanno collegato con Accedi con ChatGPT. I token non lasciano mai il server; questo elenco non ne mostra.",
+      "mode": "Accedi con ChatGPT: {{mode}}",
+      "modes": {
+        "disabled": "disattivato",
+        "loopback_local": "rientro automatico (installazione locale)",
+        "hosted_paste": "flusso con incolla"
+      },
+      "disabledHint": "I membri non possono collegare account ChatGPT finché non viene attivato.",
+      "openSettings": "Apri le impostazioni del modulo llm",
+      "emptyTitle": "Nessun membro ha collegato un account ChatGPT.",
+      "emptyHint": "I membri collegano i propri account dalle impostazioni di sicurezza.",
+      "search": "Cerca account",
+      "planGranted": "Concesso",
+      "planNotGranted": "Non concesso",
+      "neverUsed": "Mai",
+      "columns": {
+        "user": "Membro",
+        "account": "Account",
+        "status": "Stato",
+        "planUsage": "Uso del piano",
+        "lastUsed": "Ultimo uso"
+      },
+      "status": {
+        "active": "Attivo",
+        "plan_disabled": "Uso del piano non concesso",
+        "needs_reauth": "Accesso richiesto",
+        "revoked": "Revocato"
+      },
+      "forceUnlink": "Scollega forzatamente",
+      "forceUnlinkTitle": "Scollegare forzatamente {{label}}?",
+      "forceUnlinkBody": "{{label}} di {{user}} viene revocato presso OpenAI e rimosso. I modelli addebitati al piano di quel membro smettono di funzionare finché non collega di nuovo un account.",
+      "forceUnlinkSuccess": "L'account è stato scollegato.",
+      "noPermission": "Lo scollegamento forzato richiede il permesso di gestire gli account collegati."
     }
   },
   "adminModules": {
@@ -2774,7 +3612,14 @@
         "goToError": "Vai a {{group}}",
         "reloadReview": "Ricarica e rivedi"
       },
+      "busyLeave": {
+        "title": "Salvataggio in corso",
+        "body": "Una modifica è ancora in fase di salvataggio. Uscendo ora potresti non vederne l'esito.",
+        "stay": "Resta",
+        "leave": "Esci comunque"
+      },
       "rail": {
+        "extensions": "Estensioni",
         "overview": "Panoramica",
         "configuration": "Configurazione",
         "module": "Modulo",
@@ -3354,5 +4199,321 @@
     "errors": {
       "generic": "Operazione non riuscita."
     }
+  },
+  "pinMethod": {
+    "title": "Accesso con PIN",
+    "cardTitle": "Accesso con PIN",
+    "badgeSet": "Impostato",
+    "badgeNotSet": "Non impostato",
+    "badgeLocked": "Bloccato",
+    "updatedAt": "Ultima modifica {{date}}.",
+    "notSetAdmin": "L'utente non ha un PIN. Impostalo per permettergli di accedere da un dispositivo di campo con username e PIN.",
+    "notSetSelf": "Non hai un PIN. Impostalo per accedere da un dispositivo di campo con il tuo username e il PIN.",
+    "lockedUntil": "Bloccato per troppi tentativi errati fino a {{when}}.",
+    "weakNote": "Il PIN è un metodo di accesso debole: non vale mai come autenticazione a due fattori, e una sessione aperta con il PIN non può cambiare le credenziali.",
+    "setButton": "Imposta PIN",
+    "replaceButton": "Cambia PIN",
+    "codeButton": "Codice di attivazione dispositivo",
+    "removeButton": "Rimuovi PIN",
+    "cancel": "Annulla",
+    "unavailable": "L'accesso con PIN è disattivato su questa superficie. Un PIN si può preparare ora e funzionerà quando un amministratore attiverà il metodo.",
+    "loadError": "Impossibile caricare lo stato del PIN.",
+    "retry": "Riprova",
+    "toastSet": "PIN impostato. Le sessioni aperte con il PIN sono state chiuse.",
+    "toastReplaced": "PIN cambiato. Le sessioni aperte con il PIN sono state chiuse.",
+    "toastRemoved": "PIN e dispositivi attivati rimossi.",
+    "toastDeviceRevoked": "Dispositivo revocato. Le sue sessioni con PIN sono state chiuse.",
+    "clientModalTitle": "Accesso con PIN — {{email}}",
+    "setModal": {
+      "titleSet": "Imposta PIN",
+      "titleReplace": "Cambia PIN",
+      "intro": "Scegli {{count}} cifre. Evita cifre ripetute e sequenze come 12345.",
+      "labelPin": "Nuovo PIN",
+      "labelConfirm": "Ripeti il PIN",
+      "replaceNote": "Cambiare il PIN chiude tutte le sessioni aperte con quello vecchio. I dispositivi attivati restano attivi.",
+      "submit": "Salva PIN",
+      "errorRequired": "Inserisci il PIN.",
+      "errorDigits": "Usa solo cifre.",
+      "errorLength": "Il PIN deve avere esattamente {{count}} cifre.",
+      "errorMismatch": "I due PIN non coincidono."
+    },
+    "codeModal": {
+      "title": "Codice di attivazione dispositivo",
+      "intro": "Inserisci questo codice nell'app sul dispositivo, insieme allo username. Vale una sola volta e non verrà mostrato di nuovo.",
+      "expires": "Valido fino a {{when}}.",
+      "done": "Fatto"
+    },
+    "removeModal": {
+      "title": "Rimuovere il PIN?",
+      "body": "Il PIN e tutti i dispositivi attivati vengono rimossi e le sessioni aperte con il PIN vengono chiuse. Gli altri metodi di accesso non cambiano.",
+      "submit": "Rimuovi"
+    },
+    "devices": {
+      "heading": "Dispositivi attivati",
+      "introRequired": "Il PIN funziona solo su questi dispositivi. Attiva un dispositivo con un codice monouso.",
+      "introOptional": "Il legame al dispositivo è disattivato su questa superficie: il PIN funziona su qualsiasi dispositivo. I dispositivi attivati restano elencati.",
+      "empty": "Nessun dispositivo attivato.",
+      "colDevice": "Dispositivo",
+      "colPlatform": "Piattaforma",
+      "colVia": "Attivato da",
+      "colEnrolled": "Attivato il",
+      "colLastUsed": "Ultimo uso",
+      "revoke": "Revoca",
+      "viaAdmin": "Amministratore",
+      "viaSelf": "Utente"
+    },
+    "errors": {
+      "auth_pin_invalid": "Il PIN deve avere esattamente il numero di cifre configurato.",
+      "auth_pin_too_weak": "Scegli un PIN che non sia una cifra ripetuta o una sequenza.",
+      "auth_pin_username_required": "L'utente deve prima avere uno username: è l'identificativo dell'accesso con PIN.",
+      "auth_pin_username_not_unique": "Un altro utente ha lo stesso username. Assegna prima a questo utente uno username univoco.",
+      "auth_pin_not_allowed": "Questo utente non può avere un PIN: ruoli privilegiati, account di servizio e utenti senza il permesso di accesso con PIN usano metodi più forti.",
+      "auth_pin_not_set": "Non c'è ancora un PIN.",
+      "auth_pin_session_forbidden": "Hai effettuato l'accesso con il PIN. Accedi con la password o un altro metodo forte per gestire il PIN.",
+      "auth_pin_device_not_found": "Il dispositivo non è più attivato.",
+      "user_target_tier_forbidden": "Non puoi cambiare il PIN di un utente con un ruolo superiore al tuo.",
+      "unknown": "L'operazione sul PIN non è riuscita."
+    }
+  },
+  "adminRetrieval": {
+    "pageTitle": "Retrieval",
+    "pageSubtitle": "Indici di ricerca semantica: stato di motore e inferenza, corpora, avanzamento dell'indicizzazione e log di ricerca auditato.",
+    "tabs": {
+      "corpora": "Corpora",
+      "indexing": "Indicizzazione",
+      "searchLog": "Log di ricerca"
+    },
+    "noAccess": "Non hai accesso a nessuna vista di retrieval.",
+    "errors": {
+      "generic": "L'operazione non è riuscita."
+    },
+    "engine": {
+      "title": "Motore vettoriale",
+      "ok": "Raggiungibile",
+      "not_configured": "Non configurato",
+      "unavailable": "Non disponibile"
+    },
+    "inference": {
+      "title": "Endpoint di inferenza",
+      "status": {
+        "ok": "In salute",
+        "not_configured": "Non configurato",
+        "unavailable": "Non disponibile",
+        "mismatch": "Profilo non coincidente",
+        "wrong_kind": "Tipo di endpoint errato"
+      },
+      "healthy": "{{ok}} su {{total}} in salute",
+      "none": "Nessun endpoint di inferenza in uso",
+      "columns": {
+        "endpoint": "Endpoint",
+        "kind": "Usato per",
+        "status": "Stato",
+        "profile": "Profilo",
+        "boundary": "Confine"
+      },
+      "kinds": {
+        "embed": "Embedding",
+        "rerank": "Rerank"
+      },
+      "boundaries": {
+        "local": "Locale",
+        "hosted": "Ospitato"
+      }
+    },
+    "corpora": {
+      "title": "Corpora",
+      "states": {
+        "uninitialized": "Non costruito",
+        "active": "Attivo",
+        "profile_changed": "Profilo cambiato",
+        "error": "Errore"
+      },
+      "reasons": {
+        "locality": "Violazione di località",
+        "endpoint_unknown": "Endpoint sconosciuto",
+        "endpoint_kind": "Tipo di endpoint errato",
+        "unknown_state": "Stato sconosciuto"
+      },
+      "notConfigured": "Il motore vettoriale non è configurato in questa installazione. I corpora sono elencati, ma nulla viene indicizzato né è ricercabile finché non lo è.",
+      "empty": "Nessun corpus registrato o memorizzato.",
+      "search": "Cerca corpora…",
+      "notRegistered": "Non registrato",
+      "ownerRunning": "In esecuzione",
+      "ownerStopped": "Non in esecuzione",
+      "outboxOldest": "il più vecchio {{date}}",
+      "tenants": "{{done}} completate · {{building}} in costruzione",
+      "columns": {
+        "name": "Corpus",
+        "owner": "Proprietario",
+        "state": "Stato",
+        "generation": "Generazione",
+        "outbox": "Aggiornamenti in attesa",
+        "tenants": "Organizzazioni",
+        "actions": "Azioni"
+      },
+      "dropTitle": "Elimina corpus",
+      "dropConfirm": "Eliminare lo stato memorizzato di {{name}}? Le generazioni {{generations}} e le loro collezioni vengono eliminate, insieme agli aggiornamenti in attesa e all'avanzamento della costruzione di ogni organizzazione. Il log di ricerca viene conservato. Eliminalo solo quando nessun server in esecuzione registra più questo corpus: durante un rilascio graduale, un server che lo registra ancora lo ricostruisce da zero.",
+      "dropSuccess": "Corpus {{name}} eliminato."
+    },
+    "searchLog": {
+      "title": "Log di ricerca",
+      "outcome": {
+        "ok": "OK",
+        "degraded": "Degradato",
+        "error": "Errore"
+      },
+      "errorKind": {
+        "not_configured": "Non configurato",
+        "unavailable": "Non disponibile",
+        "principals": "Ricerca dei principal fallita",
+        "visibility_check": "Controllo di visibilità fallito",
+        "canceled": "Annullata"
+      },
+      "audited": "Ogni consultazione di questo log viene registrata nel registro di audit. Le ricerche degli ultimi secondi potrebbero non essere ancora elencate.",
+      "empty": "Nessuna ricerca corrisponde a questi filtri.",
+      "stepUpNeeded": "La consultazione del log di ricerca richiede una nuova verifica.",
+      "durationMs": "{{ms}} ms",
+      "filters": {
+        "userUuid": "UUID utente",
+        "since": "Dal",
+        "until": "Al",
+        "datePlaceholder": "aaaa-mm-gg",
+        "invalidUuid": "Inserisci un UUID valido.",
+        "untilBeforeSince": "La data di fine precede quella di inizio."
+      },
+      "columns": {
+        "createdAt": "Ora",
+        "user": "Utente",
+        "corpus": "Corpus",
+        "query": "Query",
+        "returned": "Restituiti",
+        "subjects": "Soggetti",
+        "duration": "Durata",
+        "outcome": "Esito",
+        "details": "Dettagli"
+      },
+      "details": {
+        "show": "Mostra dettagli",
+        "hide": "Nascondi dettagli",
+        "showAria": "Mostra i dettagli della ricerca del {{date}}",
+        "hideAria": "Nascondi i dettagli della ricerca del {{date}}",
+        "mode": "Modalità",
+        "principals": "Principal",
+        "returned": "Fonti restituite",
+        "subjects": "Soggetti",
+        "filter": "Filtro",
+        "none": "Nessuno"
+      }
+    },
+    "loadError": "Non è stato possibile caricare i dati di retrieval.",
+    "actions": {
+      "retry": "Riprova",
+      "diagnose": "Diagnostica",
+      "diagnoseAria": "Diagnostica {{name}}",
+      "drop": "Elimina",
+      "dropAria": "Elimina {{name}}",
+      "close": "Chiudi",
+      "run": "Esegui ricerca",
+      "running": "Ricerca in corso…",
+      "apply": "Applica filtri",
+      "verify": "Verifica e carica"
+    },
+    "erasures": {
+      "pending": "Cancellazioni in attesa",
+      "fencing": "Cancellazioni in recinzione"
+    },
+    "diagnostics": {
+      "title": "Diagnostica {{name}}",
+      "hint": "Esegue una ricerca reale a tuo nome, con i tuoi principal. Viene registrata nel log di ricerca e nel registro di audit.",
+      "query": "Query",
+      "mode": "Modalità",
+      "limit": "Risultati",
+      "modes": {
+        "hybrid": "Ibrida",
+        "dense": "Densa",
+        "keyword": "Parole chiave"
+      },
+      "validation": {
+        "queryRequired": "Inserisci una query.",
+        "queryTooLong": "Al massimo {{max}} caratteri.",
+        "limitRange": "Tra 1 e 100."
+      },
+      "result": "Risultato",
+      "pinned": "Collezione {{collection}} · profilo di embedding {{profile}}",
+      "principals": "Principal applicati",
+      "degraded": "Ricerca degradata: una parte della pipeline non era disponibile, quindi questo ordinamento può differire da quello di una ricerca in salute.",
+      "noHits": "Nessuna fonte a te visibile corrisponde a questa query.",
+      "columns": {
+        "rank": "#",
+        "sourceId": "Fonte",
+        "chunkId": "Frammento",
+        "score": "Punteggio",
+        "fused": "Fuso",
+        "dense": "Denso",
+        "keyword": "Parole chiave",
+        "rerank": "Rerank",
+        "snippet": "Estratto"
+      }
+    },
+    "indexing": {
+      "empty": "Nessun corpus registrato.",
+      "search": "Cerca corpora…",
+      "erasuresPending": "Cancellazioni in attesa",
+      "initialBuild": {
+        "pending": "In attesa",
+        "building": "In costruzione",
+        "done": "Completata"
+      },
+      "columns": {
+        "corpus": "Corpus",
+        "owner": "Proprietario",
+        "state": "Stato del corpus",
+        "initialBuild": "Costruzione iniziale",
+        "points": "Punti indicizzati",
+        "outbox": "Aggiornamenti in attesa"
+      }
+    }
+  },
+  "adminDeliveryLog": {
+    "title": "Registro delle consegne",
+    "subtitle": "Le email che la piattaforma ha provato a inviare negli ultimi 90 giorni, con l'esito. Una riga «soppressa» non è mai partita.",
+    "col": {
+      "date": "Data",
+      "type": "Tipo",
+      "category": "Categoria",
+      "recipient": "Destinatario",
+      "status": "Stato",
+      "reason": "Motivo",
+      "sender": "Mittente"
+    },
+    "status": {
+      "sent": "Inviata",
+      "suppressed": "Soppressa",
+      "failed": "Non riuscita",
+      "queued": "In coda"
+    },
+    "type": {
+      "transactional": "Transazionale",
+      "marketing": "Marketing"
+    },
+    "reason": {
+      "addressInvalid": "Indirizzo segnato non valido",
+      "marketingOptout": "Disiscritto dal marketing",
+      "categoryPreference": "Preferenza dell'utente per questa categoria"
+    },
+    "filter": {
+      "address": "Cerca per indirizzo",
+      "status": "Stato",
+      "anyStatus": "Tutti gli stati",
+      "type": "Tipo",
+      "anyType": "Tutti i tipi",
+      "category": "Categoria (es. auth.reset_password)"
+    },
+    "refresh": "Aggiorna",
+    "loading": "Caricamento del registro…",
+    "loadError": "Non è stato possibile caricare il registro delle consegne.",
+    "retry": "Riprova",
+    "empty": "Nessuna email negli ultimi 90 giorni.",
+    "noResults": "Nessuna riga corrisponde ai filtri."
   }
 }

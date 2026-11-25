@@ -130,20 +130,114 @@ func TestUpdateUser_MissingCallerRowIsInternal(t *testing.T) {
 	}
 }
 
-// A patch that assigns no role never resolves a caller role at all — the
-// read is on the guarded path only. The store has no row for the actor,
-// so an unconditional caller lookup would surface as a 500 here.
-func TestUpdateUser_ProfileOnlyPatchDoesNotResolveTheCallerRole(t *testing.T) {
+// A patch that assigns no role still resolves the caller's role, from the
+// database: the target-tier guard runs on every update, so a manager
+// cannot rename an administrator. The claim says super_admin; the row says
+// manager, and the row wins.
+func TestUpdateUser_ProfileOnlyPatchRunsTheTargetTierGuard(t *testing.T) {
+	t.Parallel()
+	users := newUserStore(nil)
+	users.seed("actor-1", "manager")
+	users.seed("admin-1", "administrator")
+	users.seed("op-1", "operator")
+	h := NewUserHandler(users.svc)
+
+	rename := func(target string) error {
+		_, err := h.UpdateUser(claimCtx("actor-1", "super_admin"), &UpdateUserRequest{
+			ID:   target,
+			Body: iface.UpdateUserInput{FullName: "Renamed"},
+		})
+		return err
+	}
+	err := rename("admin-1")
+	assertStatus(t, err, http.StatusForbidden)
+	assertErrCode(t, err, errcode.UserTargetTierForbidden)
+	if n := users.updateCalls(); n != 0 {
+		t.Errorf("the guard must refuse before the write; %d update calls", n)
+	}
+	if err := rename("op-1"); err != nil {
+		t.Fatalf("a manager renaming an operator must pass: %v", err)
+	}
+	// Equal tier passes too: an administrator edits another administrator.
+	users.seed("actor-1", "administrator")
+	if err := rename("admin-1"); err != nil {
+		t.Fatalf("equal tier must pass: %v", err)
+	}
+}
+
+// A profile-only patch by a caller with no row is the same fail-closed
+// 500 as a role patch: the guard cannot run without the caller's tier.
+func TestUpdateUser_ProfileOnlyPatchWithAMissingCallerRowIsInternal(t *testing.T) {
 	t.Parallel()
 	users := newUserStore(nil)
 	users.seed("target-1", "operator") // no actor row on purpose
 	h := NewUserHandler(users.svc)
 
-	if _, err := h.UpdateUser(claimCtx("actor-1", "super_admin"), &UpdateUserRequest{
+	_, err := h.UpdateUser(claimCtx("actor-1", "super_admin"), &UpdateUserRequest{
 		ID:   "target-1",
 		Body: iface.UpdateUserInput{FullName: "Renamed"},
-	}); err != nil {
-		t.Fatalf("a profile-only patch must not need the caller's role: %v", err)
+	})
+	assertStatus(t, err, http.StatusInternalServerError)
+	assertErrCode(t, err, errcode.UserRoleLookupUnavailable)
+	if n := users.updateCalls(); n != 0 {
+		t.Errorf("a caller whose role cannot be resolved must not write; %d update calls", n)
+	}
+}
+
+// --- DeleteUser: the target-tier guard --------------------------------
+
+func TestDeleteUser_RunsTheTargetTierGuard(t *testing.T) {
+	t.Parallel()
+	users := newUserStore(nil)
+	users.seed("actor-1", "manager")
+	users.seed("admin-1", "administrator")
+	users.seed("op-1", "operator")
+	deleted := []string{}
+	users.svc.softDeleteAndAliasFn = func(_ context.Context, id string) error { deleted = append(deleted, id); return nil }
+	h := NewUserHandler(users.svc)
+
+	_, err := h.DeleteUser(claimCtx("actor-1", "super_admin"), &DeleteUserRequest{ID: "admin-1"})
+	assertStatus(t, err, http.StatusForbidden)
+	assertErrCode(t, err, errcode.UserTargetTierForbidden)
+	if len(deleted) != 0 {
+		t.Errorf("the guard must refuse before the delete; deleted %v", deleted)
+	}
+	if _, err := h.DeleteUser(claimCtx("actor-1", "super_admin"), &DeleteUserRequest{ID: "op-1"}); err != nil {
+		t.Fatalf("a manager deleting an operator must pass: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "op-1" {
+		t.Errorf("deleted = %v, want [op-1]", deleted)
+	}
+}
+
+// The refusal is audited with the code and the direction of the attempt.
+func TestDeleteUser_TargetTierRefusalIsAudited(t *testing.T) {
+	t.Parallel()
+	users := newUserStore(nil)
+	sink := &captureSink{}
+	users.svc.sink = sink
+	users.seed("actor-1", "manager")
+	users.seed("admin-1", "administrator")
+	h := NewUserHandler(users.svc)
+
+	if _, err := h.DeleteUser(claimCtx("actor-1", "super_admin"), &DeleteUserRequest{ID: "admin-1"}); err == nil {
+		t.Fatal("expected a refusal")
+	}
+	ev := findAudit(sink, "user.delete.refused")
+	if ev == nil {
+		t.Fatalf("no user.delete.refused event; got %v", sink.events)
+	}
+	if got, _ := ev.Metadata["code"].(string); got != errcode.UserTargetTierForbidden {
+		t.Errorf("metadata.code = %q, want %q", got, errcode.UserTargetTierForbidden)
+	}
+	if got, _ := ev.Metadata["attempted"].(string); got != "target_above_caller" {
+		t.Errorf("metadata.attempted = %q, want target_above_caller", got)
+	}
+	if got, _ := ev.Metadata["from"].(string); got != "administrator" {
+		t.Errorf("metadata.from = %q, want administrator", got)
+	}
+	if got, _ := ev.Metadata["caller_role"].(string); got != "manager" {
+		t.Errorf("metadata.caller_role = %q, want manager", got)
 	}
 }
 
@@ -509,5 +603,62 @@ func TestUpdateClientUserAdmin_DevTokenCallerIsInertWhenProductionLike(t *testin
 	assertErrCode(t, err, errcode.UserRoleLookupUnavailable)
 	if got := clients.roleOf("client-target"); got != "operator" {
 		t.Errorf("target role = %q, want it unchanged", got)
+	}
+}
+
+// --- write bound to the guarded role ---------------------------------
+
+// The write that follows the target-tier guard carries the role the guard
+// read, so a promotion landing in between refuses it (409) instead of
+// letting a manager modify the user it now ranks below.
+func TestUpdateUser_WriteIsBoundToTheGuardedRole(t *testing.T) {
+	t.Parallel()
+	users := newUserStore(nil)
+	users.seed("actor-1", "manager")
+	users.seed("op-1", "operator")
+	write := users.svc.updateUserFn
+	var bound string
+	users.svc.updateUserFn = func(ctx context.Context, id string, in *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+		bound = services.ExpectedRole(ctx)
+		return write(ctx, id, in)
+	}
+	h := NewUserHandler(users.svc)
+
+	if _, err := h.UpdateUser(claimCtx("actor-1", "manager"), &UpdateUserRequest{
+		ID: "op-1", Body: iface.UpdateUserInput{FullName: "Renamed"},
+	}); err != nil {
+		t.Fatalf("a manager renaming an operator must pass: %v", err)
+	}
+	if bound != "operator" {
+		t.Errorf("write precondition = %q, want the guarded role %q", bound, "operator")
+	}
+
+	users.svc.updateUserFn = func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+		return nil, services.ErrTargetRoleChanged
+	}
+	_, err := h.UpdateUser(claimCtx("actor-1", "manager"), &UpdateUserRequest{
+		ID: "op-1", Body: iface.UpdateUserInput{FullName: "Again"},
+	})
+	assertStatus(t, err, http.StatusConflict)
+	assertErrCode(t, err, errcode.UserTargetChanged)
+}
+
+func TestDeleteUser_WriteIsBoundToTheGuardedRole(t *testing.T) {
+	t.Parallel()
+	users := newUserStore(nil)
+	users.seed("actor-1", "manager")
+	users.seed("op-1", "operator")
+	var bound string
+	users.svc.softDeleteAndAliasFn = func(ctx context.Context, _ string) error {
+		bound = services.ExpectedRole(ctx)
+		return services.ErrTargetRoleChanged
+	}
+	h := NewUserHandler(users.svc)
+
+	_, err := h.DeleteUser(claimCtx("actor-1", "manager"), &DeleteUserRequest{ID: "op-1"})
+	assertStatus(t, err, http.StatusConflict)
+	assertErrCode(t, err, errcode.UserTargetChanged)
+	if bound != "operator" {
+		t.Errorf("delete precondition = %q, want the guarded role %q", bound, "operator")
 	}
 }

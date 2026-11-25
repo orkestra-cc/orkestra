@@ -54,6 +54,10 @@ func (f *fakeNotifRepo) List(_ context.Context, _ repository.Filter, _ int64) ([
 	return nil, nil
 }
 
+func (f *fakeNotifRepo) Page(_ context.Context, _ repository.Filter, _, _ int64) ([]*models.NotificationDoc, int64, error) {
+	return nil, 0, nil
+}
+
 func (f *fakeNotifRepo) GetByUUID(_ context.Context, _ string) (*models.NotificationDoc, error) {
 	return nil, nil
 }
@@ -1243,21 +1247,22 @@ func TestTemplatePortLocaleDefault(t *testing.T) {
 // catch.
 func fullyPopulatedProfile(slug string, allowedTypes []string) SenderProfile {
 	return SenderProfile{
-		Slug:         slug,
-		Label:        "sentinel-label-zz9",
-		Provider:     "smtp",
-		Categories:   []string{"*"},
-		AllowedTypes: allowedTypes,
-		FromAddress:  "sentinel-from-zz9@example.com",
-		FromName:     "sentinel-fromname-zz9",
-		ReplyTo:      "sentinel-replyto-zz9@example.com",
-		SMTPHost:     "sentinel-host-zz9.example.net",
-		SMTPPort:     2525,
-		SMTPUsername: "sentinel-username-zz9",
-		SMTPPassword: "sentinel-password-zz9",
-		SMTPTLSMode:  "starttls",
-		MailUpUser:   "sentinel-mailupuser-zz9",
-		MailUpSecret: "sentinel-mailupsecret-zz9",
+		Slug:          slug,
+		Label:         "sentinel-label-zz9",
+		Provider:      "smtp",
+		Categories:    []string{"*"},
+		AllowedTypes:  allowedTypes,
+		FromAddress:   "sentinel-from-zz9@example.com",
+		FromName:      "sentinel-fromname-zz9",
+		ReplyTo:       "sentinel-replyto-zz9@example.com",
+		SMTPHost:      "sentinel-host-zz9.example.net",
+		SMTPPort:      2525,
+		SMTPUsername:  "sentinel-username-zz9",
+		SMTPPassword:  "sentinel-password-zz9",
+		SMTPTLSMode:   "starttls",
+		MailUpUser:    "sentinel-mailupuser-zz9",
+		MailUpSecret:  "sentinel-mailupsecret-zz9",
+		SMTP2GOAPIKey: "sentinel-smtp2gokey-zz9",
 	}
 }
 
@@ -1324,7 +1329,7 @@ func TestNotificationService_Dispatch_ExplicitSender_IneligibleType_ErrorFreeOfS
 	secrets := []string{
 		"sentinel-from-zz9@example.com", "sentinel-fromname-zz9", "sentinel-replyto-zz9@example.com",
 		"sentinel-host-zz9.example.net", "sentinel-username-zz9", "sentinel-password-zz9",
-		"sentinel-mailupuser-zz9", "sentinel-mailupsecret-zz9", "2525",
+		"sentinel-mailupuser-zz9", "sentinel-mailupsecret-zz9", "sentinel-smtp2gokey-zz9", "2525",
 	}
 	for _, s := range secrets {
 		if strings.Contains(doc.Error, s) {
@@ -1512,7 +1517,7 @@ func TestNotificationService_ListEligibleSenders_NoSecretHostUsernameInOutput(t 
 	}
 	secrets := []string{
 		"sentinel-replyto-zz9@example.com", "sentinel-host-zz9.example.net", "sentinel-username-zz9",
-		"sentinel-password-zz9", "sentinel-mailupuser-zz9", "sentinel-mailupsecret-zz9", "2525", "starttls",
+		"sentinel-password-zz9", "sentinel-mailupuser-zz9", "sentinel-mailupsecret-zz9", "sentinel-smtp2gokey-zz9", "2525", "starttls",
 	}
 	for _, s := range secrets {
 		if strings.Contains(string(blob), s) {

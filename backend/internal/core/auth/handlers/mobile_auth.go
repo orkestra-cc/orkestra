@@ -28,8 +28,8 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	authutils "github.com/orkestra/backend/internal/core/auth/utils"
 	"github.com/orkestra/backend/internal/shared/types"
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // MobileAuthBeginRequest commits the app's PKCE challenge.
@@ -175,7 +175,7 @@ func (h *AuthHandler) completeMobileAuth(ctx context.Context, provider models.OA
 	if rec.Provider != provider || rec.Tier != h.tier {
 		return nil, refuse("record_mismatch")
 	}
-	if subtle.ConstantTimeCompare([]byte(authutils.GenerateCodeChallenge(codeVerifier)), []byte(rec.CodeChallenge)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(utils.GenerateCodeChallenge(codeVerifier)), []byte(rec.CodeChallenge)) != 1 {
 		return nil, refuse("verifier_mismatch")
 	}
 

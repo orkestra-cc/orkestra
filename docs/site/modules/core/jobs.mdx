@@ -1,0 +1,164 @@
+---
+title: jobs
+sidebar_position: 11
+---
+
+# jobs
+
+The scheduler for **background jobs**. A module declares the work it needs done on a schedule; `jobs` runs it once per cluster, retries it, keeps a record of every attempt and lets Tier-1 operators change the schedule, disable a job or run it now from `/admin/modules/jobs`. Added to the always-loaded core by [ADR-0024](https://github.com/orkestra-cc/orkestra/blob/dev/docs/adr/0024-core-jobs-module.md) as the eleventh core module.
+
+## What it does
+
+- Collects the jobs that modules declare through `module.HasJobs` after every module has initialised.
+- Runs each job on its schedule (fixed interval, cron expression, or only on request).
+- Takes a lease in MongoDB so that, with several backend replicas, **at most one run of a job is in progress at any time**.
+- Retries failed attempts with a durable backoff, runs a missed slot once after downtime, and records every attempt.
+- Exposes the whole thing to operators in a console workspace and to Prometheus.
+
+:::warning At most one run in progress, not exactly one
+The lease guarantees that two replicas do not run the same job at the same time. It does not guarantee a slot runs exactly once: a retry, a catch-up after downtime, or a run whose lease was lost can repeat work. **Every job must be idempotent.**
+:::
+
+It is not a work queue. There are no payloads, workers or per-item retries; loops that drain a queue stay with their module. It has no tenant scope: jobs belong to the installation (Tier 1), and the run log carries no personal data.
+
+## Console workspace
+
+`/admin/modules/jobs` (the module's own settings stay under the **Settings** view of the same page). It shows:
+
+- a table of jobs with module, name, readable schedule, state, last result and next run;
+- per job: enable or disable, edit the schedule (every, cron, timezone) with a preview of the next five runs computed by the backend, **Run now**, and **Reset to default**;
+- the run history of a job, newest first, with a status filter and **Load more**.
+
+Viewing needs `system.jobs.read`; the row actions appear only with `system.jobs.manage`. The selected job and tab are kept in the URL. A job whose module is stopped is shown as such and is not run.
+
+## Schedules
+
+| Kind | Declared as | Meaning |
+|---|---|---|
+| Every | `jobs.Every(15 * time.Minute)` | A fixed interval. Minimum one minute; an operator override is capped at 366 days. |
+| Cron | `jobs.Cron("0 2 * * *")` | A 5-field cron expression, evaluated in the job's time zone. |
+| Manual | `jobs.Manual()` | Runs only on request. An operator cannot give it a schedule. |
+
+### Cron grammar
+
+Five fields: `minute hour day-of-month month day-of-week`.
+
+| Field | Values |
+|---|---|
+| minute | 0-59 |
+| hour | 0-23 |
+| day-of-month | 1-31 |
+| month | 1-12 or `jan`..`dec` |
+| day-of-week | 0-6 (Sunday is 0; 7 also means Sunday) or `sun`..`sat` |
+
+Each field accepts `*`, a value, a list (`1,15`), a range (`1-5`) and steps (`*/10`, `0-30/5`). The macros `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly` and `@annually` are accepted. When both day-of-month and day-of-week are restricted, a day matches if **either** does (the classic Vixie rule); if one of them is `*`, both must match.
+
+An invalid expression is refused with `jobs.invalid_schedule`, and the error names the field.
+
+### Time zone and daylight saving
+
+Cron is evaluated in the job's zone: the operator's override if set, else the module setting `timezone` (an IANA name, default `UTC`). The name `Local` is refused because it depends on the host.
+
+- A wall time that does not exist (the hour skipped in spring) is **skipped** that day.
+- A wall time that occurs twice (the hour repeated in autumn) runs **once**.
+
+## Retry, timeout and catch-up
+
+- **Timeout.** Each attempt is bounded by the job's timeout (default 10 minutes, maximum 6 hours). A timeout is a failed attempt (`timed_out`).
+- **Retry.** The default is one attempt, no retry. With `Retry{MaxAttempts: n}` a failed attempt is retried with exponential backoff and jitter (default 1 minute, up to 1 hour). The retry is stored in MongoDB, so it survives a restart and any replica can take it. An error wrapped with `jobs.Permanent(err)` is not retried. When the attempts are used up the job waits for its next regular slot.
+- **Catch-up.** If a slot was missed because the process or the module was down, the job runs **once** (trigger `catchup`), not once per missed slot. A job declared with `SkipMissed: true` instead records a `skipped` run and waits for the next slot.
+- **Shutdown.** On stop the running jobs are cancelled, given up to 30 seconds, and recorded as `interrupted`, which counts as a failed attempt.
+- **Module stopped.** When the module that declares a job stops (disabled at `/admin/modules`, or stopped at process shutdown before the scheduler), its running job is cancelled within 30 seconds and recorded as `interrupted` **without** using up an attempt: the slot, retry or request stays due and runs once the module starts again. The job body must be idempotent anyway.
+- **Disabled jobs** are not scheduled, retried or caught up. **Run now** still works.
+
+Run statuses: `running`, `succeeded`, `failed`, `timed_out`, `interrupted`, `abandoned` (the lease expired while the run was recorded as in progress) and `skipped`.
+
+## Multi-replica behaviour
+
+Each job has one state document. A replica claims a due job with a single conditional update (due, lease free or expired). The lease lasts two minutes and is renewed every 30 seconds. A renew error is treated as transient: the run goes on while a later renew can still land in time. A run fences itself: it is cancelled when the lease is lost, or 40 seconds (the renew interval plus the 10-second write timeout) before the lease it last renewed expires, so it has stopped before another replica may claim the job. Lease expiry is judged on each replica's clock: keep the replicas NTP-synced, with a skew well below those 40 seconds. Every replica polls every 10 seconds (or at the next known due time), so a manual request or an override made on one replica is seen by the others within that time.
+
+## Operator overrides
+
+An operator can override `enabled`, the schedule and the timezone of a job; **Reset to default** removes the override. The code holds the default and the override wins. Changing the effective settings (an override, a new code default, a zone change) reschedules the job from now and skips the slot that was due under the old schedule. A change of the module `timezone` is applied as soon as each replica sees it (within 30 seconds): cron jobs move to their next time in the new zone, so no day is lost; interval and manual jobs do not depend on the zone and keep their due time. Edits carry the revision the console read; if a run finished in between, the save answers 409 and the console reloads. Overrides and manual requests are written to the audit trail.
+
+## Configuration
+
+Configured at `/admin/modules/jobs` (settings view), per [ADR-0012](https://github.com/orkestra-cc/orkestra/blob/dev/docs/adr/0012-module-config-group-contract.md).
+
+| Key | Environment variable | Default | Range | Applied |
+|---|---|---|---|---|
+| `timezone` | `JOBS_TIMEZONE` | `UTC` | IANA name | live (cached up to 30 s) |
+| `maxConcurrentRuns` | `JOBS_MAX_CONCURRENT_RUNS` | 4 | 1-32 | after a restart |
+| `runRetentionDays` | `JOBS_RUN_RETENTION_DAYS` | 30 | 1-365 | at each cleanup run |
+
+The module's own job `jobs.runs_cleanup` deletes runs older than `runRetentionDays`.
+
+## Permissions
+
+| Permission | Allows |
+|---|---|
+| `system.jobs.read` | List jobs, read a job, read its runs, preview a schedule |
+| `system.jobs.manage` | Override a job, reset it, run it now |
+
+Both are system permissions, granted by default to super_admin, administrator and developer.
+
+## API
+
+All routes are Tier 1 (operator host), under `/v1/admin/jobs`.
+
+| Method | Path | Permission | Result |
+|---|---|---|---|
+| GET | `/v1/admin/jobs` | `system.jobs.read` | All declared jobs with effective schedule, state and last run |
+| GET | `/v1/admin/jobs/{key}` | `system.jobs.read` | One job |
+| GET | `/v1/admin/jobs/{key}/runs?status=&cursor=&limit=` | `system.jobs.read` | Runs, newest first (limit 1-100, default 25) with `nextCursor` |
+| POST | `/v1/admin/jobs/schedule-preview` | `system.jobs.read` | The next five run times in the zone and a readable description |
+| PATCH | `/v1/admin/jobs/{key}` | `system.jobs.manage` | Set `enabled`, `schedule`, `timezone`; body carries `revision` |
+| DELETE | `/v1/admin/jobs/{key}/override?revision=` | `system.jobs.manage` | Remove the override |
+| POST | `/v1/admin/jobs/{key}/run` | `system.jobs.manage` | 202; the next free replica runs it |
+
+Errors: `jobs.not_found` (404), `jobs.revision_conflict`, `jobs.already_running`, `jobs.already_requested`, `jobs.module_stopped` (409), `jobs.invalid_schedule`, `jobs.manual_schedule_locked`, `jobs.invalid_timezone` (422), `jobs.invalid_query` (400), `jobs.persistence_failed` (500).
+
+## Metrics
+
+| Metric | Labels |
+|---|---|
+| `orkestra_jobs_runs_total` | `job`, `status` |
+| `orkestra_jobs_run_duration_seconds` | `job` |
+| `orkestra_jobs_lease_lost_total` | `job` |
+
+`job` is the job key and is bounded by the jobs compiled into the build. The module reports degraded health when its loop is not running or claims have failed for more than five minutes.
+
+## Adding a job
+
+Implement `module.HasJobs` on your module. The job key is `<module>.<name>`; `name` matches `^[a-z][a-z0-9_]{0,62}$`.
+
+```go
+func (m *Module) Jobs() []jobs.Definition {
+	return []jobs.Definition{{
+		Name:        "expire_quotes", // key: "sales.expire_quotes"
+		Title:       "Expire stale quotes",
+		Description: "Marks quotes past their validity date as expired.",
+		Schedule:    jobs.Cron("0 2 * * *"), // or jobs.Every(15*time.Minute), jobs.Manual()
+		Timeout:     5 * time.Minute,        // default 10m, max 6h
+		Retry:       jobs.RetryPolicy{MaxAttempts: 3},
+		Run: func(ctx context.Context, run *jobs.Run) error {
+			n, err := m.svc.ExpireStale(ctx, run.ScheduledFor())
+			run.Detail("expired", n) // counts only, never personal data
+			if errors.Is(err, services.ErrMisconfigured) {
+				return jobs.Permanent(err) // retrying will not help
+			}
+			return err
+		},
+	}}
+}
+```
+
+Rules for the body:
+
+- Honour `ctx`: the timeout and a shutdown cancel it.
+- Be idempotent: running the same period twice must be safe.
+- Keep errors and `run.Detail` values free of personal data; the run log is readable by operators and is not part of data-subject requests.
+- A job that works per tenant iterates the tenants itself.
+- Do not start a ticker in `Start()` for new background work; declare a job instead.
+
+`DisabledByDefault: true` keeps a new job off until an operator enables it; `SkipMissed: true` drops runs missed during downtime.

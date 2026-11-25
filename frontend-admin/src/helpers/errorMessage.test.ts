@@ -39,4 +39,32 @@ describe('resolveErrorMessage (ADR-0007)', () => {
     expect(resolveErrorMessage(undefined, 'only')).toBe('only');
     expect(resolveErrorMessage(null)).toBe('');
   });
+
+  it('opt-in includeDetail appends the backend detail to a resolved localized message', () => {
+    i18n.addResourceBundle('en', 'billing', {
+      errors: { invoice_overdue: 'Invoice overdue' }
+    });
+    const msg = resolveErrorMessage(
+      {
+        code: 'billing.invoice_overdue',
+        detail: 'invoice #123 is 40 days late'
+      },
+      undefined,
+      { includeDetail: true }
+    );
+    expect(msg).toContain('Invoice overdue');
+    expect(msg).toContain('invoice #123 is 40 days late');
+  });
+
+  it('other callers (opts omitted) keep getting the localized message alone, unaffected by includeDetail', () => {
+    i18n.addResourceBundle('en', 'billing', {
+      errors: { invoice_overdue: 'Invoice overdue' }
+    });
+    expect(
+      resolveErrorMessage({
+        code: 'billing.invoice_overdue',
+        detail: 'raw english'
+      })
+    ).toBe('Invoice overdue');
+  });
 });

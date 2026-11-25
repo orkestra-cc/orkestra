@@ -108,6 +108,17 @@ const AuthOAuthEmailUnverified = "auth.oauth_email_unverified"
 // target's surface refuses.
 const AuthPasswordLoginDisabled = "auth.password_login_disabled"
 
+// AuthRecipientSuppressed signals that an operator-initiated email
+// (password reset, verification, invite) was not sent because the user's
+// address is on the email suppression list: nothing was minted or sent.
+// 409 on the admin user and client-user routes only; the public
+// forgot-password answer never changes.
+const AuthRecipientSuppressed = "auth.recipient_suppressed"
+
+// AuthSuppressionUnavailable signals that the email suppression list could
+// not be read, so an operator-initiated email was not sent. 503.
+const AuthSuppressionUnavailable = "auth.suppression_unavailable"
+
 // AuthLoginMethodLockout signals that a module-config mutation would
 // leave a surface with no way to authenticate: password off with no
 // structurally configured OAuth provider, or with verified-email
@@ -125,6 +136,33 @@ const AuthLoginMethodLockout = "auth.login_method_lockout"
 // case: answering 429 for one and 401 for the other would be an
 // existence oracle, which is the defect (M-7) the counters close.
 const AuthTooManyAttempts = "auth.too_many_attempts"
+
+// AuthPINLoginDisabled signals that the PIN method is switched off for the surface the request came in on (auth keys pinLoginEnabled{Admin,Client}, default off), or the deployment cannot store PINs. 403 on the PIN routes.
+const AuthPINLoginDisabled = "auth.pin_login_disabled"
+
+// AuthPINInvalid signals that a new PIN is not exactly auth.pinLength digits. 422.
+const AuthPINInvalid = "auth.pin_invalid"
+
+// AuthPINTooWeak signals that a new PIN is a repeated digit or an ascending/descending run (1111, 12345, 98765). 422.
+const AuthPINTooWeak = "auth.pin_too_weak"
+
+// AuthPINUsernameRequired signals that the target user has no username, which is the PIN sign-in identifier. 409.
+const AuthPINUsernameRequired = "auth.pin_username_required"
+
+// AuthPINUsernameNotUnique signals that another live user of the same tier carries the target's username, so a username + PIN sign-in could not tell them apart. 409.
+const AuthPINUsernameNotUnique = "auth.pin_username_not_unique"
+
+// AuthPINNotAllowed signals that the user may not hold or use a PIN: a privileged role (super_admin, administrator, or any role MFA is required for), a service principal, or no auth.pin_login permission. 409 on the management routes, 403 at sign-in after a correct PIN.
+const AuthPINNotAllowed = "auth.pin_not_allowed"
+
+// AuthPINNotSet signals that the operation needs an existing PIN (device enrollment code, removal) and the user has none. 409.
+const AuthPINNotSet = "auth.pin_not_set"
+
+// AuthPINDeviceNotFound signals that the user has no registered PIN device with that id. 404.
+const AuthPINDeviceNotFound = "auth.pin_device_not_found"
+
+// AuthPINSessionForbidden signals that a session that began with a PIN tried to manage a credential (its own PIN, a device enrollment code). A PIN never vouches for a credential change. 403.
+const AuthPINSessionForbidden = "auth.pin_session_forbidden"
 
 // The four codes below all ride on a 401, and the reason they exist is
 // the same for each: a 401 that carries NO top-level code is the one
@@ -317,6 +355,34 @@ const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
 // Either way the request fails closed. 500.
 const UserRoleLookupUnavailable = "user.role_lookup_unavailable"
 
+// UserTargetTierForbidden signals that the caller tried to update or
+// delete a user whose CURRENT system role sits higher in the tier ladder
+// than the caller's own (a manager editing an administrator). Companion of
+// UserRoleEscalationForbidden, which guards the role being ASSIGNED; this
+// one guards the target itself, so that holding user.update never lets a
+// lower tier rename, deactivate, re-email or delete a higher one. Wire
+// code "user.target_tier_forbidden"; HTTP 403.
+const UserTargetTierForbidden = "user.target_tier_forbidden"
+
+// UserTargetChanged signals that the target's system role changed between
+// the target-tier guard's read and the write it guarded (a concurrent
+// promotion or demotion): the write is refused rather than applied to a
+// user the guard did not check. Wire code "user.target_changed"; HTTP 409.
+// The caller reloads the user and retries.
+const UserTargetChanged = "user.target_changed"
+
+// UserPreferencesModuleUnknown signals a GET/PUT on /v1/me/preferences/{module}
+// for a module that declares no per-user preferences (module.HasUserPreferences)
+// or is currently disabled: there is no schema to validate against, so the
+// store holds nothing for it. HTTP 404.
+const UserPreferencesModuleUnknown = "user.preferences.module_unknown"
+
+// UserPreferencesInvalid signals that a PUT /v1/me/preferences/{module} body
+// did not satisfy the module's declared fields: an undeclared key, a missing
+// required field, or a value outside its type, options, min/max or pattern.
+// The detail lists every problem. HTTP 422.
+const UserPreferencesInvalid = "user.preferences.invalid"
+
 // --- marketing ---
 
 // MarketingCardCodeCollision signals that the card-emit path
@@ -365,6 +431,217 @@ const LoggingConfigConflict = "logging.config_conflict"
 // LoggingPersistenceFailed signals an internal repository failure. The
 // underlying cause is logged server-side and never enters the response. 500.
 const LoggingPersistenceFailed = "logging.persistence_failed"
+
+// --- jobs ---
+
+// JobsNotFound signals that no registered job has the requested key. 404.
+const JobsNotFound = "jobs.not_found"
+
+// JobsRevisionConflict signals that the job changed since the caller read it
+// (another operator edit, or a run that finished): reload and retry. 409.
+const JobsRevisionConflict = "jobs.revision_conflict"
+
+// JobsAlreadyRunning signals a run request for a job that is running now. 409.
+const JobsAlreadyRunning = "jobs.already_running"
+
+// JobsAlreadyRequested signals a run request for a job that already has one
+// waiting for a free replica. 409.
+const JobsAlreadyRequested = "jobs.already_requested"
+
+// JobsModuleStopped signals a run request for a job whose module is not
+// started: a stopped module runs no jobs. 409.
+const JobsModuleStopped = "jobs.module_stopped"
+
+// JobsInvalidSchedule signals a schedule override or preview that does not
+// parse or is out of bounds; the detail names the offending cron field. 422.
+const JobsInvalidSchedule = "jobs.invalid_schedule"
+
+// JobsManualScheduleLocked signals a schedule override on a job its module
+// declares manual-only. 422.
+const JobsManualScheduleLocked = "jobs.manual_schedule_locked"
+
+// JobsInvalidTimezone signals a timezone that is not an IANA name. 422.
+const JobsInvalidTimezone = "jobs.invalid_timezone"
+
+// JobsInvalidQuery signals a run-history filter outside the contract: an
+// unknown status or a malformed cursor. 400.
+const JobsInvalidQuery = "jobs.invalid_query"
+
+// JobsPersistenceFailed signals that the job state or run history could not
+// be read or written. The cause is logged server-side. 500.
+const JobsPersistenceFailed = "jobs.persistence_failed"
+
+// --- llm ---
+
+// LLMNotConfigured: the organization has no active model at all. 503.
+const LLMNotConfigured = "llm.not_configured"
+
+// LLMProviderUnavailable: the provider could not be reached or returned a
+// transient failure; the circuit breaker may be open. 503.
+const LLMProviderUnavailable = "llm.provider_unavailable"
+
+// LLMNoEligibleModel: models exist but none matches purpose, capabilities
+// and the caller's grants. 403.
+const LLMNoEligibleModel = "llm.no_eligible_model"
+
+// LLMModelAccessDenied: the pinned ModelUUID is not among the caller's
+// candidates. 403.
+const LLMModelAccessDenied = "llm.model_access_denied"
+
+// LLMCapabilityMismatch: the request asks for something the model or the
+// credential kind cannot do. 422.
+const LLMCapabilityMismatch = "llm.capability_mismatch"
+
+// LLMInvalidRequest: size limits, message role or option rejected before
+// any provider is resolved. 422.
+const LLMInvalidRequest = "llm.invalid_request"
+
+// LLMNotFound: credential, model or grant UUID unknown in this org. 404.
+const LLMNotFound = "llm.not_found"
+
+// LLMNameInUse: a credential or model with this name already exists in
+// this org. 409.
+const LLMNameInUse = "llm.name_in_use"
+
+// LLMCredentialInUse: delete refused because an active model references
+// the credential. 409.
+const LLMCredentialInUse = "llm.credential_in_use"
+
+// LLMSecretKeyMissing: neither a KMS provider nor LLM_SECRET_ENCRYPTION_KEY
+// is available, so no secret can be stored. 503, a deployment fault.
+const LLMSecretKeyMissing = "llm.secret_key_missing"
+
+// LLMEndpointNotAllowed: baseUrl rejected by the anti-SSRF validation in a
+// production-like environment. 422.
+const LLMEndpointNotAllowed = "llm.endpoint_not_allowed"
+
+// LLMHostedDisabled: a cloud provider was requested while allow_hosted is
+// false. 422.
+const LLMHostedDisabled = "llm.hosted_disabled"
+
+// LLMMockNotAllowed: the mock provider is only selectable outside
+// production-like environments. 422.
+const LLMMockNotAllowed = "llm.mock_not_allowed"
+
+// LLMGrantNotMember: a grant names a user who is not a member of this
+// org. 422; the grant list is not written at all.
+const LLMGrantNotMember = "llm.grant_not_member"
+
+// LLMBudgetExceeded: the org's monthly token budget (action block) has no
+// room for the call's reservation; nothing was sent to a provider. 429
+// with Retry-After.
+const LLMBudgetExceeded = "llm.budget_exceeded"
+
+// LLMPlanQuotaExhausted: the provider reports the account's or plan's
+// quota exhausted (not a transient rate limit); no fallback is tried. 429.
+const LLMPlanQuotaExhausted = "llm.plan_quota_exhausted"
+
+// LLMUserAccountRequired: the model bills the caller's linked account and
+// there is no user or no linked account. 409.
+const LLMUserAccountRequired = "llm.user_account_required"
+
+// LLMUserAccountReauthRequired: the linked account's refresh failed; the
+// user must sign in again. 409.
+const LLMUserAccountReauthRequired = "llm.user_account_reauth_required"
+
+// LLMPlanUsageDisabled: the linked identity lacks the scope that allows
+// direct plan usage. 409.
+const LLMPlanUsageDisabled = "llm.plan_usage_disabled"
+
+// LLMCredentialRejected: the provider refused the credential (401/403):
+// wrong, revoked or under-privileged key. 422.
+const LLMCredentialRejected = "llm.credential_rejected"
+
+// LLMRateLimited: an llm admin operation (credential test, model
+// discovery, prompt test) exceeded its per-minute limit. 429 with
+// Retry-After.
+const LLMRateLimited = "llm.rate_limited"
+
+// LLMPartialOutput: the provider failed after output had already reached
+// the caller; the call is not retried on another model. 502.
+const LLMPartialOutput = "llm.partial_output"
+
+// LLMSIWCConfigInvalid: the Sign in with ChatGPT settings are contradictory
+// or unsupported on this deployment (422 on the module settings surface,
+// 503 when a user-facing flow trips over it).
+const LLMSIWCConfigInvalid = "llm.siwc_config_invalid"
+
+// LLMSIWCDisabled: Sign in with ChatGPT is off on this installation
+// (siwc_mode disabled). 404.
+const LLMSIWCDisabled = "llm.siwc_disabled"
+
+// LLMSIWCUnsupportedDeployment: loopback_local while the operator API is
+// not reached as http://127.0.0.1:<port>. 409.
+const LLMSIWCUnsupportedDeployment = "llm.siwc_unsupported_deployment"
+
+// LLMSIWCCallbackInvalid: the pasted callback URL is malformed or does not
+// match the attempt's redirect URI (scheme, host, port, path). 422.
+const LLMSIWCCallbackInvalid = "llm.siwc_callback_invalid"
+
+// LLMSIWCStateInvalid: the authorization attempt is unknown, expired,
+// already used, or belongs to another user, org or installation. 409.
+const LLMSIWCStateInvalid = "llm.siwc_state_invalid"
+
+// LLMSIWCDenied: the user declined the authorization at OpenAI. 409.
+const LLMSIWCDenied = "llm.siwc_denied"
+
+// LLMSIWCExchangeFailed: the authorization code could not be exchanged
+// for a usable token set. 502.
+const LLMSIWCExchangeFailed = "llm.siwc_exchange_failed"
+
+// LLMSIWCIDTokenInvalid: the ID token did not validate, or a reauth came
+// back under another registration or identity. 409.
+const LLMSIWCIDTokenInvalid = "llm.siwc_id_token_invalid"
+
+// LLMRequestCanceled: the caller hung up (or its context was cancelled)
+// while a live check or a model call was running. Neither a server fault
+// nor a rejection on the request's merits: 499 Client Closed Request, so
+// an abandoned request never counts as a 5xx.
+const LLMRequestCanceled = "llm.request_canceled"
+
+// --- retrieval ---
+
+// RetrievalNotConfigured: the vector engine is not configured on this
+// installation. 503 (FeatureNotConfigured).
+const RetrievalNotConfigured = "retrieval.not_configured"
+
+// RetrievalUnavailable: the vector engine or the principal resolver is
+// down. 503.
+const RetrievalUnavailable = "retrieval.unavailable"
+
+// RetrievalCorpusNotFound: no corpus of that name is declared, or it has
+// no retrieval state. 404.
+const RetrievalCorpusNotFound = "retrieval.corpus_not_found"
+
+// RetrievalCorpusRegistered: the corpus is still registered, or another
+// replica re-registered it while a drop ran. 409.
+const RetrievalCorpusRegistered = "retrieval.corpus_registered"
+
+// RetrievalCorpusUnavailable: the module that owns the corpus is not
+// running. 503.
+const RetrievalCorpusUnavailable = "retrieval.corpus_unavailable"
+
+// RetrievalForbidden: the caller may not search or administer this
+// corpus. 403.
+const RetrievalForbidden = "retrieval.forbidden"
+
+// RetrievalInvalidFilter: the filter does not fit the corpus. 422.
+const RetrievalInvalidFilter = "retrieval.invalid_filter"
+
+// RetrievalInvalidRequest: the search request is malformed. 422.
+const RetrievalInvalidRequest = "retrieval.invalid_request"
+
+// RetrievalLocalityViolation: an inference endpoint breaks the corpus
+// locality rule. 409.
+const RetrievalLocalityViolation = "retrieval.locality_violation"
+
+// RetrievalVisibilityCheckFailed: the source visibility check could not
+// run. 503.
+const RetrievalVisibilityCheckFailed = "retrieval.visibility_check_failed"
+
+// RetrievalInternal: any other retrieval fault. The cause is logged by
+// the handler, never sent. 500.
+const RetrievalInternal = "retrieval.internal"
 
 // --- navigation ---
 
@@ -455,6 +732,14 @@ const NotificationSenderBadAllowedType = "notification.sender_bad_allowed_type"
 // message. The detail carries the bounded diagnostic, never vendor text. 502.
 const NotificationSendFailed = "notification.send_failed"
 
+// NotificationAddressSuppressed: a test send named an address on the email
+// suppression list, which receives no email of any type. 422.
+const NotificationAddressSuppressed = "notification.address_suppressed"
+
+// NotificationSuppressionUnavailable: the email suppression list could not be
+// read, so the test send was refused. 503.
+const NotificationSuppressionUnavailable = "notification.suppression_unavailable"
+
 // NotificationSenderDriverNoOneClick: a sender profile declares marketing in
 // its allowed_types but its provider cannot put the RFC 8058 one-click
 // unsubscribe headers on the wire, while require_one_click_unsubscribe is
@@ -466,6 +751,22 @@ const NotificationSenderDriverNoOneClick = "notification.sender_driver_no_one_cl
 // origin), so no one-click unsubscribe link can be built, while
 // require_one_click_unsubscribe is on. 422.
 const NotificationPublicBaseURLMissing = "notification.public_base_url_missing"
+
+// NotificationPushInvalidRequest: a push request or device registration
+// failed validation (tier, user list, title/body/data limits). 422.
+const NotificationPushInvalidRequest = "notification.push_invalid_request"
+
+// NotificationPushDeviceNotFound: the caller has no push device with that id
+// in the tier of the route. 404.
+const NotificationPushDeviceNotFound = "notification.push_device_not_found"
+
+// NotificationPushSessionMissing: the access token carries no session id
+// (sid), so a device cannot be bound to a session. 401.
+const NotificationPushSessionMissing = "notification.push_session_missing"
+
+// NotificationPushUnavailable: push delivery is not configured or the
+// provider is down. 503.
+const NotificationPushUnavailable = "notification.push_unavailable"
 
 // --- compliance ---
 
@@ -526,3 +827,86 @@ const CompliancePolicyUnavailable = "compliance.policy_unavailable"
 // CompliancePolicyPersistenceFailed signals an unexpected failure of the
 // policy engine; the cause is logged server-side, never returned. 500.
 const CompliancePolicyPersistenceFailed = "compliance.policy_persistence_failed"
+
+// ComplianceErasureRequestBusy signals that another erasure run holds the
+// request's lease. 409.
+const ComplianceErasureRequestBusy = "compliance.erasure_request_busy"
+
+// ComplianceErasureRequestStarted signals a reject of an erasure that has
+// already started; it can be retried, not rejected. 409.
+const ComplianceErasureRequestStarted = "compliance.erasure_request_started"
+
+// ComplianceErasureRequestNotClosable signals a close of a request that still
+// waits on an installed producer. 409.
+const ComplianceErasureRequestNotClosable = "compliance.erasure_request_not_closable"
+
+// ComplianceErasureCloseNoteRequired signals a close without a note of 1 to
+// 500 characters. 422.
+const ComplianceErasureCloseNoteRequired = "compliance.erasure_close_note_required"
+
+// ComplianceLegalHoldActive signals an erasure refused because the subject is
+// under an active legal hold. 409.
+const ComplianceLegalHoldActive = "compliance.legal_hold_active"
+
+// ComplianceRetentionMinimumNotMet signals a hard delete refused because the
+// subject's data must be kept longer; the body carries retainUntil (RFC 3339)
+// and reasons. 409.
+const ComplianceRetentionMinimumNotMet = "compliance.retention_minimum_not_met"
+
+// ComplianceRetentionCheckUnavailable signals a hard delete refused because the
+// retention check could not be completed (it fails closed). 503.
+const ComplianceRetentionCheckUnavailable = "compliance.retention_check_unavailable"
+
+// ComplianceErasureRequestExists signals that the subject already has a
+// pending or incomplete erasure request; the body carries its id. 409.
+const ComplianceErasureRequestExists = "compliance.erasure_request_exists"
+
+// ComplianceErasureApprovalsMissing signals an execute with fewer distinct
+// approvals than the request requires; the body carries have and need. 409.
+const ComplianceErasureApprovalsMissing = "compliance.erasure_approvals_missing"
+
+// ComplianceErasureSelfApproval signals the data subject acting as approver or
+// executor of their own erasure request. 409.
+const ComplianceErasureSelfApproval = "compliance.erasure_self_approval"
+
+// ComplianceErasureAlreadyApproved signals an operator approving a request
+// they already approved. 409.
+const ComplianceErasureAlreadyApproved = "compliance.erasure_already_approved"
+
+// ComplianceErasureModeMismatch signals an approve or execute in a mode other
+// than the one the first approval locked. 409.
+const ComplianceErasureModeMismatch = "compliance.erasure_mode_mismatch"
+
+// ComplianceErasureReceiptUnavailable signals a receipt request for an erasure
+// request that is not completed or closed_partial (pending, incomplete or
+// rejected). 409.
+const ComplianceErasureReceiptUnavailable = "compliance.erasure_receipt_unavailable"
+
+// ComplianceInvalidCursor signals a list cursor the server did not issue. 422.
+const ComplianceInvalidCursor = "compliance.invalid_cursor"
+
+// ComplianceReasonRequired signals a reason or note outside 1 to 500
+// characters. 422.
+const ComplianceReasonRequired = "compliance.reason_required"
+
+// ComplianceLegalHoldExpiryPast signals a legal-hold expiry that is not in the
+// future. 422.
+const ComplianceLegalHoldExpiryPast = "compliance.legal_hold_expiry_past"
+
+// ComplianceExportStorageUnavailable signals a DSR export that needs object
+// storage when none is configured. 503.
+const ComplianceExportStorageUnavailable = "compliance.export_storage_unavailable"
+
+// ComplianceExportExpired signals a download of a DSR export past its expiry. 410.
+const ComplianceExportExpired = "compliance.export_expired"
+
+// ComplianceExportErasureInProgress signals a DSR export refused or removed
+// because the subject is being erased. 409.
+const ComplianceExportErasureInProgress = "compliance.export_erasure_in_progress"
+
+// ComplianceExportNotFound signals a DSR export that does not exist. 404.
+const ComplianceExportNotFound = "compliance.export_not_found"
+
+// ComplianceSubjectNotFound signals a data subject UUID that matches no
+// operator or client user row (a deleted tombstone still counts). 404.
+const ComplianceSubjectNotFound = "compliance.subject_not_found"

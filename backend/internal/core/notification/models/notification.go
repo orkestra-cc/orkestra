@@ -34,6 +34,16 @@ type NotificationDoc struct {
 	// FailureReason classifies a failed row (iface.FailureAttachmentRejected);
 	// returned again by the idempotent replay.
 	FailureReason string `bson:"failureReason,omitempty" json:"failureReason,omitempty"`
+	// Push carries the device counts of a push row (channel "push"). Never
+	// the token, title body or payload.
+	Push *PushStats `bson:"push,omitempty" json:"push,omitempty"`
+}
+
+// PushStats are the per-user device counts of one push delivery row.
+type PushStats struct {
+	Attempted int `bson:"attempted" json:"attempted"`
+	Delivered int `bson:"delivered" json:"delivered"`
+	Disabled  int `bson:"disabled" json:"disabled"`
 }
 
 // AttachmentMeta is what the delivery log keeps of an attachment: its
@@ -44,11 +54,24 @@ type AttachmentMeta struct {
 	SizeBytes   int    `bson:"sizeBytes" json:"sizeBytes"`
 }
 
-// SuppressionDoc is a recipient that must not receive any notifications
-// (hard bounce, spam complaint, manual unsubscribe of all mail).
+// SuppressionDoc is an address that must not receive any email, of any type
+// (hard bounce, spam complaint, an operator marking it invalid). dispatchEmail
+// checks it before every send, transactional included, and SendTest refuses
+// it too. Written only through iface.EmailSuppressionManager.
+//
+// The row is platform-wide: Address is the key and TenantID is attribution
+// only, like MarketingOptoutDoc's. A bounce is a fact of the mailbox, not of
+// the tenant that saw it.
 type SuppressionDoc struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-	Address   string             `bson:"address" json:"address"`
-	Reason    string             `bson:"reason" json:"reason"`
-	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
+	ID      primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	Address string             `bson:"address" json:"address"`
+	// Reason is why the address is suppressed (iface.SuppressionReason*).
+	Reason    string    `bson:"reason" json:"reason"`
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	// Source names the path that wrote the row (e.g. "operator.manual",
+	// "operator.import"); ActorUUID the operator, when one did; TenantID the
+	// tenant the request acted in. All three are attribution, never scope.
+	Source    string `bson:"source,omitempty" json:"source,omitempty"`
+	ActorUUID string `bson:"actorUuid,omitempty" json:"actorUuid,omitempty"`
+	TenantID  string `bson:"tenantId,omitempty" json:"tenantId,omitempty"`
 }

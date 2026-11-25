@@ -16,8 +16,12 @@
 # STAGE 1: Base Dependencies
 # ============================================
 # Using Docker Hardened Images (DHI) for security
-# dhi.io/golang:1-dev includes git, ca-certificates, tzdata, and build tools
-FROM dhi.io/golang:1-dev AS base
+# dhi.io/golang:<minor>-dev includes git, ca-certificates, tzdata, and build tools.
+# Pinned to the Go minor the gate tests (.mise.toml, backend/go.mod, CI) — never
+# the floating `1`, which silently moved production builds to a Go minor the
+# gate had never run. Patch releases arrive through `orkestra.sh` building with
+# --pull; bump the minor here together with .mise.toml and go.mod.
+FROM dhi.io/golang:1.27-dev AS base
 
 # Set working directory
 WORKDIR /app
@@ -92,8 +96,8 @@ RUN /app/bin/server --version || echo "Binary built successfully"
 # STAGE 4: Production Runtime
 # ============================================
 # Using Docker Hardened Images (DHI) for production
-# dhi.io/golang:1 is the hardened runtime image
-FROM dhi.io/golang:1 AS production
+# dhi.io/golang:<minor> is the hardened runtime image (same minor as the builder)
+FROM dhi.io/golang:1.27 AS production
 
 # Set timezone
 ENV TZ=Europe/Rome

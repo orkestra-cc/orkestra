@@ -14,6 +14,8 @@ interface Props {
   body: string;
   confirmLabel: string;
   busy: boolean;
+  // Confirm button variant; destructive by default.
+  variant?: 'orkestra-danger' | 'orkestra-primary';
   onCancel: () => void;
   onConfirm: (reason: string) => void;
 }
@@ -25,6 +27,7 @@ const ReasonModal = ({
   body,
   confirmLabel,
   busy,
+  variant = 'orkestra-danger',
   onCancel,
   onConfirm
 }: Props) => {
@@ -68,7 +71,7 @@ const ReasonModal = ({
           <Button variant="orkestra-default" onClick={onCancel} disabled={busy}>
             {t('adminCompliance.saveModal.cancel')}
           </Button>
-          <Button type="submit" variant="orkestra-danger" disabled={busy}>
+          <Button type="submit" variant={variant} disabled={busy}>
             {confirmLabel}
           </Button>
         </Modal.Footer>

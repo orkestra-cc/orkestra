@@ -35,6 +35,9 @@ const SortableGroupListShowcase = lazy(
 const SecretOnceDisplayExample = lazy(
   () => import('reference/components/ui/SecretOnceDisplayExample')
 );
+const SearchablePagedTableShowcase = lazy(
+  () => import('reference/components/tables/SearchablePagedTable')
+);
 const Dropdowns = lazy(() => import('reference/components/ui/Dropdowns'));
 const ListGroups = lazy(() => import('reference/components/ui/ListGroups'));
 const Modals = lazy(() => import('reference/components/ui/Modals'));
@@ -595,6 +598,10 @@ export function getReferenceRoutes(): RouteObject[] {
           element: <SecretOnceDisplayExample />
         },
         {
+          path: paths.searchablePagedTable,
+          element: <SearchablePagedTableShowcase />
+        },
+        {
           path: rootPaths.carouselRoot,
           children: [
             { path: paths.bootstrapCarousel, element: <BootstrapCarousel /> },
@@ -898,6 +905,10 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'secret-once-display',
               element: <SecretOnceDisplayExample />
+            },
+            {
+              path: 'searchable-paged-table',
+              element: <SearchablePagedTableShowcase />
             },
             {
               path: 'carousel',

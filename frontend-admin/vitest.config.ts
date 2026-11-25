@@ -1,6 +1,15 @@
 import { defineConfig, mergeConfig } from 'vitest/config';
 import viteConfigFn from './vite.config.js';
 
+// The coverage run is the pre-push gate (`make ci` → `npm run test:coverage`).
+// It instruments every file and often runs on a busy host, where heavy
+// component tests then miss the 5 s test timeout and Testing Library's 1 s
+// waits on files that pass alone, a different file each run. Wider limits there tolerate the
+// slowness only — a test that is actually broken still fails. `npm test`
+// keeps the defaults, so a test that needs these limits on a quiet machine
+// still shows up.
+const coverageRun = process.argv.includes('--coverage');
+
 export default mergeConfig(
   viteConfigFn({ mode: 'test' }),
   defineConfig({
@@ -11,6 +20,9 @@ export default mergeConfig(
       // mismatch jsdom + MSW v2 + Node fetch trip over.
       environment: 'happy-dom',
       setupFiles: ['./src/test/setup.ts'],
+      testTimeout: coverageRun ? 15_000 : 5_000,
+      // Read by src/test/setup.ts (Testing Library asyncUtilTimeout).
+      env: { RTL_ASYNC_UTIL_TIMEOUT: coverageRun ? '3000' : '1000' },
       include: ['src/**/*.{test,spec}.{ts,tsx}'],
       coverage: {
         provider: 'v8',

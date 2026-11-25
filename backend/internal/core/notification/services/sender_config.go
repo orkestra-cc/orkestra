@@ -23,10 +23,11 @@ func SenderItems() []module.ConfigItemField {
 	// One condition with two values is an OR within the entry (ADR-0012), so
 	// no DependsOnMatch is needed: identity fields show for both transports
 	// that read them, and stay hidden for noop, which reads none.
-	identity := []module.FieldCondition{{Key: SubProvider, In: []string{"smtp", "mailup"}}}
+	identity := []module.FieldCondition{{Key: SubProvider, In: []string{"smtp", "mailup", "smtp2go"}}}
 	mailUpOnly := []module.FieldCondition{{Key: SubProvider, In: []string{"mailup"}}}
+	smtp2goOnly := []module.FieldCondition{{Key: SubProvider, In: []string{"smtp2go"}}}
 	return []module.ConfigItemField{
-		{Key: SubProvider, Label: "Provider", Type: module.FieldEnum, Options: []string{"noop", "smtp", "mailup"}, Required: true, Default: "noop"},
+		{Key: SubProvider, Label: "Provider", Type: module.FieldEnum, Options: []string{"noop", "smtp", "mailup", "smtp2go"}, Required: true, Default: "noop"},
 		{Key: SubCategories, Label: "Categories", Type: module.FieldStringList, Placeholder: "auth.*, *",
 			Description: "Routing patterns this profile serves: an exact category (auth.verify_email), a prefix (auth.*), or * for the default. Leave empty to keep the profile as a draft that receives no mail."},
 		{Key: SubAllowedTypes, Label: "Explicitly selectable for", Type: module.FieldStringList, Placeholder: "marketing",
@@ -46,6 +47,13 @@ func SenderItems() []module.ConfigItemField {
 			HelpURL:     "https://helpmailup.atlassian.net/wiki/spaces/mailupapi/pages/36342655/Transactional+Emails+using+APIs"},
 		{Key: SubMailUpSecret, Label: "MailUp SMTP+ secret", Type: module.FieldSecret, Required: true,
 			DependsOn: mailUpOnly},
+		{Key: SubSMTP2GOAPIKey, Label: "SMTP2GO API key", Type: module.FieldSecret, Required: true,
+			DependsOn:   smtp2goOnly,
+			Description: "An API key from Sending > API Keys in the SMTP2GO console. Grant it only the email send permission. The from address must belong to a sender domain verified in SMTP2GO.",
+			HelpURL:     "https://developers.smtp2go.com/reference/send-standard-email"},
+		{Key: SubSMTP2GORegion, Label: "SMTP2GO region", Type: module.FieldEnum, Options: smtp2goRegions, Default: "global",
+			DependsOn:   smtp2goOnly,
+			Description: "The API host requests are sent to. Choose eu to keep requests and their messages in SMTP2GO's EU region."},
 	}
 }
 

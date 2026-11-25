@@ -58,6 +58,16 @@ type SessionRiskLookup func(ctx context.Context, sessionID string) (float64, err
 // gate.
 type MFAEnrollmentLookup func(ctx context.Context, audience, userUUID string) (hasFactor bool, err error)
 
+// PasswordSetLookup resolves whether a user has a password set (a
+// non-empty hash), scoped to the tier that minted the caller's token —
+// like MFAEnrollmentLookup, one middleware serves both surfaces, so the
+// implementation dispatches on audience. RequireStepUp's no-factor branch
+// reads it so an OAuth-only account is never offered a password reconfirm
+// it cannot answer. A non-nil error keeps the reconfirm on offer (the
+// pre-lookup answer): the reconfirm endpoint still verifies the password,
+// so that never weakens the gate.
+type PasswordSetLookup func(ctx context.Context, audience, userUUID string) (hasPassword bool, err error)
+
 // MFAEpochLookup resolves a user's CURRENT MFA epoch — the value every
 // access token records in its "mfae" claim at mint time. Comparing the two
 // is what makes a credential removal take effect on the caller's existing
@@ -120,6 +130,7 @@ type AuthMiddleware struct {
 	sessionRevocation services.SessionRevocationService
 	sessionRiskLookup SessionRiskLookup
 	mfaEnrollment     MFAEnrollmentLookup
+	passwordSet       PasswordSetLookup
 	mfaEpochLookup    MFAEpochLookup
 	stepUpPolicy      StepUpPolicy
 	users             iface.UserProvider
@@ -197,6 +208,14 @@ func (m *AuthMiddleware) SetSessionRiskLookup(lookup SessionRiskLookup) {
 // behaviour (every step-up failure → step_up_required).
 func (m *AuthMiddleware) SetMFAEnrollmentLookup(lookup MFAEnrollmentLookup) {
 	m.mfaEnrollment = lookup
+}
+
+// SetPasswordSetLookup wires the per-tier "has a password" resolver read by
+// RequireStepUp's no-factor branch: a caller without a password gets
+// mfa_enrollment_required instead of password_confirm_required. Optional —
+// nil keeps offering the reconfirm to every no-factor caller.
+func (m *AuthMiddleware) SetPasswordSetLookup(lookup PasswordSetLookup) {
+	m.passwordSet = lookup
 }
 
 // SetMFAEpochLookup wires the per-tier MFA-epoch resolver that every gate
@@ -497,6 +516,9 @@ func (m *AuthMiddleware) sendAccessTokenExpired(w http.ResponseWriter) {
 func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, claims *models.JWTClaims, next http.Handler) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, ctxauth.KeyUserUUID, claims.UserUUID)
+	if claims.SessionID != "" {
+		ctx = context.WithValue(ctx, ctxauth.KeySessionID, claims.SessionID)
+	}
 	ctx = context.WithValue(ctx, ctxauth.KeyUserEmail, claims.Email)
 	ctx = context.WithValue(ctx, ctxauth.KeySystemRole, claims.SystemRole)
 	ctx = context.WithValue(ctx, ctxClaims, claims)
@@ -927,6 +949,9 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 		if err == nil {
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, ctxauth.KeyUserUUID, claims.UserUUID)
+			if claims.SessionID != "" {
+				ctx = context.WithValue(ctx, ctxauth.KeySessionID, claims.SessionID)
+			}
 			ctx = context.WithValue(ctx, ctxauth.KeyUserEmail, claims.Email)
 			ctx = context.WithValue(ctx, ctxauth.KeySystemRole, claims.SystemRole)
 			ctx = context.WithValue(ctx, ctxClaims, claims)
@@ -1072,6 +1097,13 @@ func (m *AuthMiddleware) RequirePermission(permission string) func(http.Handler)
 					WithDetail("permission", permission).Build())
 				return
 			}
+			if pinSessionForbidden(r.Context(), permission) {
+				m.sendErrorResponse(w, r, errors.AuthorizationError("insufficient permissions").
+					WithOperation("require_permission").
+					WithDetail("permission", permission).
+					WithDetail("reason", "pin_session").Build())
+				return
+			}
 			allowed, err := m.authz.HasPermission(r.Context(), userUUID, tenantID, permission)
 			if err != nil {
 				m.sendErrorResponse(w, r, errors.InternalError("permission check failed").
@@ -1091,6 +1123,29 @@ func (m *AuthMiddleware) RequirePermission(permission string) func(http.Handler)
 	}
 }
 
+// pinSessionForbidden reports whether a PIN session (amr ["pin"]) asks for
+// a destructive, administrative or system permission. It is the
+// role-table twin of abac.pin_session_no_destructive and
+// abac.pin_session_no_system: Cedar enforces only the actions listed in
+// CEDAR_ENFORCE_ACTIONS, so without this a PIN session whose user holds,
+// say, tenant.delete through a custom tenant role would reach it on the
+// default shadow deployment. Suffix and module are read the way the Cedar
+// context stamps action_suffix and action_module.
+func pinSessionForbidden(ctx context.Context, permission string) bool {
+	amr, ok := GetAMR(ctx)
+	if !ok || !models.HasPINAMR(amr) {
+		return false
+	}
+	if strings.HasPrefix(permission, "system.") {
+		return true
+	}
+	switch permission[strings.LastIndex(permission, ".")+1:] {
+	case "delete", "admin", "manage":
+		return true
+	}
+	return false
+}
+
 func (m *AuthMiddleware) RequireSystemPermission(permission string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1103,6 +1158,13 @@ func (m *AuthMiddleware) RequireSystemPermission(permission string) func(http.Ha
 			if !ok {
 				m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
 					WithOperation("require_system_permission").Build())
+				return
+			}
+			if pinSessionForbidden(r.Context(), permission) {
+				m.sendErrorResponse(w, r, errors.AuthorizationError("insufficient system permissions").
+					WithOperation("require_system_permission").
+					WithDetail("permission", permission).
+					WithDetail("reason", "pin_session").Build())
 				return
 			}
 			allowed, err := m.authz.HasPermission(r.Context(), userUUID, "", permission)
@@ -1401,7 +1463,10 @@ func (m *AuthMiddleware) RequireEnrolmentProof(maxAge time.Duration) func(http.H
 				m.sendStepUpRequired(w, r, maxAge)
 				return
 			}
-			if claims.AuthTime > 0 && time.Since(time.Unix(claims.AuthTime, 0)) <= maxAge {
+			// A PIN session's auth_time is a sign-in with a weak secret:
+			// it never vouches for adding a factor.
+			// The caller re-authenticates with a real credential instead.
+			if claims.AuthTime > 0 && time.Since(time.Unix(claims.AuthTime, 0)) <= maxAge && !models.HasPINAMR(claims.AMR) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -1491,6 +1556,15 @@ func (m *AuthMiddleware) dispatchStepUpFailure(w http.ResponseWriter, r *http.Re
 	if !allowed {
 		m.sendMFAEnrollmentRequired(w, r)
 		return
+	}
+	// An account with no password (OAuth-only) cannot answer a reconfirm:
+	// enrolling a factor is the one way forward. A lookup error keeps the
+	// reconfirm on offer (see PasswordSetLookup).
+	if m.passwordSet != nil {
+		if hasPassword, err := m.passwordSet(r.Context(), claims.Audience, claims.UserUUID); err == nil && !hasPassword {
+			m.sendNoPasswordEnrollmentRequired(w)
+			return
+		}
 	}
 	m.sendPasswordConfirmRequired(w, r, maxAge)
 }
@@ -1722,6 +1796,20 @@ func (m *AuthMiddleware) sendMFAEnrollmentRequired(w http.ResponseWriter, _ *htt
 		code:   "mfa_enrollment_required",
 		title:  "mfa enrollment required",
 		detail: "your role requires a second factor; enroll one before performing this action",
+		scheme: schemeBearer,
+		item:   &codedErrorItem{message: "mfa enrollment required", location: "require_step_up", value: "MFA_ENROLLMENT_REQUIRED"},
+	})
+}
+
+// sendNoPasswordEnrollmentRequired is sendMFAEnrollmentRequired for a
+// caller with no factor and no password (an OAuth-only account): same code
+// and status, so the SPA's enrolment nudge applies, with the real reason.
+func (m *AuthMiddleware) sendNoPasswordEnrollmentRequired(w http.ResponseWriter) {
+	writeCodedError(w, codedError{
+		status: http.StatusForbidden,
+		code:   "mfa_enrollment_required",
+		title:  "mfa enrollment required",
+		detail: "this account has no password to reconfirm; enroll a second factor before performing this action",
 		scheme: schemeBearer,
 		item:   &codedErrorItem{message: "mfa enrollment required", location: "require_step_up", value: "MFA_ENROLLMENT_REQUIRED"},
 	})

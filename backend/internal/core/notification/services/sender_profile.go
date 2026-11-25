@@ -8,7 +8,7 @@ import "strconv"
 type SenderProfile struct {
 	Slug         string   // element key segment; LegacySlug for the legacy profile
 	Label        string   // operator display name
-	Provider     string   // driver name: "noop" | "smtp" (| "mailup", PR 3)
+	Provider     string   // driver name: "noop" | "smtp" | "mailup" | "smtp2go"
 	Categories   []string // normalized routing patterns; "*" marks the default
 	AllowedTypes []string // send types that may name this profile explicitly (ADR-0021 D2): subset of {marketing, transactional}; empty = never selectable by slug
 
@@ -24,25 +24,30 @@ type SenderProfile struct {
 
 	MailUpUser   string // SMTP+ username, sNNNNN_NN
 	MailUpSecret string // SMTP+ secret
+
+	SMTP2GOAPIKey string // SMTP2GO API key
+	SMTP2GORegion string // "global" | "eu" | "us" | "au"; "" reads as global
 }
 
 // Sub-field keys of one email.senders element. They are the record-list
 // item keys (PR 2), the names a driver's Requires() speaks, and the
 // argument Field accepts — one vocabulary, three readers.
 const (
-	SubProvider     = "provider"
-	SubCategories   = "categories"
-	SubAllowedTypes = "allowed_types"
-	SubFromAddress  = "from_address"
-	SubFromName     = "from_name"
-	SubReplyTo      = "reply_to"
-	SubSMTPHost     = "smtp_host"
-	SubSMTPPort     = "smtp_port"
-	SubSMTPTLSMode  = "smtp_tls_mode"
-	SubSMTPUsername = "smtp_username"
-	SubSMTPPassword = "smtp_password"
-	SubMailUpUser   = "mailup_user"
-	SubMailUpSecret = "mailup_secret"
+	SubProvider      = "provider"
+	SubCategories    = "categories"
+	SubAllowedTypes  = "allowed_types"
+	SubFromAddress   = "from_address"
+	SubFromName      = "from_name"
+	SubReplyTo       = "reply_to"
+	SubSMTPHost      = "smtp_host"
+	SubSMTPPort      = "smtp_port"
+	SubSMTPTLSMode   = "smtp_tls_mode"
+	SubSMTPUsername  = "smtp_username"
+	SubSMTPPassword  = "smtp_password"
+	SubMailUpUser    = "mailup_user"
+	SubMailUpSecret  = "mailup_secret"
+	SubSMTP2GOAPIKey = "smtp2go_api_key"
+	SubSMTP2GORegion = "smtp2go_region"
 )
 
 // LegacySlug names the profile synthesized from the flat email.* keys. The
@@ -81,6 +86,10 @@ func (p SenderProfile) Field(key string) string {
 		return p.MailUpUser
 	case SubMailUpSecret:
 		return p.MailUpSecret
+	case SubSMTP2GOAPIKey:
+		return p.SMTP2GOAPIKey
+	case SubSMTP2GORegion:
+		return p.SMTP2GORegion
 	}
 	return ""
 }
@@ -111,6 +120,10 @@ func (p *SenderProfile) setField(key, v string) {
 		p.MailUpUser = v
 	case SubMailUpSecret:
 		p.MailUpSecret = v
+	case SubSMTP2GOAPIKey:
+		p.SMTP2GOAPIKey = v
+	case SubSMTP2GORegion:
+		p.SMTP2GORegion = v
 	}
 }
 

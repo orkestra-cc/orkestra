@@ -4,6 +4,7 @@ import {
   faClipboardList,
   faClockRotateLeft,
   faGavel,
+  faIdCard,
   faScaleBalanced,
   faUserCheck,
   faUserSlash
@@ -13,7 +14,6 @@ import { useTranslation } from 'react-i18next';
 import {
   useListAuditEventsQuery,
   useListChangeRequestsQuery,
-  useListErasureRequestsQuery,
   useListLegalHoldsQuery,
   useRetentionPreviewQuery
 } from 'store/api/complianceApi';
@@ -25,6 +25,8 @@ import ErasureRequestsTab from './ErasureRequestsTab';
 import LegalHoldsTab from './LegalHoldsTab';
 import PoliciesTab from './PoliciesTab';
 import RetentionTab from './RetentionTab';
+import SubjectTab from './SubjectTab';
+import { useOpenErasureRequests } from './useOpenErasureRequests';
 
 // CompliancePage is the operator-facing GDPR/compliance dashboard (ADR-0009):
 // a summary KPI row, then tabbed surfaces to review and resolve erasure
@@ -40,6 +42,11 @@ const TABS = [
     key: 'requests',
     labelKey: 'adminCompliance.tabs.erasureRequests',
     icon: faUserSlash
+  },
+  {
+    key: 'subject',
+    labelKey: 'adminCompliance.tabs.subject',
+    icon: faIdCard
   },
   { key: 'holds', labelKey: 'adminCompliance.tabs.legalHolds', icon: faGavel },
   {
@@ -82,7 +89,7 @@ const CompliancePage = () => {
 
   // The summary cards share the same RTK Query caches the tabs read, so there
   // is no extra network cost — RTK Query dedupes the in-flight requests.
-  const erasures = useListErasureRequestsQuery();
+  const erasures = useOpenErasureRequests();
   const holds = useListLegalHoldsQuery();
   const retention = useRetentionPreviewQuery();
   const audit = useListAuditEventsQuery({ limit: 50 });
@@ -197,6 +204,11 @@ const CompliancePage = () => {
             <Tab.Content>
               <Tab.Pane eventKey="requests">
                 <ErasureRequestsTab />
+              </Tab.Pane>
+              {/* mountOnEnter: the preview is audited (gdpr.dsr.previewed) per load, so
+                  it must not run for a subject nobody opened the tab for. */}
+              <Tab.Pane eventKey="subject" mountOnEnter>
+                <SubjectTab />
               </Tab.Pane>
               <Tab.Pane eventKey="holds">
                 <LegalHoldsTab />

@@ -46,14 +46,23 @@ const (
 	ServiceOAuthProviderFactory ServiceKey = "auth.oauth_factory"
 	ServiceOAuthStateService    ServiceKey = "auth.oauth_state"
 	ServiceOAuthProviderRepo    ServiceKey = "auth.oauth_provider_repo"
-	ServiceAIModelProvider      ServiceKey = "aimodels.provider"
+	ServiceLLMGateway           ServiceKey = "llm.gateway" // iface.LLMGateway, registered by core/llm
 	ServicePDFService           ServiceKey = "documents.pdf"
 	ServiceGraphRepo            ServiceKey = "graph.repository"
-	ServiceRAGQuery             ServiceKey = "rag.query"
+	// Deprecated: use ServiceRetrieval with iface.RetrievalSearch (ADR-0023 D16); removed in a later release.
+	ServiceRAGQuery  ServiceKey = "rag.query"
+	ServiceRetrieval ServiceKey = "retrieval.service" // *retrieval/services.Service: RetrievalCorpusRegistry, RetrievalOutbox, RetrievalSearch, RetrievalPrincipalResolver (ADR-0023)
 
-	ServiceNotificationSender  ServiceKey = "notification.sender"
-	ServicePasswordService     ServiceKey = "auth.password"
-	ServicePasswordAuthService ServiceKey = "auth.password_auth"
+	ServiceNotificationSender ServiceKey = "notification.sender"
+	// ServiceMarketingOptoutManager is the audited lookup/lift/record of
+	// durable marketing opt-outs (iface.MarketingOptoutManager).
+	ServiceMarketingOptoutManager ServiceKey = "notification.marketing_optout_manager"
+	// ServiceEmailSuppressionManager is the audited lookup/suppress/lift of
+	// the email suppression list (iface.EmailSuppressionManager): an address
+	// on it receives no email of any type.
+	ServiceEmailSuppressionManager ServiceKey = "notification.email_suppression_manager"
+	ServicePasswordService         ServiceKey = "auth.password"
+	ServicePasswordAuthService     ServiceKey = "auth.password_auth"
 
 	// ServiceSessionRevocation is the Redis-backed revoked-session set. Every
 	// authenticated request checks it before running the handler, so an
@@ -87,6 +96,14 @@ const (
 	// every token of the other tier. Value: middleware.MFAEpochLookup.
 	ServiceMFAEpochLookup ServiceKey = "auth.mfa_epoch_lookup"
 
+	// ServicePasswordSetLookup resolves whether a user has a password set,
+	// scoped to the tier that minted the caller's token. Consumed by
+	// AuthMiddleware.RequireStepUp so a caller with no factor and no
+	// password (an OAuth-only account) is told to enroll a factor instead
+	// of being offered a password reconfirm. Wired by the auth module from
+	// both tiers' user providers. Value: middleware.PasswordSetLookup.
+	ServicePasswordSetLookup ServiceKey = "auth.password_set_lookup"
+
 	// ServiceWebAuthn is the W3C WebAuthn ceremony orchestrator (registration
 	// + assertion). Registered by the auth module when the deployment has
 	// configured an RP via WEBAUTHN_RP_ID + WEBAUTHN_RP_ORIGINS. Consumers
@@ -102,7 +119,8 @@ const (
 	// auth-policy roadmap. Value: *auth/services.AuthPolicyService.
 	ServiceAuthPolicy ServiceKey = "auth.policy"
 
-	ServiceTenantProvider ServiceKey = "tenant.provider"
+	ServiceTenantProvider        ServiceKey = "tenant.provider"
+	ServiceTenantDirectoryReader ServiceKey = "tenant.directory_reader" // iface.TenantDirectoryReader, registered by core/tenant
 	// ServiceAccessProvider is the polymorphic-owner capability-entitlement
 	// surface. Registered by the tenant module alongside ServiceTenantProvider
 	// because the entitlements projection lives in the tenant collection set
@@ -116,6 +134,11 @@ const (
 	// its audit sink via SetAuditSink — the public provider interface stays
 	// slim, the concrete service carries post-init setters.
 	ServiceTenantService ServiceKey = "tenant.service"
+	// ServiceModuleStatus is the *ModuleRegistry, registered by the server
+	// bootstrap so a module can ask whether another module is started
+	// (ModuleStatusReader). Resolve it lazily: the registry is populated before
+	// InitAll, but module state changes at runtime. Value: *ModuleRegistry.
+	ServiceModuleStatus ServiceKey = "module.status"
 	// ServiceDefaultTenantProvider resolves the platform default Tier-1
 	// tenant (tenant_defaults pointer). Value: iface.DefaultTenantProvider.
 	ServiceDefaultTenantProvider ServiceKey = "tenant.default_provider"
@@ -141,6 +164,11 @@ const (
 	// Value: *capability.Registry. Consumers use it to enumerate or resolve
 	// capability IDs when building the admin catalog UI or validating grants.
 	ServiceCapabilityRegistry ServiceKey = "system.capability_registry"
+
+	// ServiceJobCatalog is the boot-time catalog of module-contributed
+	// background jobs (HasJobs) collected after InitAll. Registered empty
+	// before any Init. Value: *jobs.Catalog.
+	ServiceJobCatalog ServiceKey = "jobs.catalog"
 
 	// ServiceFirstAdminClaimer gates the platform's one-time super_admin seat.
 	// Registered by main.go wiring; consumed by password auth + setup wizard
@@ -188,6 +216,12 @@ const (
 	// self-subscribed) land on the audit trail alongside the module's
 	// own subscriptions_activity log.
 	ServiceSubscriptionService ServiceKey = "subscriptions.service"
+
+	// ServiceUserPreferenceRegistry is the boot-time catalog of per-user
+	// preference schemas and profile sections declared by modules
+	// (*UserPreferenceRegistry, user_preferences.go). Created and
+	// registered by the module registry before Init, populated after.
+	ServiceUserPreferenceRegistry ServiceKey = "user.preference_registry"
 
 	// ServicePIIProducerRegistry is the boot-time catalog of PII
 	// producers. Pre-created in cmd/server/main.go before InitAll so
@@ -359,3 +393,9 @@ func MustGetTyped[T any](r *ServiceRegistry, key ServiceKey) T {
 const (
 	ServiceCRMActivitySink ServiceKey = "crm.activity_sink"
 )
+
+// ModuleStatusReader reports whether a module is currently started. It is the
+// narrow view of *ModuleRegistry registered under ServiceModuleStatus.
+type ModuleStatusReader interface {
+	IsStarted(name string) bool
+}

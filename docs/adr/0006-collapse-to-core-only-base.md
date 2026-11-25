@@ -8,7 +8,7 @@ public: true
 
 | Field | Value |
 |---|---|
-| **Status** | ✅ Accepted — shipped in v0.3.0 (2026-06-02); partially amended by [ADR-0009](0009-core-compliance-module.md) (compliance re-homed to core) |
+| **Status** | ✅ Accepted — shipped in v0.3.0 (2026-06-02); partially amended by [ADR-0009](0009-core-compliance-module.md) (compliance re-homed to core) and [ADR-0022](0022-core-llm-module.md) (`llm` added as a core module) |
 | **Date** | 2026-06-01 |
 | **Authors** | @salvatore.balestrino |
 | **Supersedes** | Reverses the multi-repo extraction track (SDK split "Phase 5", addon repo extraction). Partially supersedes [ADR-0003](0003-three-audience-host-split.md) (the `client` audience is emptied of subscriptions/payments/onboarding). |

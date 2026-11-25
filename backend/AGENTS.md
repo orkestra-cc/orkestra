@@ -1,10 +1,10 @@
 # Backend — Go Modular Server
 
-Single Go binary, single Go module. 8 core modules (always loaded) and an **empty optional-module catalog** ([ADR-0006](../docs/adr/0006-collapse-to-core-only-base.md): core-only base — a fork adds its own optional modules in-tree). Slim `cmd/server/main.go` that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
+Single Go binary, single Go module. 11 core modules (always loaded) and an **empty optional-module catalog** ([ADR-0006](../docs/adr/0006-collapse-to-core-only-base.md): core-only base — a fork adds its own optional modules in-tree). Slim `cmd/server/main.go` that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
 
 ## Stack
 
-Go 1.26.9 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR hot-reload (Docker)
+Go 1.27.4 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR hot-reload (Docker)
 
 ## Module System
 
@@ -34,7 +34,7 @@ frozen** — it is the public SDK surface, so new capabilities arrive as new
 sub-interfaces, never as extra methods here. Prose reference:
 [`../docs/site/sdk/module-interface.mdx`](../docs/site/sdk/module-interface.mdx).
 
-**Registration** (`cmd/server/catalog.go` + `catalog_<name>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging → compliance) are always loaded — they live in `catalog.go`. The `optionalModules` map ships empty; a fork's optional module lives in its own `cmd/server/catalog_<name>.go` file and registers itself via `init()`. Every registered module compiles into the binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. Optional modules are instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
+**Registration** (`cmd/server/catalog.go` + `catalog_<name>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging → jobs → llm → retrieval → compliance) are always loaded — they live in `catalog.go`. The `optionalModules` map ships empty; a fork's optional module lives in its own `cmd/server/catalog_<name>.go` file and registers itself via `init()`. Every registered module compiles into the binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. Optional modules are instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
 
 **First-boot seeding**: on a fresh install, `ConfigService.SeedFromModules` creates the `module_configs` document from each module's `ConfigSchema().EnvVar` and `EnabledByDefault`. Subsequent boots ignore env defaults; admin-set values in `module_configs` are authoritative. Subsequent boots also **backfill** any schema key an existing document lacks (a key the schema gained after the document was created) with its `EnvVar`/`Default` **when that fallback is non-empty** — present values, explicit empty strings included, are never touched, and a key whose fallback is empty stays absent because absence is meaningful to `GetRawValue` readers (ADR-0017: an absent `sessionAbsoluteTTL` is the default cap, a present empty one disables it). The backfilled key names are logged at INFO. So a runtime read never has to guess a default for a key the document was created without. (ADR-0006 removed the `ORKESTRA_PROFILE` minimal/full seeding — with an empty catalog there is nothing to pre-enable.) Documents for modules **no longer compiled into the binary** (addons a fork removed, or anything left over from the ADR-0006 core-only collapse on an upgraded environment) are treated as **orphans**: `GetAllConfigs` / `ModuleStatusJSON` filter them out of the admin listing so the `/admin/modules` UI only ever shows registered modules. The orphan documents are *not* deleted — they stay in the collection (recoverable, secrets intact); they are simply not served.
 
@@ -57,16 +57,20 @@ backend/
 │   │   ├── main.go                 # Boot, register modules, start
 │   │   ├── catalog.go              # Core module catalog + empty optionalModules
 │   │   └── catalog_<name>.go       # (none in the base) one per fork-added module
-│   └── migrations/                 # One-shot data migrations (0002, 0003)
+│   ├── migrations/                 # One-shot data migrations (0002, 0003)
+│   └── retrieval-bench/            # ADR-0023 D14 benchmark CLI (make retrieval-bench; imports retrieval/engine and llm/installation by documented exception)
 ├── internal/
-│   ├── core/                       # Always loaded (init order: user → notification → tenant → authz → auth → navigation → logging)
+│   ├── core/                       # Always loaded (init order: user → notification → tenant → authz → auth → navigation → logging → jobs → llm → retrieval → compliance)
 │   │   ├── user/                   # User CRUD, roles, documents
 │   │   ├── notification/           # Email delivery, templates, preferences, unsubscribe
 │   │   ├── tenant/                 # Orgs + memberships (two-tier tenancy)
 │   │   ├── authz/                  # Permissions, roles, Cedar policy engine
 │   │   ├── auth/                   # Email/password + OAuth 2.1, JWT, sessions, RBAC
 │   │   ├── navigation/             # Dynamic menu from module NavItems
-│   │   └── logging/                # Runtime log-level admin (ADR-0005 Phase F)
+│   │   ├── logging/                # Runtime log-level admin (ADR-0005 Phase F)
+│   │   ├── llm/                    # LLM credentials, models, grants, gateway (ADR-0022)
+│   │   ├── retrieval/              # Corpora, hybrid search, Qdrant engine driver (ADR-0023)
+│   │   └── compliance/             # Audit trail + GDPR DSR, KMS, legal hold, policy engine (ADR-0009)
 │   │   # internal/addons/ does not exist in the base — a fork adds it
 │   ├── shared/                     # Backend-internal infrastructure
 │   │   ├── config/                 # App configuration
@@ -120,7 +124,7 @@ Users enable the module via the admin UI at `/admin/modules` (takes effect immed
 
 OpenAPI specs are auto-generated by Huma v2 — add endpoints with `huma.Register()` and they appear in `/docs` after restart.
 
-**`API_DOCS_ENABLED`** (`cmd/server/docs.go`, `shared/config`): `/docs` and `/openapi.json` are registered only when this is true — default `true` in `development`, `false` in `staging`/`production`. The document is a complete route inventory, and the docs page executes a third-party bundle on the API origin, which is the origin that carries the HttpOnly refresh cookie — so a production-like stack that opts in must also gate both paths at the edge (Cloudflare Access, IP allowlist). `make openapi-dump` / `OPENAPI_DUMP` read the in-memory document and are unaffected. The page's CSP allows exactly one script (the pinned Scalar bundle) and `connect-src 'self'`; bumping Scalar means updating `scalarScriptURL` and `scalarScriptSRI` together (recipe in the file), and `TestDocsPage_IsNotAScriptSinkOnTheAPIOrigin` fails on any loosening.
+**`API_DOCS_ENABLED`** (`cmd/server/docs.go`, `shared/config`): `/docs` and `/openapi.json` are registered only when this is true — default `true` in `development`, `false` in `staging`/`production`. Off means off for huma's built-in copies as well: every `humachi.New(r, ri.APIConfig)` registers `/openapi.json`, `/openapi.yaml`, `/openapi-3.0.*` and `/schemas/{schema}` from the shared config, so `setupMiddleware` mounts `denySpecRoutes` on both audience muxes when the flag is false and those paths answer 404 (`TestSpecRoutes_NotServedWhenAPIDocsAreDisabled`). The `$schema` links in response bodies stay as they are; they resolve only where the docs are on. The document is a complete route inventory, and the docs page executes a third-party bundle on the API origin, which is the origin that carries the HttpOnly refresh cookie — so a production-like stack that opts in must also gate `/docs`, `/openapi*` and `/schemas/*` at the edge (Cloudflare Access, IP allowlist). `make openapi-dump` / `OPENAPI_DUMP` read the in-memory document and are unaffected. The page's CSP allows exactly one script (the pinned Scalar bundle) and `connect-src 'self'`; bumping Scalar means updating `scalarScriptURL` and `scalarScriptSRI` together (recipe in the file), and `TestDocsPage_IsNotAScriptSinkOnTheAPIOrigin` fails on any loosening.
 
 ### Canonical spec for docs.orkestra.cc
 
@@ -148,7 +152,7 @@ return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 // → 409 {"status":409,"title":"Conflict","detail":"Email already in use","code":"auth.email_in_use"}
 ```
 
-Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `TooManyRequests`, `ServiceUnavailable`, `Internal`); `errcode.New(status, code, detail)` exists for one-offs. `TooManyRequests` is the one builder that composes with `WithHeader` in practice — a 429 without `Retry-After` gives the caller nothing to act on, so every emitter chains `.WithHeader("Retry-After", "<seconds>")`. Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
+Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `TooManyRequests`, `ServiceUnavailable`, `Internal`); `errcode.New(status, code, detail)` exists for one-offs. `TooManyRequests` is the one builder that composes with `WithHeader` in practice — a 429 without `Retry-After` gives the caller nothing to act on, so every emitter chains `.WithHeader("Retry-After", "<seconds>")`. `FeatureNotConfigured(code, detail)` builds the same 503 body as `ServiceUnavailable` but opts in as an *expected* unavailability (an optional feature the installation has deliberately left unconfigured), which the request logger grades WARN; never use it for a fault that breaks a core flow (`auth.jwt_not_configured` stays `ServiceUnavailable`). Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
 
 Examples:
 
@@ -188,9 +192,9 @@ Orkestra sets three cookies, all HttpOnly. None is readable by script.
 
 | Cookie | Set by | Lifetime | Purpose |
 |---|---|---|---|
-| `orkestra_cookie` (name from `COOKIE_NAME_REFRESH`) | login / refresh | 7d | The refresh token. The only credential cookie; the SPA holds the access token in memory. |
-| `orkestra_did` | `shared/middleware.DeviceMiddleware` on first sight of a browser | 1y | Server-minted random device identifier. **Not a credential** — it identifies a device, it does not authenticate one. Replaces the old MD5-of-headers id, which any caller could reproduce. Native apps send `X-Device-ID` instead. |
-| `orkestra_oauth_state` | OAuth start endpoints | 10m | Per-flow CSRF nonce that binds an OAuth callback to the browser that started it. Cleared on callback. |
+| `orkestra_cookie` (default; `COOKIE_NAME_REFRESH`, else `COOKIE_NAME_PREFIX` + `cookie`) | login / refresh | 7d | The refresh token. The only credential cookie; the SPA holds the access token in memory. |
+| `orkestra_did` (default; `DEVICE_COOKIE_NAME`, else `COOKIE_NAME_PREFIX` + `did`) | `shared/middleware.DeviceMiddleware` on first sight of a browser | 1y | Server-minted random device identifier. **Not a credential** — it identifies a device, it does not authenticate one. Replaces the old MD5-of-headers id, which any caller could reproduce. Native apps send `X-Device-ID` instead. `Secure` follows `COOKIE_SECURE` like the session cookies (behind a TLS-terminating proxy the request itself is plain HTTP). |
+| `orkestra_oauth_state` (default; `COOKIE_NAME_PREFIX` + `oauth_state`) | OAuth start endpoints | 10m | Per-flow CSRF nonce that binds an OAuth callback to the browser that started it. Cleared on callback. |
 
 ## Client IP resolution (trusted proxies)
 
@@ -219,7 +223,7 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose logs -f backend
 ```
 
-The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; a fork with a Chainguard subscription overrides the base via the `GO_BASE` build-arg). One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`) + an opt-in `docker-compose.observability.yml` — ADR-0006 removed the `minimal`/`full` runtime-profile compose files.
+The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; a fork with a Chainguard subscription overrides the base via the `GO_BASE` build-arg). One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`), plus opt-in `docker-compose.observability.yml` and `docker-compose.retrieval.yml` overlays — ADR-0006 removed the `minimal`/`full` runtime-profile compose files. The retrieval overlay (Qdrant + two TEI servers on the internal `retrieval-net`, ADR-0023) is what `cmd/retrieval-bench` measures: `make retrieval-bench` runs it with `go run` inside the dev/staging backend container (see [`internal/core/retrieval/AGENTS.md`](internal/core/retrieval/AGENTS.md#benchmark-d14)).
 
 **WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually (container names are stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; example below uses the shipped defaults, **not necessarily your stack** — read yours from `docker/.env`, see [docker/AGENTS.md](../docker/AGENTS.md#multi-stack-model)):
 ```bash
@@ -229,7 +233,7 @@ docker restart orkestra-backend-development
 
 **Log level**: controlled by `LOG_LEVEL` env var — `debug` (dev), `info` (staging), `warn` (prod).
 
-**Structured request logger** (ADR-0005 Phase A): every HTTP request produces one JSON line via `shared/middleware.RequestLogger` (mounted outermost on each audience mux after `RequestID` + `RealIP`). The payload is **allowlist-only** — never log bodies, headers, or raw query strings; module code uses `slog.InfoContext(ctx, "msg", slog.String(...))` so `trace_id` / `span_id` correlate to the same request automatically via `shared/utils.TraceContextHandler`. Tunables: `LOG_HTTP_SKIP_PATHS` (default `/health,/ready,/metrics,/openapi.json`), `LOG_HTTP_SLOW_THRESHOLD_MS` (default `1000`).
+**Structured request logger** (ADR-0005 Phase A): every HTTP request produces one JSON line via `shared/middleware.RequestLogger` (mounted outermost on each audience mux after `RequestID` + `RealIP`). The payload is **allowlist-only** — never log bodies, headers, or raw query strings; module code uses `slog.InfoContext(ctx, "msg", slog.String(...))` so `trace_id` / `span_id` correlate to the same request automatically via `shared/utils.TraceContextHandler`. Level: 5xx → ERROR, 4xx → WARN, except a 503 built with `errcode.FeatureNotConfigured` — an explicit opt-in for an optional feature the installation has deliberately left unconfigured — → WARN; the `errors.RecordErrorCode()` Huma transformer records that opt-in via `ctxauth.RequestAnnotations.MarkExpectedUnavailable`. The code is never pattern-matched: a deployment fault such as `auth.jwt_not_configured` uses plain `errcode.ServiceUnavailable` and stays ERROR. Tunables: `LOG_HTTP_SKIP_PATHS` (default `/health,/ready,/metrics,/openapi.json`), `LOG_HTTP_SLOW_THRESHOLD_MS` (default `1000`).
 
 **HTTP latency histogram** (ADR-0005 Phase B): the same middleware observes `orkestra_http_request_duration_seconds` on `metrics.Default()` after each request, labelled `{audience, method, route, status_class}` with the Chi route template (never raw path) and `trace_id` as a Prometheus exemplar. Streaming endpoints (paths ending `/stream`) are intentionally excluded so SSE lifetime doesn't pollute API p99. The histogram is wired by the `setupMiddleware` call sites — modules don't need to register anything.
 
@@ -241,7 +245,8 @@ docker restart orkestra-backend-development
 
 ## Rules
 
-- **Read the module's own AGENTS.md** before modifying it — all eight core modules (`user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `compliance`) have one under `internal/core/<name>/`. Each also has a published page under [`../docs/site/modules/core/`](../docs/site/modules/core/) — the AGENTS.md is the contract, the page is the reference; **update both** when you change a module.
+- **Read the module's own AGENTS.md** before modifying it — all eleven core modules (`user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `jobs`, `llm`, `retrieval`, `compliance`) have one under `internal/core/<name>/`. Each also has a published page under [`../docs/site/modules/core/`](../docs/site/modules/core/) — the AGENTS.md is the contract, the page is the reference; **update both** when you change a module.
+- **New background work uses `module.HasJobs`** — return `[]jobs.Definition` (schedule, timeout, retry) from the module and let the `jobs` core module run it; never start a `time.NewTicker` loop in `Start()`. It gives the job a cluster lease (at most one run in progress, so the body must be idempotent), durable retries, a run log, metrics and the `/admin/modules/jobs` console. Contract and example: [`internal/core/jobs/AGENTS.md`](internal/core/jobs/AGENTS.md). Existing tickers migrate in their own PRs
 - **Use the module system** — don't add routes or init logic directly to main.go
 - **Use `pkg/sdk/iface`** for cross-module deps — never import another module's services package from module.go
 - **Validate all inputs**, implement RBAC on every endpoint, never expose secrets in responses

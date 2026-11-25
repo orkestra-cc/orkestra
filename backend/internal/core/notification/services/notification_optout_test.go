@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -121,3 +122,8 @@ func TestDispatch_TransactionalIgnoresOptouts(t *testing.T) {
 		t.Fatalf("expected one send, got %d", driver.sends)
 	}
 }
+
+func (f *fakeOptouts) Get(context.Context, string) (*models.MarketingOptoutDoc, error) {
+	return nil, nil
+}
+func (f *fakeOptouts) DeleteIfAt(context.Context, string, time.Time) (bool, error) { return false, nil }

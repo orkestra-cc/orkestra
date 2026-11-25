@@ -12,7 +12,6 @@ import (
 	authRepository "github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/user/repository"
 	"github.com/orkestra/backend/internal/shared/blob"
-	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -30,7 +29,21 @@ var (
 	ErrEmailNotUnique         = errors.New("email address already in use")
 	ErrOAuthProviderNotLinked = errors.New("oauth provider is not linked to this user")
 	ErrInvalidAvatarSource    = errors.New("invalid avatar source")
+	// ErrTargetRoleChanged: an UpdateUser or SoftDeleteAndAliasEmail under
+	// WithExpectedRole found the user holding another role.
+	ErrTargetRoleChanged = repository.ErrRoleChanged
 )
+
+// WithExpectedRole makes the next UpdateUser or SoftDeleteAndAliasEmail on
+// ctx write only while the user still holds role, failing with
+// ErrTargetRoleChanged otherwise. It closes the window between the
+// handlers' target-tier guard, which reads the role, and the write.
+func WithExpectedRole(ctx context.Context, role string) context.Context {
+	return repository.WithExpectedRole(ctx, role)
+}
+
+// ExpectedRole returns the precondition WithExpectedRole put on ctx.
+func ExpectedRole(ctx context.Context) string { return repository.ExpectedRole(ctx) }
 
 // UserService defines the interface for user business logic
 type UserService interface {
@@ -182,15 +195,6 @@ func (s *userService) CreateUser(ctx context.Context, input *iface.CreateUserInp
 	user.Phone = input.Phone
 	user.Role = input.Role
 
-	// Encrypt PIN if provided
-	if input.PIN != "" {
-		encryptedPIN, err := s.encryptPIN(input.PIN)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt PIN: %w", err)
-		}
-		user.PIN = encryptedPIN
-	}
-
 	// Create user in repository
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		if err == repository.ErrUserAlreadyExists {
@@ -280,20 +284,14 @@ func (s *userService) UpdateUser(ctx context.Context, id string, input *iface.Up
 		}
 	}
 
-	// Encrypt PIN if provided
-	if input.PIN != "" {
-		encryptedPIN, err := s.encryptPIN(input.PIN)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt PIN: %w", err)
-		}
-		input.PIN = encryptedPIN
-	}
-
 	// Update user in repository
 	updatedUser, err := s.userRepo.Update(ctx, id, input)
 	if err != nil {
 		if err == repository.ErrUserNotFound {
 			return nil, ErrUserNotFound
+		}
+		if errors.Is(err, repository.ErrRoleChanged) {
+			return nil, ErrTargetRoleChanged
 		}
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
@@ -337,6 +335,9 @@ func (s *userService) SoftDeleteAndAliasEmail(ctx context.Context, id string) er
 	if err := s.userRepo.SoftDeleteAndAliasEmail(ctx, id); err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil
+		}
+		if errors.Is(err, repository.ErrRoleChanged) {
+			return ErrTargetRoleChanged
 		}
 		return fmt.Errorf("failed to soft-delete-and-alias user: %w", err)
 	}
@@ -471,18 +472,6 @@ func (s *userService) CountActiveAdministrators(ctx context.Context, excludeUUID
 		return 0, fmt.Errorf("count active administrators: %w", err)
 	}
 	return count, nil
-}
-
-// encryptPIN encrypts a PIN using the crypto utility
-func (s *userService) encryptPIN(pin string) (string, error) {
-	// Use the existing OAuth token encryption utility as it provides AES-GCM encryption
-	return utils.EncryptOAuthToken(pin)
-}
-
-// decryptPIN decrypts a PIN using the crypto utility
-func (s *userService) decryptPIN(encryptedPIN string) (string, error) {
-	// Use the existing OAuth token decryption utility
-	return utils.DecryptOAuthToken(encryptedPIN)
 }
 
 // enrichWithOAuthProviders enriches user response with OAuth providers
@@ -963,6 +952,69 @@ func (s *userService) RecordFailedLogin(ctx context.Context, userUUID string, lo
 	}
 	return s.userRepo.RecordFailedLogin(ctx, userUUID, lockUntil)
 }
+
+// GetUserForPINAuth implements iface.PINCredentialStore.
+func (s *userService) GetUserForPINAuth(ctx context.Context, username string) (*iface.User, error) {
+	if username == "" {
+		return nil, ErrUserNotFound
+	}
+	user, err := s.userRepo.GetForPINAuth(ctx, username)
+	if err != nil {
+		return nil, asUserNotFound(err)
+	}
+	return user, nil
+}
+
+// CountUsersByUsername implements iface.PINCredentialStore.
+func (s *userService) CountUsersByUsername(ctx context.Context, username string) (int64, error) {
+	if username == "" {
+		return 0, nil
+	}
+	return s.userRepo.CountByUsername(ctx, username)
+}
+
+// SetPINHash implements iface.PINCredentialStore.
+func (s *userService) SetPINHash(ctx context.Context, userUUID, hash string) error {
+	if strings.TrimSpace(userUUID) == "" || hash == "" {
+		return ErrInvalidInput
+	}
+	return asUserNotFound(s.userRepo.SetPINHash(ctx, userUUID, hash))
+}
+
+// ClearPIN implements iface.PINCredentialStore.
+func (s *userService) ClearPIN(ctx context.Context, userUUID, expectedHash string) error {
+	if strings.TrimSpace(userUUID) == "" {
+		return ErrInvalidInput
+	}
+	return asUserNotFound(s.userRepo.ClearPIN(ctx, userUUID, expectedHash))
+}
+
+// RecordFailedPIN implements iface.PINCredentialStore.
+func (s *userService) RecordFailedPIN(ctx context.Context, userUUID string) (int, error) {
+	if userUUID == "" {
+		return 0, ErrInvalidInput
+	}
+	n, err := s.userRepo.RecordFailedPIN(ctx, userUUID)
+	return n, asUserNotFound(err)
+}
+
+// LockPIN implements iface.PINCredentialStore.
+func (s *userService) LockPIN(ctx context.Context, userUUID, expectedHash string, until time.Time) error {
+	if userUUID == "" || expectedHash == "" {
+		return ErrInvalidInput
+	}
+	return s.userRepo.LockPIN(ctx, userUUID, expectedHash, until)
+}
+
+// ClearFailedPINs implements iface.PINCredentialStore.
+func (s *userService) ClearFailedPINs(ctx context.Context, userUUID string) error {
+	if userUUID == "" {
+		return ErrInvalidInput
+	}
+	return s.userRepo.ClearFailedPINs(ctx, userUUID)
+}
+
+var _ iface.PINCredentialStore = (*userService)(nil)
 
 // ClearFailedLogins delegates to the repository.
 func (s *userService) ClearFailedLogins(ctx context.Context, userUUID string) error {

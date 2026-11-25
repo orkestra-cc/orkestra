@@ -250,6 +250,10 @@ type AuthService interface {
 	GetSessionCountByUUID(ctx context.Context, userUUID string) (int, error)
 	RenameSessionByUUID(ctx context.Context, userUUID string, deviceID, deviceName string) error
 	TerminateSessionByUUID(ctx context.Context, userUUID string, deviceID string) error
+	// TerminateCurrentSession ends one session by id (the JWT sid): refresh
+	// tokens, session doc and Redis sid. No-op for an unknown session or
+	// one owned by another user.
+	TerminateCurrentSession(ctx context.Context, userUUID, sessionUUID string) error
 	TerminateAllSessionsByUUID(ctx context.Context, userUUID string) error
 
 	// Enhanced token management with UUID and risk assessment
@@ -367,6 +371,9 @@ type AuthConfig struct {
 }
 
 type authService struct {
+	// pinSessions re-validates a PIN session on every refresh
+	// (SetPINSessionChecker); nil refuses PIN refreshes.
+	pinSessions PINSessionChecker
 	// oauthCompensationFailure counts a failed backwards compensation on
 	// the signup reservation (spec §4.8 D32 item 5). Nil records on the
 	// process-wide metrics collector; tests inject a counter.
@@ -459,6 +466,19 @@ func (s *authService) SetPolicy(p *AuthPolicyService) {
 // SetAudience records the surface this service serves so policy
 // reads can fetch audience-scoped knobs.
 func (s *authService) SetOAuthStoreGate(gate func() bool) { s.oauthStoreGate = gate }
+
+// SetPINSessionChecker wires the tier's PIN service, which every refresh
+// of a PIN session consults (CheckPINSession). Unset, a PIN session
+// cannot refresh: there is nothing to re-validate it against.
+func (s *authService) SetPINSessionChecker(c PINSessionChecker) { s.pinSessions = c }
+
+// checkPINSession re-validates a PIN session before a refresh mints.
+func (s *authService) checkPINSession(ctx context.Context, userUUID, deviceID string) error {
+	if s.pinSessions == nil {
+		return ErrRefreshSessionInactive
+	}
+	return s.pinSessions.CheckPINSession(ctx, userUUID, deviceID)
+}
 
 func (s *authService) SetAudience(a PolicyAudience) {
 	s.audience = a
@@ -1309,6 +1329,66 @@ func (s *authService) FindAccountsForConsolidation(ctx context.Context, email st
 	return []*iface.User{convertUserResponseToAuthModel(userResponse)}, nil
 }
 
+// ActiveSessions implements iface.SessionActivityReader for this tier: true
+// for each id whose session doc is isActive and unexpired and, when a
+// revocation store is wired, not in the revocation set.
+// A session therefore reads ended once it expires (idle TTL or max age) or
+// once a revocation runs revokeSessionInternal on it: password change,
+// admin or self revoke, refresh replay, and logout. Logout reaches it only
+// when the request identifies the session: a verified bearer access token
+// of that session (TerminateCurrentSession on its sid) or a verified
+// refresh cookie (TerminateSessionByUUID on the cookie's device). A logout
+// carrying neither ends nothing. The doc is authoritative, Redis is defense
+// in depth and a Redis error is logged at Warn and ignored so push never
+// hard-depends on Redis.
+// Unknown ids are absent from the map; empty input does not query.
+func (s *authService) ActiveSessions(ctx context.Context, sessionIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(sessionIDs))
+	if len(sessionIDs) == 0 || s.authSessionRepo == nil {
+		return out, nil
+	}
+	docs, err := s.authSessionRepo.GetActiveByUUIDs(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range docs {
+		if d == nil {
+			continue
+		}
+		if s.sessionRevocation != nil {
+			revoked, rerr := s.sessionRevocation.IsRevoked(ctx, d.UUID)
+			if rerr != nil {
+				slog.Default().Warn("auth: session revocation lookup failed; trusting the session doc",
+					slog.String("error", rerr.Error()))
+			} else if revoked {
+				continue
+			}
+		}
+		out[d.UUID] = true
+	}
+	return out, nil
+}
+
+// TerminateCurrentSession ends the single session sessionUUID of userUUID
+// (refresh tokens, session doc, Redis sid) — the logout path of a bearer
+// caller that has no verifiable refresh cookie. A session that is unknown
+// or belongs to another user is a silent no-op (logout is idempotent).
+func (s *authService) TerminateCurrentSession(ctx context.Context, userUUID, sessionUUID string) error {
+	if userUUID == "" || sessionUUID == "" || s.authSessionRepo == nil {
+		return nil
+	}
+	sess, err := s.authSessionRepo.GetByUUID(ctx, sessionUUID)
+	if err != nil {
+		return err
+	}
+	if sess == nil || sess.UserUUID != userUUID {
+		return nil
+	}
+	return s.revokeSessionInternal(ctx, sessionUUID, "user_logout")
+}
+
+var _ iface.SessionActivityReader = (*authService)(nil)
+
 // GetUserSessionsByUUID lists active (isActive && !expired) sessions
 // for the user, sorted most-recent-first. The IsCurrent flag is left
 // unset — the HTTP handler stamps it by comparing each
@@ -1509,6 +1589,62 @@ func (s *authService) RevokeAllUserSessionsExcept(ctx context.Context, userUUID,
 	s.RecordSelfAuthEvent(ctx, "self_session_revoke_all", userUUID, map[string]interface{}{
 		"revoked": revoked,
 	})
+	return revoked, degraded
+}
+
+// RevokePINSessions revokes the user's active sessions that began with a
+// PIN — every one, or only those on deviceID when it is non-empty — with
+// the same three-step revocation as every other path. A PIN set, change
+// or removal, and a device revocation, end the sessions the old secret
+// opened without touching the user's password or OAuth sessions.
+// Returns the count revoked; a partial Redis push is reported through
+// SessionRevocationDegradedError after the loop, as RevokeAllUserSessionsExcept does.
+// RevokePINSession ends one PIN session of the user, leaving the others
+// alone. A session that is not the user's, not a PIN session or already
+// gone is a no-op.
+func (s *authService) RevokePINSession(ctx context.Context, userUUID, sessionUUID, reason string) error {
+	if userUUID == "" || sessionUUID == "" || s.authSessionRepo == nil {
+		return nil
+	}
+	sess, err := s.authSessionRepo.GetByUUID(ctx, sessionUUID)
+	if err != nil {
+		return err
+	}
+	if sess == nil || sess.UserUUID != userUUID || sess.LoginMethod != models.LoginMethodPIN {
+		return nil
+	}
+	return s.revokeSessionInternal(ctx, sessionUUID, reason)
+}
+
+func (s *authService) RevokePINSessions(ctx context.Context, userUUID, deviceID, reason string) (int, error) {
+	if userUUID == "" {
+		return 0, fmt.Errorf("revoke pin sessions: userUUID required")
+	}
+	if s.authSessionRepo == nil {
+		return 0, nil
+	}
+	sessions, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+	if err != nil {
+		return 0, err
+	}
+	revoked := 0
+	var degraded error
+	for _, sess := range sessions {
+		if sess == nil || sess.LoginMethod != models.LoginMethodPIN {
+			continue
+		}
+		if deviceID != "" && sess.DeviceID != deviceID {
+			continue
+		}
+		if err := s.revokeSessionInternal(ctx, sess.UUID, reason); err != nil {
+			var partial *SessionRevocationDegradedError
+			if !errors.As(err, &partial) {
+				return revoked, err
+			}
+			degraded = err
+		}
+		revoked++
+	}
 	return revoked, degraded
 }
 
@@ -1913,6 +2049,14 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	// mfae from `user`, so the new token is issued under the CURRENT epoch
 	// and is never stale the moment it is signed.
 	amr, lastOTPAt := carryAMR(claims.AMR, claims.LastOTPAt, claims.MFAEpoch, user.MFAEpoch)
+	refreshTTL := s.jwtService.RefreshTokenTTL()
+	pinSession := tokenDoc.LoginMethod == models.LoginMethodPIN
+	if pinSession {
+		if err := s.checkPINSession(ctx, user.UUID, tokenDoc.DeviceID); err != nil {
+			return nil, err
+		}
+		amr, lastOTPAt, refreshTTL = s.pinSessionMint(ctx, security)
+	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
 		// Signing is ours to get right; a failure here is not the caller's.
@@ -1932,12 +2076,13 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		IPAddress:    security.IPAddress,
 		RiskScore:    tokenDoc.RiskScore,
 		IssuedAt:     now,
-		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
+		ExpiresAt:    now.Add(refreshTTL),
 		LastActivity: now,
 		IsRevoked:    false,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		FamilyID:     tokenDoc.FamilyID, // inherit: rotation doesn't start a new family
+		LoginMethod:  tokenDoc.LoginMethod,
 	}
 
 	if err := s.refreshTokenRepo.RotateWithFamily(ctx, hashedToken, newDoc); err != nil {
@@ -1976,15 +2121,20 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	oauthProviders, _ := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
 	oauthProvidersInfo := models.ConvertOAuthProvidersToInfo(oauthProviders)
 
+	expiresIn := int64(s.jwtService.AccessTokenTTL(ctx).Seconds())
+	if pinSession {
+		expiresIn = pair.ExpiresIn
+	}
 	return &models.TokenResponse{
-		AccessToken:    pair.AccessToken,
-		RefreshToken:   pair.RefreshToken,
-		TokenType:      "Bearer",
-		ExpiresIn:      int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
-		SessionID:      newSessionID,
-		DeviceID:       tokenDoc.DeviceID,
-		User:           s.buildUserResponse(ctx, user),
-		OAuthProviders: oauthProvidersInfo,
+		AccessToken:      pair.AccessToken,
+		RefreshToken:     pair.RefreshToken,
+		TokenType:        "Bearer",
+		ExpiresIn:        expiresIn,
+		RefreshExpiresIn: int64(refreshTTL.Seconds()),
+		SessionID:        newSessionID,
+		DeviceID:         tokenDoc.DeviceID,
+		User:             s.buildUserResponse(ctx, user),
+		OAuthProviders:   oauthProvidersInfo,
 	}, nil
 }
 
@@ -2130,6 +2280,14 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 	// rotating, so a client that only ever calls it must not be the one path
 	// where a removed factor's markers live on.
 	amr, lastOTPAt := carryAMR(claims.AMR, claims.LastOTPAt, claims.MFAEpoch, user.MFAEpoch)
+	expiresIn := int64(s.jwtService.AccessTokenTTL(ctx).Seconds())
+	if doc.LoginMethod == models.LoginMethodPIN {
+		if err := s.checkPINSession(ctx, user.UUID, doc.DeviceID); err != nil {
+			return nil, err
+		}
+		amr, lastOTPAt, _ = s.pinSessionMint(ctx, security)
+		expiresIn = int64(security.AccessTTL.Seconds())
+	}
 	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
 		// Signing is ours to get right; a failure here is not the caller's.
@@ -2141,12 +2299,26 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		AccessToken:    access,
 		RefreshToken:   "", // no rotation — caller's cookie stays authoritative
 		TokenType:      "Bearer",
-		ExpiresIn:      int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
+		ExpiresIn:      expiresIn,
 		SessionID:      doc.SessionUUID,
 		DeviceID:       doc.DeviceID,
 		User:           s.buildUserResponse(ctx, user),
 		OAuthProviders: models.ConvertOAuthProvidersToInfo(oauthProviders),
 	}, nil
+}
+
+// pinSessionMint is what a refresh of a PIN session mints.
+// The refresh JWT carries no amr, so without this a
+// refreshed PIN session would come back with an EMPTY amr — the same shape
+// as a refreshed password session — and every gate that refuses a PIN
+// session would stop recognising it after the first refresh. It re-asserts
+// amr ["pin"] (no second factor, last_otp_at 0) and sets the PIN
+// lifetimes on security; the returned duration is the refresh row's idle
+// timeout.
+func (s *authService) pinSessionMint(ctx context.Context, security *models.SecurityContext) ([]string, int64, time.Duration) {
+	security.AccessTTL = s.policy.PINAccessTokenTTL(ctx)
+	security.RefreshTTL = s.policy.PINRefreshTokenTTL(ctx)
+	return []string{models.AMRPIN}, 0, security.RefreshTTL
 }
 
 // handleRefreshReplay kills the family and logs a structured warning. The
@@ -2512,6 +2684,24 @@ func authEventComplianceAction(eventType string) string {
 		return "auth.session.revoked.self"
 	case "self_session_revoke_all":
 		return "auth.session.revoked_all.self"
+	// PIN sign-in: every change to the credential
+	// or to the devices allowed to use it.
+	case "admin_pin_set":
+		return "auth.pin.set"
+	case "admin_pin_removed":
+		return "auth.pin.removed"
+	case "self_pin_changed":
+		return "auth.pin.changed.self"
+	case "self_pin_removed":
+		return "auth.pin.removed.self"
+	case "admin_pin_enrollment_code", "self_pin_enrollment_code":
+		return "auth.pin.enrollment_code_issued"
+	case "pin_device_enrolled":
+		return "auth.pin.device_enrolled"
+	case "admin_pin_device_revoked", "self_pin_device_revoked":
+		return "auth.pin.device_revoked"
+	case "pin_disabled_after_failures":
+		return "auth.pin.disabled"
 	}
 	return ""
 }

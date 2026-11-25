@@ -2,6 +2,10 @@
 # Sources orkestra.sh (main() is guarded, so this does NOT launch the TUI) and
 # unit-tests ask_value's non-interactive path. Also re-tested by Task 3.
 set -uo pipefail
+# A pre-push hook fired from a linked worktree exports GIT_DIR, which would
+# turn every `git -C "$tmp/..."` below into an operation on the real repo.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$DIR/../orkestra.sh"     # guarded main => no menu; sourcing is safe
@@ -98,11 +102,11 @@ export OBS_RESET_LOG="$obs_reset_log"
         case " $* " in
             *" config --services "*)
                 printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
-                    otel-collector tempo prometheus loki promtail grafana
+                    otel-collector tempo prometheus loki alloy grafana
                 ;;
             *" config --volumes "*)
                 printf '%s\n' mongodb-data redis-data rustfs-data \
-                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                    tempo-data prometheus-data loki-data alloy-data grafana-data
                 ;;
         esac
         return 0
@@ -112,10 +116,10 @@ export OBS_RESET_LOG="$obs_reset_log"
 check "observability reset never falls through to down -v" "no" "$(grep -Eq 'compose .* down -v( |$)' "$obs_reset_log" && printf yes || printf no)"
 check "observability reset removes only six explicit services" \
     "yes" \
-    "$(grep -Eq 'compose .* rm -sfv otel-collector tempo prometheus loki promtail grafana$' "$obs_reset_log" && printf yes || printf no)"
+    "$(grep -Eq 'compose .* rm -sfv otel-collector tempo prometheus loki alloy grafana$' "$obs_reset_log" && printf yes || printf no)"
 check "observability reset removes five explicit named volumes" \
     "5" \
-    "$(grep -Ec '^volume rm orkestra-test-development_(tempo-data|prometheus-data|loki-data|promtail-positions|grafana-data)$' "$obs_reset_log" || true)"
+    "$(grep -Ec '^volume rm orkestra-test-development_(tempo-data|prometheus-data|loki-data|alloy-data|grafana-data)$' "$obs_reset_log" || true)"
 check "observability reset never targets application or infra volumes" \
     "no" \
     "$(grep -Eq '^volume rm .*_(mongodb-data|redis-data|rustfs-data)$' "$obs_reset_log" && printf yes || printf no)"
@@ -138,6 +142,7 @@ export OBS_UP_LOG="$obs_up_log"
     p_muted() { :; }
     p_ok() { :; }
     observability_info() { :; }
+    GRAFANA_ADMIN_PASSWORD=test-grafana-password
     with_spinner() {
         shift
         "$@"
@@ -146,13 +151,14 @@ export OBS_UP_LOG="$obs_up_log"
         local IFS=' '
         printf '%s\n' "$*" >> "$OBS_UP_LOG"
         case " $* " in
+            *" volume inspect "*) return 1 ;;
             *" config --services "*)
                 printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
-                    otel-collector tempo prometheus loki promtail grafana
+                    otel-collector tempo prometheus loki alloy grafana
                 ;;
             *" config --volumes "*)
                 printf '%s\n' mongodb-data redis-data rustfs-data \
-                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                    tempo-data prometheus-data loki-data alloy-data grafana-data
                 ;;
             *" ps -q backend "*) printf 'backend-id\n' ;;
         esac
@@ -163,7 +169,82 @@ export OBS_UP_LOG="$obs_up_log"
 check "observability up applies its backend override through the merged stack" \
     "yes" \
     "$(grep -Eq 'compose .* -f .*docker-compose.observability.yml .* up -d --no-deps backend$' "$obs_up_log" && printf yes || printf no)"
+check "observability up on a fresh host runs no legacy clean-up" \
+    "no" \
+    "$(grep -Eq '^(rm -f|run --rm --user 0)' "$obs_up_log" && printf yes || printf no)"
 rm -f "$obs_up_log"
+
+# The overlay counts as active from its containers' labels, never from a
+# compose render (which an unset Grafana password breaks), and a leftover
+# Promtail container counts too.
+obs_active() {
+    (
+        COMPOSE_PROJECT_NAME=orkestra-test-development
+        OBS_ACTIVE_SERVICE=$1
+        docker() {
+            local IFS=' '
+            case " $* " in
+                *" ps -q --filter label=com.docker.compose.project=orkestra-test-development --filter label=com.docker.compose.service=${OBS_ACTIVE_SERVICE} "*)
+                    printf 'container-id\n' ;;
+            esac
+            return 0
+        }
+        compose_stack() { return 1; }
+        observability_project_active && printf yes || printf no
+    )
+}
+check "observability is active when its alloy container runs" "yes" "$(obs_active alloy)"
+check "observability is active when only a legacy promtail runs" "yes" "$(obs_active promtail)"
+check "observability is not active without any of its containers" "no" "$(obs_active none)"
+
+# observability up refuses an empty or placeholder Grafana password before
+# touching anything.
+obs_pw_log="$(mktemp)"
+export OBS_PW_LOG="$obs_pw_log"
+obs_pw_out=$(
+    check_docker_running() { :; }
+    observability_check_file() { :; }
+    observability_init_env() { ENV_FILE=/nonexistent/.env; COMPOSE_PROJECT_NAME=orkestra-test-development; }
+    page_header() { :; }
+    GRAFANA_ADMIN_PASSWORD=REPLACE_WITH_RANDOM_HEX_32_GRAFANA_ADMIN
+    docker() { local IFS=' '; printf '%s\n' "$*" >> "$OBS_PW_LOG"; return 0; }
+    observability_up 2>&1
+)
+check "observability up refuses the placeholder Grafana password" \
+    "yes/no" \
+    "$(printf '%s' "$obs_pw_out" | grep -q 'GRAFANA_ADMIN_PASSWORD still holds the docker/.env.example placeholder' && printf yes || printf no)/$([ -s "$obs_pw_log" ] && printf yes || printf no)"
+rm -f "$obs_pw_log"
+
+# A host upgraded from the Promtail overlay: the retired container and volume
+# go, and tempo-data is handed to Tempo 2.10's uid through the pinned Grafana
+# image (Tempo's own image has no chown).
+obs_mig_log="$(mktemp)"
+export OBS_MIG_LOG="$obs_mig_log"
+(
+    COMPOSE_PROJECT_NAME=orkestra-test-development
+    OBSERVABILITY_COMPOSE="$PROJECT_ROOT/docker/docker-compose.observability.yml"
+    p_muted() { :; }
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$OBS_MIG_LOG"
+        case " $* " in
+            *" ps -aq "*"service=promtail "*) printf 'old-promtail-id\n' ;;
+            *" volume inspect orkestra-test-development_promtail-positions "*) return 0 ;;
+            *" volume inspect orkestra-test-development_tempo-data "*) return 0 ;;
+            *" volume inspect "*) return 1 ;;
+        esac
+        return 0
+    }
+    observability_migrate_legacy
+) >/dev/null 2>&1
+obs_grafana_image=$(sed -n 's/^ *image: *\(grafana\/grafana:[^ ]*\) *$/\1/p' "$PROJECT_ROOT/docker/docker-compose.observability.yml" | head -1)
+check "observability migration removes the retired promtail container" "yes" \
+    "$(grep -qx 'rm -f old-promtail-id' "$obs_mig_log" && printf yes || printf no)"
+check "observability migration removes the promtail positions volume" "yes" \
+    "$(grep -qx 'volume rm orkestra-test-development_promtail-positions' "$obs_mig_log" && printf yes || printf no)"
+check "observability migration hands tempo-data to uid 10001" "yes" \
+    "$(grep -qxF "run --rm --user 0 --network none --entrypoint chown -v orkestra-test-development_tempo-data:/var/tempo ${obs_grafana_image} -R 10001:10001 /var/tempo" "$obs_mig_log" && printf yes || printf no)"
+rm -f "$obs_mig_log"
 
 obs_down_log="$(mktemp)"
 export OBS_DOWN_LOG="$obs_down_log"
@@ -190,11 +271,11 @@ export OBS_DOWN_LOG="$obs_down_log"
         case " $* " in
             *" config --services "*)
                 printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
-                    otel-collector tempo prometheus loki promtail grafana
+                    otel-collector tempo prometheus loki alloy grafana
                 ;;
             *" config --volumes "*)
                 printf '%s\n' mongodb-data redis-data rustfs-data \
-                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                    tempo-data prometheus-data loki-data alloy-data grafana-data
                 ;;
             *" ps -q backend "*) printf 'backend-id\n' ;;
         esac
@@ -204,7 +285,7 @@ export OBS_DOWN_LOG="$obs_down_log"
 ) >/dev/null 2>&1
 check "observability down dry-run removes only six explicit services" \
     "yes" \
-    "$(grep -Eq 'compose .* rm -sf otel-collector tempo prometheus loki promtail grafana$' "$obs_down_log" && printf yes || printf no)"
+    "$(grep -Eq 'compose .* rm -sf otel-collector tempo prometheus loki alloy grafana$' "$obs_down_log" && printf yes || printf no)"
 check "observability down dry-run never uses project-wide down" \
     "no" \
     "$(grep -Eq 'compose .* down( |$)' "$obs_down_log" && printf yes || printf no)"
@@ -222,6 +303,465 @@ obs_catalog_count="$(
 )"
 check "observability log picker uses the explicit service catalog" "6" "$obs_catalog_count"
 
+# --- Retrieval overlay (ADR-0023): fail closed, seed before serving, scope the
+# five owned services, and keep the other overlay's backend override. ---
+# has <file> <ERE> -> yes|no. Negative checks pair it with a positive one
+# ("<ran>/<forbidden>") so a run that logged nothing cannot pass them.
+has() { grep -Eq -- "$2" "$1" && printf yes || printf no; }
+# A shell-exported setting would change what the lifecycle does; the tests set
+# them per call instead.
+unset RETRIEVAL_SKIP_SEED RETRIEVAL_SEED_TIMEOUT QDRANT_API_KEY RETRIEVAL_INFERENCE_API_KEY
+# Scratch docker/.env: the developer's real one is never read.
+ret_env_file="$(mktemp)"
+ret_log="$(mktemp)"
+ret_out="$(mktemp)"
+ret_env_log="$(mktemp)"
+export RET_ENV_FILE="$ret_env_file" RET_LOG="$ret_log" RET_ENV_LOG="$ret_env_log"
+unset RET_FAIL RET_SIGNAL RET_SIGNAL_NAME RET_SEED_LEFT
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+
+# ret_run <cmd...> — runs cmd in a subshell against a stubbed Docker that logs
+# every call to $RET_LOG. RET_FAIL (an ERE) makes the matching call return 1.
+# Output goes to $ret_out; returns the subshell's status.
+ret_run() {
+    : > "$RET_LOG"
+    : > "$RET_ENV_LOG"
+    (
+        check_docker_running() { :; }
+        retrieval_check_file() { :; }
+        retrieval_init_env() {
+            ENV=development
+            COMPOSE_PROJECT_NAME=orkestra-test-development
+            INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+            COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+            RETRIEVAL_COMPOSE="$PROJECT_ROOT/docker/docker-compose.retrieval.yml"
+            ENV_FILE="$RET_ENV_FILE"
+        }
+        observability_init_env() { retrieval_init_env; }
+        page_header() { :; }
+        p_ok() { :; }
+        with_spinner() {
+            shift
+            "$@"
+        }
+        docker() {
+            local IFS=' '
+            printf '%s\n' "$*" >> "$RET_LOG"
+            # What Compose would interpolate: the exported value only.
+            printenv RETRIEVAL_SEED_TIMEOUT >> "$RET_ENV_LOG" || echo unset >> "$RET_ENV_LOG"
+            if [ -n "${RET_FAIL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$RET_FAIL"; then
+                return 1
+            fi
+            # RET_SIGNAL (an ERE) signals this shell during the matching call,
+            # which then succeeds: a signal sent to the script alone, while
+            # Compose finishes its wait.
+            if [ -n "${RET_SIGNAL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$RET_SIGNAL"; then
+                kill -"${RET_SIGNAL_NAME:-TERM}" "$BASHPID"
+            fi
+            case " $* " in
+                *" config --services "*)
+                    printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
+                        otel-collector tempo prometheus loki alloy grafana \
+                        qdrant tei-embed tei-rerank tei-embed-seed tei-rerank-seed
+                    ;;
+                *" config --volumes "*)
+                    printf '%s\n' mongodb-data redis-data rustfs-data \
+                        tempo-data prometheus-data loki-data alloy-data grafana-data \
+                        qdrant-data tei-weights
+                    ;;
+                *" ps -q backend "*) printf 'backend-id\n' ;;
+                *" ps -q qdrant tei-embed tei-rerank "*) printf '%s\n' qdrant-id tei-embed-id tei-rerank-id ;;
+                *" ps -a -q tei-embed-seed tei-rerank-seed "*) [ -z "${RET_SEED_LEFT:-}" ] || printf 'seed-id\n' ;;
+            esac
+            return 0
+        }
+        retrieval_init_env
+        "$@"
+    ) > "$ret_out" 2>&1
+}
+
+ret_discovery_log="$(mktemp)"
+export RET_DISCOVERY_LOG="$ret_discovery_log"
+(
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$RET_DISCOVERY_LOG"
+        return 17
+    }
+    INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+    COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+    RETRIEVAL_COMPOSE="$PROJECT_ROOT/docker/docker-compose.retrieval.yml"
+    ENV_FILE="$RET_ENV_FILE"
+    retrieval_list_services
+) >/dev/null 2>&1
+ret_discovery_status=$?
+check "retrieval discovery fails closed on invalid compose" "1" "$ret_discovery_status"
+check "retrieval discovery validates the merged stack" "3" "$(sed -n '1p' "$ret_discovery_log" | grep -o -- ' -f ' | wc -l | tr -d ' ')"
+check "retrieval discovery lists the seed profile" "yes" "$(has "$ret_discovery_log" '--profile retrieval-seed config --services$')"
+rm -f "$ret_discovery_log"
+
+# Missing keys: the failure names the empty one and prints no key value.
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=\n' > "$ret_env_file"
+RET_FAIL='config --services' ret_run retrieval_up; rc=$?
+check "retrieval up with a missing key fails before any lifecycle call" "1/no" \
+    "$rc/$(has "$ret_log" ' (up|rm) ')"
+check "the missing-key failure names the empty key only" "yes/no" \
+    "$(has "$ret_out" 'RETRIEVAL_INFERENCE_API_KEY must be set')/$(has "$ret_out" 'QDRANT_API_KEY')"
+check "the missing-key failure prints no key value" "no" "$(has "$ret_out" 'qdrant-key-value-1234')"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+# Both keys set: a render failing for another reason must not blame them.
+RET_FAIL='config --services' ret_run retrieval_up; rc=$?
+check "a render failure with both keys set points at the Compose error" "1/no/yes/no" \
+    "$rc/$(has "$ret_log" ' (up|rm) ')/$(has "$ret_out" 'see the Compose error above')/$(has "$ret_out" 'must be set')"
+
+# The docker/.env.example placeholders are public strings: up refuses them,
+# naming the key only; down still runs so the overlay can be removed.
+printf 'ENV=development\nQDRANT_API_KEY=REPLACE_WITH_RANDOM_HEX_64_QDRANT_API_KEY\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+ret_run retrieval_up; rc=$?
+check "retrieval up refuses a placeholder key before any lifecycle call" "1/no/yes" \
+    "$rc/$(has "$ret_log" ' (up|rm) ')/$(has "$ret_out" 'QDRANT_API_KEY still holds the docker/.env.example placeholder')"
+check "the placeholder refusal prints no key value" "no/no" \
+    "$(has "$ret_out" 'REPLACE_WITH_RANDOM_HEX')/$(has "$ret_out" 'inference-key-value-5678')"
+ret_run retrieval_down; rc=$?
+check "retrieval down still runs with a placeholder key" "0/yes" "$rc/$(has "$ret_log" ' rm -sf qdrant ')"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+RETRIEVAL_INFERENCE_API_KEY=REPLACE_WITH_RANDOM_HEX_64_RETRIEVAL_INFERENCE_KEY ret_run retrieval_up; rc=$?
+check "a placeholder from the shell is refused too" "1/yes" \
+    "$rc/$(has "$ret_out" 'RETRIEVAL_INFERENCE_API_KEY still holds the docker/.env.example placeholder')"
+
+ret_run retrieval_up; rc=$?
+# ret_line <ERE> -> the first matching line number of the Docker log, or 0.
+ret_line() { grep -nE -- "$1" "$ret_log" | head -1 | cut -d: -f1 | grep . || printf 0; }
+ret_seed_order="$(ret_line 'compose .* --profile retrieval-seed up -d --wait .* tei-embed-seed$') $(ret_line 'compose .* --profile retrieval-seed rm -sf tei-embed-seed$') $(ret_line 'compose .* --profile retrieval-seed up -d --wait .* tei-rerank-seed$') $(ret_line 'compose .* --profile retrieval-seed rm -sf tei-rerank-seed$') $(ret_line 'compose .* up -d --wait .* qdrant tei-embed tei-rerank$')"
+check "retrieval up succeeds" "0" "$rc"
+# One model loaded twice at most (I1): each seed is removed before the next
+# starts, and both before serving.
+check "retrieval up seeds one model at a time, then serves" "yes" \
+    "$(tr ' ' '\n' <<< "$ret_seed_order" | awk 'BEGIN { ok = 1 } $1 <= prev { ok = 0 } { prev = $1 } END { r = (ok && NR == 5) ? "yes" : "no"; print r }')"
+check "retrieval up waits with the default seed timeout, exported to Compose" "yes/yes/1800" \
+    "$(has "$ret_log" 'up -d --wait --wait-timeout 1800 tei-embed-seed$')/$(has "$ret_log" 'up -d --wait --wait-timeout 1800 tei-rerank-seed$')/$(sort -u "$ret_env_log" | tr '\n' ' ' | sed 's/ $//')"
+check "retrieval up never starts both seeds in one call" "no" "$(has "$ret_log" ' up .*tei-embed-seed tei-rerank-seed')"
+check "retrieval up applies its backend override" "yes" "$(has "$ret_log" 'compose .* -f .*docker-compose.retrieval.yml .* up -d --no-deps backend$')"
+check "retrieval up and info print no key value" "no/no" \
+    "$(has "$ret_out" 'qdrant-key-value-1234')/$(has "$ret_out" 'inference-key-value-5678')"
+
+RETRIEVAL_SKIP_SEED=true ret_run retrieval_up
+check "RETRIEVAL_SKIP_SEED skips the seed step" "yes/no" \
+    "$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" ' up .*tei-embed-seed')"
+printf 'RETRIEVAL_SKIP_SEED=true\n' >> "$ret_env_file"
+ret_run retrieval_up
+check "RETRIEVAL_SKIP_SEED in docker/.env skips the seed step" "yes/no" \
+    "$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" ' up .*tei-embed-seed')"
+RETRIEVAL_SKIP_SEED=false ret_run retrieval_up
+check "the shell RETRIEVAL_SKIP_SEED wins over docker/.env" "yes" "$(has "$ret_log" ' up .*tei-embed-seed')"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n# RETRIEVAL_SKIP_SEED=true\nRETRIEVAL_SEED_TIMEOUT=60\n' > "$ret_env_file"
+ret_run retrieval_up
+check "a commented RETRIEVAL_SKIP_SEED is ignored" "yes" "$(has "$ret_log" ' up .*tei-embed-seed')"
+check "RETRIEVAL_SEED_TIMEOUT from docker/.env bounds each seed wait" "yes/yes" \
+    "$(has "$ret_log" 'up -d --wait --wait-timeout 60 tei-embed-seed$')/$(has "$ret_log" 'up -d --wait --wait-timeout 60 tei-rerank-seed$')"
+# The overlay renders the same variable into the seeds' healthcheck
+# start_period, so every Compose call must see the value resolved here.
+check "every Compose call sees the .env seed timeout exported" "60" "$(sort -u "$ret_env_log" | tr '\n' ' ' | sed 's/ $//')"
+RETRIEVAL_SEED_TIMEOUT=120 ret_run retrieval_up
+check "the shell seed timeout wins and is what Compose sees" "yes/120" \
+    "$(has "$ret_log" 'up -d --wait --wait-timeout 120 tei-rerank-seed$')/$(sort -u "$ret_env_log" | tr '\n' ' ' | sed 's/ $//')"
+RETRIEVAL_SEED_TIMEOUT=soon ret_run retrieval_up; rc=$?
+check "an invalid RETRIEVAL_SEED_TIMEOUT is refused before any Compose call" "1/0/yes" \
+    "$rc/$(wc -l < "$ret_log" | tr -d ' ')/$(has "$ret_out" 'RETRIEVAL_SEED_TIMEOUT must be a whole number')"
+# A deploy probes the overlay through stack_compose_files: an invalid value
+# must stop it rather than fail the render and silently unwire the backend.
+RETRIEVAL_SEED_TIMEOUT=soon ret_run stack_compose_files; rc=$?
+check "an invalid seed timeout stops the overlay probe a deploy uses" "1/no" "$rc/$(has "$ret_log" 'docker-compose.retrieval.yml')"
+printf 'ENV=development\nQDRANT_API_KEY=qdrant-key-value-1234\nRETRIEVAL_INFERENCE_API_KEY=inference-key-value-5678\n' > "$ret_env_file"
+
+RET_FAIL='up -d --wait .* tei-embed-seed$' ret_run retrieval_up; rc=$?
+check "a failed seed exits non-zero" "1" "$rc"
+check "a failed seed still removes the seeds" "yes" "$(has "$ret_log" '--profile retrieval-seed rm -sf tei-embed-seed tei-rerank-seed$')"
+check "a failed first seed starts neither the second nor a serving container" "yes/no/no" \
+    "$(has "$ret_log" 'tei-embed-seed tei-rerank-seed$')/$(has "$ret_log" ' up .*tei-rerank-seed$')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')"
+check "a failed seed applies no backend override" "no" "$(has "$ret_log" 'up -d --no-deps backend$')"
+RET_FAIL='up -d --wait .* tei-rerank-seed$' ret_run retrieval_up; rc=$?
+check "a failed second seed removes both seeds and serves nothing" "1/yes/yes/no/no" \
+    "$rc/$(has "$ret_log" 'rm -sf tei-embed-seed$')/$(has "$ret_log" 'rm -sf tei-embed-seed tei-rerank-seed$')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" 'up -d --no-deps backend$')"
+RET_FAIL='rm -sf tei-embed-seed$' ret_run retrieval_up; rc=$?
+check "a seed that cannot be removed stops up and points at retrieval down" "1/no/no/yes" \
+    "$rc/$(has "$ret_log" ' up .*tei-rerank-seed$')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_out" 'run ./orkestra.sh retrieval down')"
+# A stop signal sent to the script alone (timeout(1), kill) ends the up after
+# the cleanup, even though the Compose wait itself succeeds.
+for ret_signame in TERM HUP INT; do
+    RET_SIGNAL='up -d --wait .* tei-embed-seed$' RET_SIGNAL_NAME=$ret_signame ret_run retrieval_up; rc=$?
+    check "SIG$ret_signame during a seed: cleanup, then die, nothing started" "1/yes/yes/no/no/no" \
+        "$rc/$(has "$ret_out" 'Interrupted: the seeds were removed and nothing was started')/$(has "$ret_log" 'rm -sf tei-embed-seed tei-rerank-seed$')/$(has "$ret_log" ' up .*tei-rerank-seed$')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" 'up -d --no-deps backend$')"
+done
+RET_SIGNAL='up -d --wait .* tei-rerank-seed$' ret_run retrieval_up; rc=$?
+check "a signal during the last seed still stops the up" "1/yes/no/no" \
+    "$rc/$(has "$ret_out" 'Interrupted:')/$(has "$ret_log" 'up -d --wait .* qdrant tei-embed tei-rerank$')/$(has "$ret_log" 'up -d --no-deps backend$')"
+# The seed trap covers INT, TERM and HUP and restores the caller's traps.
+check "the seed step traps INT, TERM and HUP" "yes" \
+    "$(declare -f retrieval_seed | grep -q "trap 'ret_sig=1' INT TERM HUP" && printf yes || printf no)"
+ret_traps="$(
+    trap 'echo caller-int' INT
+    trap 'echo caller-term' TERM
+    ret_run_traps() { retrieval_seed; trap -p INT TERM HUP; }
+    ret_run ret_run_traps
+    cat "$ret_out"
+)"
+check "the seed step restores the caller's traps" "yes/yes/no" \
+    "$(grep -q "caller-int" <<< "$ret_traps" && printf yes || printf no)/$(grep -q "caller-term" <<< "$ret_traps" && printf yes || printf no)/$(grep -q "SIGHUP" <<< "$ret_traps" && printf yes || printf no)"
+
+ret_run retrieval_down; rc=$?
+check "retrieval down succeeds" "0" "$rc"
+check "retrieval down removes only five explicit services" "yes" \
+    "$(has "$ret_log" 'compose .* --profile retrieval-seed rm -sf qdrant tei-embed tei-rerank tei-embed-seed tei-rerank-seed$')"
+check "retrieval down never uses project-wide down or removes volumes" "yes/no/no" \
+    "$(has "$ret_log" ' rm -sf ')/$(has "$ret_log" 'compose .* down( |$)')/$(has "$ret_log" '( rm -sfv |^volume rm )')"
+check "retrieval down restores the backend without the overlay" "yes" \
+    "$(has "$ret_log" 'compose -f .*docker-compose.infra.yml -f .*docker-compose.dev.yml --env-file .* up -d --no-deps backend$')"
+(
+    observability_project_active() { return 0; }
+    ret_run retrieval_down
+)
+check "retrieval down keeps the observability override" "yes/no" \
+    "$(has "$ret_log" 'docker-compose.observability.yml .*up -d --no-deps backend$')/$(has "$ret_log" 'docker-compose.retrieval.yml .*up -d --no-deps backend$')"
+(
+    retrieval_project_active() { return 0; }
+    ret_run observability_down
+)
+check "observability down keeps the retrieval override" "yes/no" \
+    "$(has "$ret_log" 'docker-compose.retrieval.yml .*up -d --no-deps backend$')/$(has "$ret_log" 'docker-compose.observability.yml .*up -d --no-deps backend$')"
+(
+    retrieval_project_active() { return 0; }
+    GRAFANA_ADMIN_PASSWORD=test-grafana-password
+    ret_run observability_up
+)
+check "observability up keeps the retrieval override" "yes" \
+    "$(has "$ret_log" 'docker-compose.observability.yml -f .*docker-compose.retrieval.yml .*up -d --no-deps backend$')"
+
+ret_run retrieval_status
+check "retrieval status lists the servers and the seeds, with memory usage" "yes/yes" \
+    "$(has "$ret_log" '--profile retrieval-seed ps -a qdrant tei-embed tei-rerank tei-embed-seed tei-rerank-seed$')/$(has "$ret_log" '^stats --no-stream .*MemUsage')"
+check "retrieval status prints no key value" "no" "$(has "$ret_out" '(qdrant|inference)-key-value')"
+check "retrieval status is quiet without a leftover seed" "no" "$(has "$ret_out" 'seed container exists')"
+RET_SEED_LEFT=1 ret_run retrieval_status
+check "retrieval status flags a leftover seed and names the cleanup" "yes" \
+    "$(has "$ret_out" 'seed container exists.*retrieval down')"
+
+# stack_compose_files: an overlay joins the -f list when its containers exist
+# or --with names it, unless --without names it.
+ret_stack_files() {
+    (
+        ENV_FILE=/x/.env
+        INFRA_COMPOSE=/x/docker-compose.infra.yml
+        COMPOSE_FILE=/x/docker-compose.dev.yml
+        OBSERVABILITY_COMPOSE=/x/docker-compose.observability.yml
+        RETRIEVAL_COMPOSE=/x/docker-compose.retrieval.yml
+        # Not obs/ret: stack_compose_files' own locals would shadow them.
+        local stub_obs=$1 stub_ret=$2
+        shift 2
+        observability_project_active() { [ "$stub_obs" = yes ]; }
+        retrieval_project_active() { [ "$stub_ret" = yes ]; }
+        stack_compose_files "$@"
+        local IFS=' '
+        printf '%s:%s' "${#STACK_COMPOSE_FILES[@]}" "${STACK_COMPOSE_FILES[*]}"
+    ) 2>/dev/null
+}
+check "stack files: no overlay active" "4" "$(ret_stack_files no no | cut -d: -f1)"
+check "stack files: both overlays active" \
+    "8:-f /x/docker-compose.infra.yml -f /x/docker-compose.dev.yml -f /x/docker-compose.observability.yml -f /x/docker-compose.retrieval.yml" \
+    "$(ret_stack_files yes yes)"
+check "stack files: --without retrieval" "6" "$(ret_stack_files yes yes --without retrieval | cut -d: -f1)"
+check "stack files: --with retrieval when inactive" \
+    "6:-f /x/docker-compose.infra.yml -f /x/docker-compose.dev.yml -f /x/docker-compose.retrieval.yml" \
+    "$(ret_stack_files no no --with retrieval)"
+check "stack files: an unknown overlay is refused" "no" \
+    "$(ret_stack_files no no --with grafana >/dev/null && printf yes || printf no)"
+
+# The production rolling update must keep both overlays' backend override. The
+# companion counts stop the "no line uses another list" checks passing on a
+# function that no longer has the line at all.
+ret_deploy_fn="$(declare -f fullstack_execute_deploy)"
+check "production rolling update exists once" "1" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep -c 'up -d --no-deps "$BACKEND_SERVICE"')"
+check "production rolling update uses the stack file list" "0" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep 'up -d --no-deps "$BACKEND_SERVICE"' | grep -vc 'compose_files\[@\]')"
+check "production admin frontend update exists once" "1" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep -c 'up -d --no-deps "$FRONTEND_SERVICE"')"
+check "production admin frontend update uses the stack file list" "0" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep 'up -d --no-deps "$FRONTEND_SERVICE"' | grep -vc 'compose_files\[@\]')"
+# The deploy runs compose_stack (infra + app + overlays) and adds the active
+# overlays to compose_files on top of it.
+check "deploy keeps the active observability and retrieval overlays" "yes/yes" \
+    "$(printf '%s\n' "$ret_deploy_fn" | grep -q 'compose_files+=(-f "$OBSERVABILITY_COMPOSE")' && printf yes || printf no)/$(printf '%s\n' "$ret_deploy_fn" | grep -q 'compose_files+=(-f "$RETRIEVAL_COMPOSE")' && printf yes || printf no)"
+
+# gum spin runs an external process and the TTY spinner a subshell: a shell
+# function passed to with_spinner fails under gum and loses globals such as
+# STACK_COMPOSE_FILES. Every with_spinner call must run a real command.
+check "overlay lifecycle functions exist" "yes" \
+    "$(declare -F retrieval_up retrieval_down retrieval_seed observability_up observability_down observability_reset >/dev/null && printf yes || printf no)"
+check "overlay lifecycle passes no shell function to with_spinner" "0" \
+    "$(declare -f retrieval_up retrieval_down retrieval_seed observability_up observability_down observability_reset | grep -c 'with_spinner .*\(retrieval\|observability\)_')"
+ret_spinner_fns=""
+while IFS= read -r ret_word; do
+    # with_spinner runs a shell function in its bash subshell, never under gum,
+    # so compose_stack keeps its globals there; it is the one function allowed.
+    [ "$ret_word" = compose_stack ] && continue
+    if [ "$(type -t "$ret_word" 2>/dev/null)" = function ]; then
+        ret_spinner_fns="$ret_spinner_fns $ret_word"
+    fi
+done < <(declare -f | sed -n 's/^.*with_spinner "[^"]*" \([^ ;|&]*\).*$/\1/p' | sort -u)
+check "no with_spinner call in orkestra.sh runs a shell function" "" "$ret_spinner_fns"
+
+ret_catalog_count="$(
+    (
+        get_services() { return 17; }
+        list_all_services retrieval
+        printf '%s' "${#SERVICES[@]}"
+    ) 2>/dev/null
+)"
+check "retrieval log picker uses the explicit service catalog" "5" "$ret_catalog_count"
+ret_run logs_cli retrieval qdrant -n 20 -t; rc=$?
+check "retrieval logs read the merged stack, scoped to the project" "0/yes/no" \
+    "$rc/$(has "$ret_log" '^compose -f .*docker-compose.infra.yml -f .*docker-compose.dev.yml -f .*docker-compose.retrieval.yml --env-file .* logs --timestamps --tail=20 qdrant$')/$(has "$ret_log" '^ps .*--filter .*service=(qdrant|tei-)')"
+ret_run logs_cli retrieval tei-embed-seed -f
+check "retrieval logs of a seed carry its profile" "yes" \
+    "$(has "$ret_log" '-f .*docker-compose.retrieval.yml --env-file .* --profile retrieval-seed logs --follow tei-embed-seed$')"
+ret_run logs_cli retrieval backend; rc=$?
+check "retrieval logs refuse a service outside the catalog" "1/no" "$rc/$(has "$ret_log" ' logs ')"
+
+# retrieval bench runs the Go benchmark in the backend container (a backend
+# running from the checkout: the container is probed for go and the sources)
+# against the overlay. The stubs are redefined inside the wrapper subshell
+# because ret_run's own retrieval_init_env would otherwise win.
+ret_bench() {
+    retrieval_project_active() { return 0; }
+    retrieval_bench "$@"
+}
+ret_bench_prod() {
+    retrieval_init_env() { ENV=production; ENV_FILE="$RET_ENV_FILE"; }
+    retrieval_project_active() { return 0; }
+    retrieval_bench "$@"
+}
+ret_bench_inactive() {
+    retrieval_project_active() { return 1; }
+    retrieval_bench "$@"
+}
+ret_bench_tty() {
+    retrieval_project_active() { return 0; }
+    retrieval_bench_has_tty() { return 0; }
+    retrieval_bench "$@"
+}
+ret_bench_nodocker() {
+    check_docker_running() { echo "docker is not running"; exit 1; }
+    retrieval_project_active() { return 0; }
+    retrieval_bench "$@"
+}
+ret_run ret_bench_prod; rc=$?
+check "retrieval bench refuses production" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' exec ')" = no ] && printf yes || printf no)"
+ret_run ret_bench_inactive; rc=$?
+check "retrieval bench needs the overlay" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' exec ')" = no ] && grep -q 'retrieval up' "$ret_out" && printf yes || printf no)"
+ret_run ret_bench -k 5; rc=$?
+check "retrieval bench runs in the backend container" "0/yes" \
+    "$rc/$(has "$ret_log" 'compose .* -f .*docker-compose.retrieval.yml .* exec -T backend go run ./cmd/retrieval-bench -fixture internal/core/retrieval/bench/testdata/smoke-it-en.jsonl -k 5$')"
+# With a terminal, exec allocates a TTY so Ctrl-C reaches the benchmark.
+ret_run ret_bench_tty -k 5; rc=$?
+check "retrieval bench on a terminal runs without -T" "0/yes/no" \
+    "$rc/$(has "$ret_log" ' exec backend go run ./cmd/retrieval-bench -fixture .* -k 5$')/$(has "$ret_log" ' exec -T backend go run ')"
+# The container is probed for go and the sources before the run, whatever ENV
+# says: a fork's staging on the production image has neither.
+ret_run ret_bench -k 5; rc=$?
+check "retrieval bench probes the backend before the run" "0/yes/yes" \
+    "$rc/$(has "$ret_log" ' exec -T backend sh -c command -v go > /dev/null && test -f cmd/retrieval-bench/main.go$')/$([ "$(ret_line ' exec -T backend sh -c ')" -lt "$(ret_line ' go run ./cmd/retrieval-bench ')" ] && printf yes || printf no)"
+RET_FAIL=' exec -T backend sh -c ' ret_run ret_bench -k 5; rc=$?
+check "retrieval bench refuses a backend without go or the sources" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' go run ')" = no ] && grep -q 'runs from the checkout' "$ret_out" && printf yes || printf no)"
+# A Compose error during the probe is shown, not read as missing sources.
+ret_bench_probe_err() {
+    retrieval_project_active() { return 0; }
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$RET_LOG"
+        case "$*" in
+            *' exec -T backend sh -c '*) echo 'required variable MONGO_ROOT_PASSWORD is missing a value' >&2; return 1 ;;
+        esac
+    }
+    retrieval_bench "$@"
+}
+ret_run ret_bench_probe_err; rc=$?
+check "retrieval bench shows the Compose error of a failed probe" "yes" \
+    "$([ "$rc" -ne 0 ] && [ "$(has "$ret_log" ' go run ')" = no ] && grep -q '(docker: required variable MONGO_ROOT_PASSWORD is missing a value)' "$ret_out" && printf yes || printf no)"
+ret_run ret_bench_nodocker; rc=$?
+check "retrieval bench checks Docker first" "1/no/yes" "$rc/$(has "$ret_log" ' exec ')/$(has "$ret_out" 'docker is not running')"
+check "retrieval info checks Docker and the overlay file" "yes" \
+    "$(declare -f cli_dispatch | grep -A3 '^ *info)' | grep -q 'check_docker_running' && declare -f cli_dispatch | grep -A3 '^ *info)' | grep -q 'retrieval_check_file' && printf yes || printf no)"
+
+rm -f "$ret_env_file" "$ret_log" "$ret_out" "$ret_env_log"
+unset -f ret_run ret_stack_files has ret_line ret_bench ret_bench_prod ret_bench_inactive ret_bench_tty ret_bench_nodocker ret_bench_probe_err
+
+# --- compose_stack: infra + the ENV's app file + its overlays, extras last ---
+cs_tmp="$(mktemp -d)"
+touch "$cs_tmp/infra.yml" "$cs_tmp/prod.yml" "$cs_tmp/staging.yml" "$cs_tmp/dev.yml"
+cs_log="$cs_tmp/log"
+export CS_LOG="$cs_log"
+(
+    INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/prod.yml"
+    COMPOSE_OVERLAY_FILES=("$cs_tmp/staging.yml")
+    docker() { local IFS=' '; printf '%s\n' "$*" > "$CS_LOG"; }
+    compose_stack -f "$cs_tmp/obs.yml" --env-file "$cs_tmp/.env" ps
+)
+check "compose_stack layers infra, app, overlay, then extras" \
+    "compose -f $cs_tmp/infra.yml -f $cs_tmp/prod.yml -f $cs_tmp/staging.yml -f $cs_tmp/obs.yml --env-file $cs_tmp/.env ps" \
+    "$(cat "$cs_log")"
+(
+    INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/dev.yml"
+    COMPOSE_OVERLAY_FILES=()
+    docker() { local IFS=' '; printf '%s\n' "$*" > "$CS_LOG"; }
+    compose_stack ps
+)
+check "compose_stack without overlays is infra + app" \
+    "compose -f $cs_tmp/infra.yml -f $cs_tmp/dev.yml ps" "$(cat "$cs_log")"
+cs_status="$(
+    (
+        INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/prod.yml"
+        COMPOSE_OVERLAY_FILES=("$cs_tmp/missing-staging.yml")
+        docker() { :; }
+        compose_stack ps
+    ) > "$cs_tmp/out" 2>&1
+    printf '%s' "$?"
+)"
+check "compose_stack refuses a missing overlay" "1" "$cs_status"
+check "compose_stack names the missing overlay" "yes" \
+    "$(grep -q 'missing-staging.yml' "$cs_tmp/out" && printf yes || printf no)"
+check "no raw infra+app compose call is left in orkestra.sh" "0" \
+    "$(grep -cF 'docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE"' "$DIR/../orkestra.sh")"
+check "no compose_files array call bypasses compose_stack" "0" \
+    "$(grep -cF 'docker compose "${compose_files[@]}"' "$DIR/../orkestra.sh")"
+# Every ENV of this base has its own full app file: no overlay is declared.
+cs_overlays="$(
+    for cs_env in development staging production; do
+        ( ENV=$cs_env; set_env_config; printf '%s:%s ' "$cs_env" "${#COMPOSE_OVERLAY_FILES[@]}" )
+    done
+)"
+check "set_env_config declares no overlay in any ENV" \
+    "development:0 staging:0 production:0 " "$cs_overlays"
+# gum runs an external process: a shell function takes the bash spinner, so
+# with_spinner compose_stack works with gum installed and a TTY.
+cs_spin="$(
+    (
+        HAS_GUM=true; HAS_TTY=true; HAS_UNICODE=false
+        gum() { printf 'gum\n'; }
+        INFRA_COMPOSE="$cs_tmp/infra.yml"; COMPOSE_FILE="$cs_tmp/dev.yml"
+        COMPOSE_OVERLAY_FILES=()
+        docker() { local IFS=' '; printf '%s\n' "$*"; }
+        with_spinner "Listing" compose_stack ps
+        with_spinner "Listing" true
+    ) 2>&1 | grep -v 'Listing'
+)"
+check "with_spinner runs compose_stack without gum, a command with gum" \
+    "compose -f $cs_tmp/infra.yml -f $cs_tmp/dev.yml ps
+gum" "$cs_spin"
+rm -rf "$cs_tmp"
 
 # --- env-validate.sh: same-site host pairings (spec §8 follow-up #16) ---
 # The validator derives its ENV_FILE from its own location, so a copy in a
@@ -384,6 +924,104 @@ check "orkestra.sh infra deploy starts gotenberg with mongodb/redis/rustfs" "yes
     "$(grep -Eq 'compose .* up -d mongodb redis rustfs gotenberg$' "$gotenberg_deploy_log" && printf yes || printf no)"
 rm -f "$gotenberg_deploy_log" "$gotenberg_deploy_out"
 
+# --- Cloudflare Tunnel: with CLOUDFLARE_TUNNEL=true a staging/production
+# deploy carries the `tunnel` profile and keeps cloudflared up (and waits for
+# it to be ready), so a redeploy never drops the only way in; without the
+# ENV's routes file, the token, or with a token of another tunnel, it starts
+# nothing. git, curl, env-validate and the health check are stubs. ---
+td_tmp="$(mktemp -d)"
+mkdir -p "$td_tmp/scripts" "$td_tmp/docker"
+printf 'exit 0\n' > "$td_tmp/scripts/env-validate.sh"
+printf 'exit 0\n' > "$td_tmp/docker/health-check.sh"
+touch "$td_tmp/docker/docker-compose.infra.yml" "$td_tmp/docker/docker-compose.staging.yml" "$td_tmp/docker/docker-compose.prod.yml"
+export TD_LOG="$td_tmp/log"
+TD_TID=11111111-2222-4333-8444-555555555555
+export TD_GOOD_TOKEN
+TD_GOOD_TOKEN=$(printf '{"a":"a","t":"%s","s":"eA=="}' "$TD_TID" | base64 -w0)
+# td_deploy ENV — one full deploy in a subshell; prints its exit status. The
+# docker calls land in $TD_LOG, the output in $td_tmp/out.
+td_deploy() {
+    : > "$TD_LOG"
+    printf 'APP_NAME=acme\nENV=%s\n' "$1" > "$td_tmp/docker/.env"
+    [ -z "${TD_TUNNEL:-}" ] || printf 'CLOUDFLARE_TUNNEL=true\nCLOUDFLARE_TUNNEL_TOKEN=%s\n' "${TD_TUNNEL_TOKEN-$TD_GOOD_TOKEN}" >> "$td_tmp/docker/.env"
+    (
+        SCRIPT_DIR="$td_tmp"; PROJECT_ROOT="$td_tmp"; DOCKER_DIR="$td_tmp/docker"
+        ENV=$1; APP_NAME=acme; STACK="acme-$1"; COMPOSE_PROJECT_NAME="acme-$1"
+        DEPLOY_SCOPE=all; REBUILD_IMAGES=no; BRANCH=any; SKIP_CONFIRMATION=yes
+        INFRA_COMPOSE="$td_tmp/docker/docker-compose.infra.yml"
+        COMPOSE_FILE="$td_tmp/docker/docker-compose.staging.yml"
+        [ "$1" != production ] || COMPOSE_FILE="$td_tmp/docker/docker-compose.prod.yml"
+        COMPOSE_OVERLAY_FILES=()
+        ENV_FILE="$td_tmp/docker/.env"
+        check_docker_running() { :; }
+        ensure_jwt_keys_readable() { :; }
+        git() { case "$1" in rev-parse) printf 'abc1234\n' ;; log) printf 'test\n' ;; esac; return 0; }
+        curl() { printf '200'; }
+        sleep() { :; }
+        docker() {
+            local IFS=' '
+            printf '%s\n' "docker $*" >> "$TD_LOG"
+            case "$*" in
+                # Our cloudflared exists and is ready; TD_NO_IMAGE: images
+                # absent and the registry unreachable.
+                "inspect --type container "*) printf 'true|acme-%s\n' "$ENV" ;;
+                "image inspect "* | "pull "*) [ -z "${TD_NO_IMAGE:-}" ] || return 1 ;;
+            esac
+            return 0
+        }
+        fullstack_execute_deploy
+    ) < /dev/null > "$td_tmp/out" 2>&1
+    printf '%s' "$?"
+}
+td_saw() { grep -Eq -- "$1" "$TD_LOG" && printf yes || printf no; }
+td_said() { grep -qF -- "$1" "$td_tmp/out" && printf yes || printf no; }
+td_routes() { # td_routes ENV
+    mkdir -p "$td_tmp/docker/cloudflared"
+    printf '{"_tunnel_id":"%s","ingress":[{"hostname":"a.example.com","service":"http://backend:3000"},{"service":"http_status:404"}]}\n' \
+        "$TD_TID" > "$td_tmp/docker/cloudflared/$1.json"
+    chmod 644 "$td_tmp/docker/cloudflared/$1.json"
+}
+check "tunnel deploy without a routes file is refused" "1" "$(TD_TUNNEL=1 td_deploy staging)"
+check "tunnel deploy without routes: nothing built or started" "no" "$(td_saw ' (build|up) ')"
+check "tunnel deploy without routes: says why" "yes" "$(td_said 'No routes file for staging')"
+td_routes staging
+check "tunnel deploy without a token is refused" "1" "$(TD_TUNNEL=1 TD_TUNNEL_TOKEN= td_deploy staging)"
+check "tunnel deploy without a token: nothing built or started" "no" "$(td_saw ' (build|up) ')"
+check "tunnel deploy with another tunnel's token is refused" "1|no|yes" \
+    "$(TD_TUNNEL=1 TD_TUNNEL_TOKEN="$(printf '{"a":"a","t":"99999999-8888-4777-8666-555555555555","s":"eA=="}' | base64 -w0)" td_deploy staging)|$(td_saw ' (build|up) ')|$(td_said "pins $TD_TID")"
+check "tunnel deploy succeeds" "0" "$(TD_TUNNEL=1 td_deploy staging)"
+check "tunnel deploy waits for cloudflared's readiness after starting it" "yes" \
+    "$(awk '/up -d --no-deps cloudflared$/ {u = NR} / tunnel --metrics 127\.0\.0\.1:20241 ready$/ {if (u && NR > u) r = 1} END {print r ? "yes" : "no"}' "$TD_LOG")"
+check "tunnel deploy starts the staging stack with the tunnel profile" "yes" "$(td_saw '--profile tunnel .*up -d$')"
+check "tunnel deploy keeps cloudflared up" "yes" "$(td_saw '--profile tunnel .*up -d --no-deps cloudflared$')"
+check "a deploy without CLOUDFLARE_TUNNEL never starts cloudflared" "0|no|no" \
+    "$(td_deploy staging)|$(td_saw 'up -d --no-deps cloudflared')|$(td_saw '--profile tunnel')"
+check "…but keeps the switch's images on the host while routes exist" "yes|yes" \
+    "$(td_saw '^docker image inspect cloudflare/cloudflared:2026\.11\.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6$')|$(td_saw '^docker image inspect curlimages/curl:')"
+check "a failed pre-pull warns as a pull failure and does not fail the deploy" "0|yes" \
+    "$(TD_NO_IMAGE=1 td_deploy staging)|$(td_said 'Pull of cloudflare/cloudflared:2026.11.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6 failed')"
+# Production refuses root, so this case needs a non-root test run.
+if [ "$EUID" -ne 0 ]; then
+    # One tunnel per environment: staging's file would claim the same id.
+    rm -f "$td_tmp/docker/cloudflared/staging.json"
+    td_routes production
+    check "production tunnel deploy succeeds" "0" "$(TD_TUNNEL=1 td_deploy production)"
+    check "production tunnel deploy rolls the backend out with the tunnel profile" "yes" \
+        "$(td_saw '--profile tunnel .*up -d --no-deps backend$')"
+    check "production tunnel deploy keeps cloudflared up" "yes" "$(td_saw '--profile tunnel .*up -d --no-deps cloudflared$')"
+fi
+# stop/status: the profile only while CLOUDFLARE_TUNNEL=true is an ACTIVE line
+# of a staging/production docker/.env (a commented sample never counts).
+td_profile() { # td_profile ENV FILE-CONTENT
+    printf '%b' "$2" > "$td_tmp/docker/.env"
+    ( local IFS=" "; ENV=$1; ENV_FILE="$td_tmp/docker/.env"; tunnel_profile_args; printf '%s' "${TUNNEL_PROFILE_ARGS[*]:-none}" )
+}
+check "tunnel profile on staging with CLOUDFLARE_TUNNEL=true" "--profile tunnel" "$(td_profile staging 'CLOUDFLARE_TUNNEL=true\n')"
+check "no tunnel profile on development" "none" "$(td_profile development 'CLOUDFLARE_TUNNEL=true\n')"
+check "no tunnel profile from a commented CLOUDFLARE_TUNNEL=true" "none" "$(td_profile production '# CLOUDFLARE_TUNNEL=true\n')"
+rm -rf "$td_tmp"
+unset -f td_deploy td_saw td_said td_routes td_profile
+
 # --- scripts/health-check.sh checks gotenberg exactly like the other infra
 # containers: Docker container state + its compose healthcheck, no HTTP
 # probe (it has no published port to probe from the host). Run the real
@@ -461,11 +1099,60 @@ ORKESTRA_CLONE_VERSION_PIN=""
 ORKESTRA_CLONE_VERSION="stale-from-previous-resolution"
 resolve_stack_identity
 check "re-resolution without a pin recomputes the clone version" "dev" "$ORKESTRA_CLONE_VERSION"
-check "build commit is derived from HEAD" "$(git rev-parse --short HEAD)" "$ORKESTRA_BUILD_COMMIT"
+check "build commit is derived from HEAD" "$(git -C "$DIR/.." rev-parse --short HEAD)" "$ORKESTRA_BUILD_COMMIT"
 unset ORKESTRA_CLONE_VERSION ORKESTRA_BUILD_COMMIT
 ENV_FILE="$old_env_file"
 rm -f "$pin_tmp"
 
+
+# prepare_dev_frontend_dirs creates each dev frontend's bind sources and its
+# node_modules mount point before compose would create them as root, skips an
+# app the checkout does not have, and refuses a dependency or npm cache
+# directory the container could not write.
+old_project_root="$PROJECT_ROOT"
+PROJECT_ROOT=$(mktemp -d)
+mkdir -p "$PROJECT_ROOT/frontend-admin"
+prepare_dev_frontend_dirs; rc=$?
+check "dev frontend dirs: succeeds" "0" "$rc"
+check "dev frontend dirs: admin dependencies and mount point" "yes" \
+    "$([ -d "$PROJECT_ROOT/frontend-admin/.docker/node_modules" ] && [ -d "$PROJECT_ROOT/frontend-admin/node_modules" ] && echo yes)"
+check "dev frontend dirs: caches" "yes" \
+    "$([ -d "$PROJECT_ROOT/frontend-admin/.npm-cache" ] && [ -d "$PROJECT_ROOT/frontend-admin/.vite-cache" ] && echo yes)"
+check "dev frontend dirs: a missing app is skipped" "no" "$([ -e "$PROJECT_ROOT/frontend-client" ] && echo yes || echo no)"
+mkdir -p "$PROJECT_ROOT/frontend-client"
+prepare_dev_frontend_dirs; rc=$?
+check "dev frontend dirs: client dependencies and mount point" "yes" \
+    "$([ "$rc" = 0 ] && [ -d "$PROJECT_ROOT/frontend-client/.docker/node_modules" ] && [ -d "$PROJECT_ROOT/frontend-client/node_modules" ] && echo yes)"
+check "dev frontend dirs: only the apps it is given" "yes" \
+    "$(rm -r "$PROJECT_ROOT/frontend-client/.npm-cache" && prepare_dev_frontend_dirs frontend-admin && [ ! -e "$PROJECT_ROOT/frontend-client/.npm-cache" ] && echo yes)"
+prepare_dev_frontend_dirs
+# The refusals rely on chmod making a directory unwritable, which root ignores.
+if [ "$(id -u)" = 0 ]; then
+    echo "  skip dev frontend dirs: unwritable-directory checks (running as root)"
+else
+chmod 555 "$PROJECT_ROOT/frontend-client/.docker/node_modules"
+msg=$(prepare_dev_frontend_dirs 2>&1); rc=$?
+check "dev frontend dirs: unwritable dependencies refused" "1" "$rc"
+check "dev frontend dirs: the refusal names the directory" "yes" \
+    "$(grep -Fq "$PROJECT_ROOT/frontend-client/.docker/node_modules" <<<"$msg" && echo yes)"
+chmod 755 "$PROJECT_ROOT/frontend-client/.docker/node_modules"
+chmod 555 "$PROJECT_ROOT/frontend-client/.npm-cache"
+prepare_dev_frontend_dirs 2>/dev/null; rc=$?
+check "dev frontend dirs: unwritable npm cache refused" "1" "$rc"
+chmod 755 "$PROJECT_ROOT/frontend-client/.npm-cache"
+# frontend-admin's npm cache is /app/.npm-cache too: an unwritable one is refused.
+chmod 555 "$PROJECT_ROOT/frontend-admin/.npm-cache"
+prepare_dev_frontend_dirs 2>/dev/null; rc=$?
+check "dev frontend dirs: admin's unwritable npm cache refused" "1" "$rc"
+chmod 755 "$PROJECT_ROOT/frontend-admin/.npm-cache"
+# A backend-only deploy prepares no frontend: an unwritable one does not stop it.
+chmod 555 "$PROJECT_ROOT/frontend-client/.npm-cache"
+prepare_dev_frontend_dirs frontend-admin; rc=$?
+check "dev frontend dirs: an app not given is not checked" "0" "$rc"
+chmod 755 "$PROJECT_ROOT/frontend-client/.npm-cache"
+fi
+rm -r "$PROJECT_ROOT"
+PROJECT_ROOT="$old_project_root"
 
 echo
 printf 'orkestra-helpers: %d passed, %d failed\n' "$pass" "$fail"

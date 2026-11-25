@@ -137,12 +137,16 @@ func (f *fakeUserService) ValidateUserRole(context.Context, string, []string) er
 }
 func (f *fakeUserService) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
 	// The tier guards resolve the CALLER's system role through this
-	// method (D28). A test that reaches it without opting in has a
-	// fixture gap, so the unset case stays a loud panic.
+	// method (D28), and since the target-tier guard they do so on EVERY
+	// update and delete, not only on a role assignment. A test that does
+	// not care about the caller's tier leaves getUserByIDFn unset and gets
+	// a super_admin row for whoever is calling — the guards then pass, as
+	// they did before the target-tier guard existed. A test about the
+	// guards sets the function explicitly (callerRow, newUserStore).
 	if f.getUserByIDFn != nil {
 		return f.getUserByIDFn(ctx, id)
 	}
-	panic("unused: GetUserByID")
+	return &iface.User{UUID: id, Role: "super_admin", IsActive: true}, nil
 }
 func (f *fakeUserService) GetUserByObjectID(context.Context, primitive.ObjectID) (*iface.User, error) {
 	panic("unused: GetUserByObjectID")
@@ -735,7 +739,7 @@ func TestDeleteUserHandler(t *testing.T) {
 				softDeleteAndAliasFn: func(context.Context, string) error { return c.svcErr },
 			}
 			h := NewUserHandler(svc)
-			resp, err := h.DeleteUser(context.Background(), &DeleteUserRequest{ID: "u1"})
+			resp, err := h.DeleteUser(adminCtx(), &DeleteUserRequest{ID: "u1"})
 			if c.wantStatus == 0 {
 				if err != nil {
 					t.Fatalf("err = %v", err)
@@ -782,7 +786,7 @@ func TestDeleteUserHandler(t *testing.T) {
 			},
 		}
 		h := NewUserHandler(svc)
-		_, err := h.DeleteUser(context.Background(), &DeleteUserRequest{ID: "u1"})
+		_, err := h.DeleteUser(adminCtx(), &DeleteUserRequest{ID: "u1"})
 		assertStatus(t, err, 403)
 		assertErrCode(t, err, errcode.UserLastAdminForbidden)
 		if svc.lastSoftDeleteAliasID != "" {
@@ -803,7 +807,7 @@ func TestDeleteUserHandler(t *testing.T) {
 			softDeleteAndAliasFn: func(context.Context, string) error { return nil },
 		}
 		h := NewUserHandler(svc)
-		if _, err := h.DeleteUser(context.Background(), &DeleteUserRequest{ID: "u1"}); err != nil {
+		if _, err := h.DeleteUser(adminCtx(), &DeleteUserRequest{ID: "u1"}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
 		if svc.lastSoftDeleteAliasID != "u1" {
@@ -825,7 +829,7 @@ func TestDeleteUserHandler(t *testing.T) {
 			// fallback fires if the handler calls it.
 		}
 		h := NewUserHandler(svc)
-		if _, err := h.DeleteUser(context.Background(), &DeleteUserRequest{ID: "u1"}); err != nil {
+		if _, err := h.DeleteUser(adminCtx(), &DeleteUserRequest{ID: "u1"}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
 	})

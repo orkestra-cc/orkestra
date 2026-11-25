@@ -3,6 +3,7 @@
 import './webStorage';
 import '@testing-library/jest-dom/vitest';
 import { afterAll, afterEach, beforeAll, vi } from 'vitest';
+import { configure } from '@testing-library/react';
 // Initialize i18n once for the whole test suite so t('...') calls
 // resolve against the real en.json bundle instead of returning raw
 // keys — the existing EmailPasswordForm tests assert on rendered
@@ -10,6 +11,11 @@ import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 import '../i18n';
 import { server } from './server';
 import { resetCapturedRequests } from './handlers';
+
+// findBy*/waitFor default: 1 s, 3 s in the coverage gate (vitest.config.ts).
+configure({
+  asyncUtilTimeout: Number(process.env.RTL_ASYNC_UTIL_TIMEOUT) || 1000
+});
 
 // Throw on any unhandled request so tests can't silently pass against a
 // missing stub. Add the endpoint to defaultHandlers (or override per-test

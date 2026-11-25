@@ -129,10 +129,23 @@
       "suppliers": "Suppliers",
       "invoicesIssued": "Invoices Issued",
       "invoicesReceived": "Invoices Received",
-      "sdiNotifications": "SDI Notifications"
+      "sdiNotifications": "SDI Notifications",
+      "deliveryLog": "Delivery log"
     }
   },
   "errors": {
+    "jobs": {
+      "not_found": "No job with this key is registered.",
+      "revision_conflict": "The job changed since it was loaded. It has been reloaded; try again.",
+      "already_running": "The job is running now; wait for the run to finish.",
+      "already_requested": "A run of this job is already waiting for a free replica.",
+      "module_stopped": "The job's module is not started, so its jobs do not run.",
+      "invalid_schedule": "The schedule is not valid",
+      "manual_schedule_locked": "This job runs only on request; its schedule cannot be changed.",
+      "invalid_timezone": "The timezone is not an IANA zone name.",
+      "invalid_query": "The run history filter is not valid.",
+      "persistence_failed": "The job state could not be read or written. Try again."
+    },
     "401": {
       "insufficientPermissions": "Insufficient Permissions",
       "accessDenied": "Access Denied",
@@ -183,7 +196,9 @@
       "login_disabled": "Login is temporarily disabled for this surface. Contact an administrator.",
       "country_blocked": "Access from your country is not permitted.",
       "password_confirm_unavailable": "This account cannot reconfirm with a password. Use MFA or reauthenticate via OAuth.",
-      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator."
+      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator.",
+      "recipient_suppressed": "the email was not sent because the user's address is marked invalid (suppression list). Make it valid again before trying once more.",
+      "suppression_unavailable": "the list of invalid addresses could not be read, so the email was not sent. Try again shortly."
     },
     "compliance": {
       "policy_not_found": "The compliance policy does not exist.",
@@ -200,7 +215,54 @@
       "policy_reason_required": "A reason of 1 to 500 characters is required.",
       "policy_unavailable": "Policies are loading: retry in a few seconds.",
       "policy_persistence_failed": "The request could not be completed."
-    }
+    },
+    "retrieval": {
+      "not_configured": "The vector engine is not configured on this installation.",
+      "unavailable": "The vector engine is not reachable right now. Try again shortly.",
+      "corpus_not_found": "No retrieval state exists for this corpus.",
+      "corpus_registered": "The corpus is still registered. Unregister it before dropping its state.",
+      "corpus_unavailable": "The module that owns this corpus is not running. Try again when it is.",
+      "forbidden": "You may not access this corpus.",
+      "invalid_filter": "The filter does not fit this corpus.",
+      "invalid_request": "The search request is not valid.",
+      "locality_violation": "An inference endpoint breaks the locality rule of this corpus.",
+      "visibility_check_failed": "The source visibility check could not run, so no result is shown. Try again shortly.",
+      "internal": "The retrieval request could not be completed."
+    },
+    "llm": {
+      "not_configured": "No active model or credential is configured in this organization.",
+      "provider_unavailable": "The provider is not reachable right now. Try again later.",
+      "no_eligible_model": "No model you may use is configured for this purpose.",
+      "model_access_denied": "You may not use this model.",
+      "capability_mismatch": "The model does not offer what the request needs.",
+      "invalid_request": "Some fields are invalid.",
+      "not_found": "The credential, model or linked account no longer exists.",
+      "name_in_use": "Another credential or model already has this name.",
+      "credential_in_use": "An active model still uses this credential. Delete it or point it at another credential first.",
+      "secret_key_missing": "This deployment has no secret encryption key configured, so keys cannot be stored.",
+      "endpoint_not_allowed": "That endpoint is not allowed in this environment.",
+      "hosted_disabled": "Hosted providers are disabled in the llm module settings.",
+      "mock_not_allowed": "The mock provider is only available outside production.",
+      "grant_not_member": "Every granted user must be a member of this organization.",
+      "budget_exceeded": "The organization's monthly LLM budget has no room for this call.",
+      "plan_quota_exhausted": "The linked account's plan quota is used up. Try again later.",
+      "credential_rejected": "The provider rejected the credential. Check or rotate the API key.",
+      "rate_limited": "Too many requests. Wait a minute and try again.",
+      "partial_output": "The provider stopped before the answer was complete.",
+      "user_account_required": "This model is billed to your own account: link it first.",
+      "user_account_reauth_required": "Your linked account must be authorized again.",
+      "plan_usage_disabled": "The linked account did not allow plan usage.",
+      "request_canceled": "The request was cancelled before it completed.",
+      "siwc_config_invalid": "Sign in with ChatGPT is not configured correctly on this installation. Ask an administrator to review the llm module settings.",
+      "siwc_disabled": "Sign in with ChatGPT is turned off on this installation.",
+      "siwc_unsupported_deployment": "Sign in with ChatGPT cannot complete automatically here: the API must be reached as http://127.0.0.1. Ask an administrator to use the paste flow.",
+      "siwc_callback_invalid": "That is not the address the browser showed after signing in. Copy the full URL from the address bar and paste it again.",
+      "siwc_state_invalid": "This sign-in attempt has expired or was already used. Start linking again.",
+      "siwc_denied": "The authorization was declined at OpenAI. Nothing was linked.",
+      "siwc_exchange_failed": "OpenAI did not complete the sign-in. Try linking again later.",
+      "siwc_id_token_invalid": "The identity returned by OpenAI could not be verified, or it belongs to another account. Nothing was changed."
+    },
+    "mfa_enrollment_required": "This action needs a fresh check with a second factor. Set up an authenticator app or a passkey in your security settings, then try again."
   },
   "banner": {
     "impersonation": {
@@ -713,6 +775,17 @@
         "toastCopied": "Token copied to clipboard",
         "errorUnknown": "unknown error"
       }
+    },
+    "modulePreferences": {
+      "title": "Module preferences",
+      "description": "Settings each module keeps for you. They follow your account, not the organization.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Preferences saved",
+      "saveFailed": "Could not save preferences: {{error}}",
+      "empty": "No module declares preferences yet.",
+      "lastSaved": "Last saved {{when}}",
+      "unknownError": "Unknown error"
     }
   },
   "adminTenants": {
@@ -997,7 +1070,8 @@
       "toastResendFailed": "Resend failed: {{error}}",
       "toastPasswordResetSent": "Password-reset email sent",
       "toastSendFailed": "Send failed: {{error}}",
-      "errorUnknown": "unknown error"
+      "errorUnknown": "unknown error",
+      "actionManagePin": "Manage PIN"
     },
     "attachMember": {
       "title": "Attach Member",
@@ -1221,7 +1295,9 @@
       "oauth": "Linked sign-ins",
       "sessions": "Sessions",
       "devices": "Trusted devices",
-      "backupCodes": "Backup codes"
+      "backupCodes": "Backup codes",
+      "ai": "AI accounts",
+      "pin": "PIN"
     },
     "stats": {
       "mfaTitle": "Two-factor",
@@ -1269,7 +1345,12 @@
       "errorTooShort": "New password must be at least {{count}} characters.",
       "errorRequiredNew": "Enter a new password.",
       "errorRequiredConfirm": "Confirm the new password.",
-      "errorGeneric": "Failed to update password."
+      "errorGeneric": "Failed to update password.",
+      "forgotCurrent": "Don't remember your current password?",
+      "resetLinkSend": "Email me a reset link",
+      "resetLinkSending": "Sending…",
+      "resetLinkSent": "Reset link requested for {{email}}. If it does not arrive within a few minutes, ask again. Setting a new password through it signs you out on every device.",
+      "resetLinkError": "We could not send the reset link. Try again in a few minutes."
     },
     "backupCodesTab": {
       "title": "Backup codes",
@@ -1378,6 +1459,93 @@
       "modalCancel": "Cancel",
       "modalSubmit": "Unlink",
       "modalSubmitting": "Unlinking…"
+    },
+    "aiAccounts": {
+      "intro": "Link your ChatGPT account so the models your organization bills to your own ChatGPT plan run on it. The sign-in tokens stay on the server: this page never sees them.",
+      "link": "Link a ChatGPT account",
+      "linkStarting": "Starting…",
+      "pasteInstead": "Paste a sign-in address instead",
+      "disabled": "Sign in with ChatGPT is not enabled on this installation.",
+      "disabledHint": "An administrator can turn it on in the llm module settings.",
+      "disabledWithAccounts": "Sign in with ChatGPT is not enabled on this installation. You can still unlink the accounts below.",
+      "empty": "No ChatGPT account is linked yet.",
+      "emptyHint": "Link one to use the models billed to your own ChatGPT plan.",
+      "loadError": "Your linked accounts could not be loaded.",
+      "retry": "Retry",
+      "linked": "Account linked.",
+      "linkedNamed": "Account linked: {{label}}.",
+      "selectedNow": "{{label}} is now the account your plan-billed models use.",
+      "unlinked": "{{label}} was unlinked.",
+      "neverUsed": "Never",
+      "selectedBadge": "Selected",
+      "columns": {
+        "account": "Account",
+        "status": "Status",
+        "selected": "In use",
+        "linked": "Linked",
+        "lastUsed": "Last used",
+        "actions": "Actions"
+      },
+      "status": {
+        "active": "Active",
+        "plan_disabled": "Plan usage not granted",
+        "needs_reauth": "Sign-in needed",
+        "revoked": "Revoked"
+      },
+      "remedies": {
+        "plan_disabled": "Sign in again and allow plan usage when OpenAI asks.",
+        "needs_reauth": "Sign in again to keep using this account.",
+        "revoked": "OpenAI no longer accepts this sign-in. Unlink the account and link it again."
+      },
+      "actions": {
+        "select": "Select",
+        "reauthorize": "Re-authorize",
+        "unlink": "Unlink"
+      },
+      "unlinkTitle": "Unlink {{label}}?",
+      "unlinkBody": "Models billed to your own plan stop using this account, and its sign-in is revoked at OpenAI. You can link it again later.",
+      "wizard": {
+        "title": "Link a ChatGPT account",
+        "reauthTitle": "Sign in again to {{label}}",
+        "stepOf": "Step {{step}} of {{total}}",
+        "step1Title": "Sign in at OpenAI",
+        "step1": "OpenAI opens in a new tab. Sign in with the ChatGPT account you want to use and allow plan usage when asked. Keep this window open: you finish here.",
+        "open": "Open OpenAI",
+        "step2Title": "Paste the address",
+        "step2": "After you sign in, the OpenAI tab tries to open an address that starts with http://127.0.0.1 and shows a connection error. That is expected: copy the full address from that tab's address bar.",
+        "pasteLabel": "Paste the address from the OpenAI tab",
+        "pastePlaceholder": "http://127.0.0.1:…/v1/llm/accounts/openai/callback?…",
+        "pasteHint": "Include everything after the question mark. The address works once, for ten minutes.",
+        "complete": "Complete linking",
+        "completing": "Linking…",
+        "back": "Back",
+        "cancel": "Cancel",
+        "validation": {
+          "required": "Paste the address first.",
+          "invalid": "That is not a web address. Copy it from the address bar.",
+          "tooLong": "That address is too long."
+        }
+      },
+      "myModels": {
+        "title": "Models billed to your plan",
+        "note": "Which of these you can use depends on the catalog of the account you selected.",
+        "empty": "No model billed to your own ChatGPT plan is available to you.",
+        "loadError": "The models could not be loaded.",
+        "columns": {
+          "name": "Model",
+          "modelId": "Model ID"
+        }
+      },
+      "myUsage": {
+        "title": "My usage this month",
+        "org": "Billed to the organization",
+        "orgSubtitle": "Tokens on the organization's credentials",
+        "userAccount": "Billed to your plan",
+        "userAccountSubtitle": "Tokens on your linked ChatGPT account"
+      }
+    },
+    "pinTab": {
+      "intro": "Your PIN signs you in on field devices with your username. Manage it here; changes need a recent strong sign-in."
     }
   },
   "operatorProfile": {
@@ -1668,6 +1836,143 @@
       "validation": "Check the service account name and try again.",
       "generic": "Something went wrong. Please try again.",
       "credentialCap": "This service account already has two active credentials. Revoke one before issuing another."
+    }
+  },
+  "adminJobs": {
+    "title": "Background jobs",
+    "subtitle": "Jobs declared by modules: schedule, state and run history.",
+    "loading": "Loading jobs…",
+    "loadingAria": "Loading jobs workspace",
+    "loadingJobs": "Loading jobs…",
+    "loadFailed": "Failed to load the jobs. Try again shortly.",
+    "empty": "No module has declared a job.",
+    "moduleSettings": "Module settings",
+    "backToJobs": "Back to jobs",
+    "overridden": "Edited",
+    "columns": {
+      "job": "Job",
+      "module": "Module",
+      "schedule": "Schedule",
+      "status": "Status",
+      "lastRun": "Last run",
+      "nextRun": "Next run",
+      "actions": "Actions"
+    },
+    "schedule": {
+      "every": "every {{value}} {{unit}}",
+      "cron": "cron {{expr}} ({{zone}})",
+      "cronShort": "cron {{expr}}",
+      "manual": "manual",
+      "units": {
+        "s": "s",
+        "min": "min",
+        "h": "h",
+        "d": "d"
+      }
+    },
+    "status": {
+      "disabled": "Disabled",
+      "moduleStopped": "Module stopped",
+      "running": "Running",
+      "retryPending": "Retry pending",
+      "lastOk": "Last run OK",
+      "lastFailed": "Last run failed",
+      "lastSkipped": "Last run skipped",
+      "neverRun": "Not run yet"
+    },
+    "actions": {
+      "enableAria": "Enable {{title}}",
+      "editSchedule": "Edit schedule",
+      "editScheduleAria": "Edit schedule of {{title}}",
+      "runNow": "Run now",
+      "runNowAria": "Run {{title}} now",
+      "reset": "Reset to default",
+      "resetAria": "Reset {{title}} to default"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "schedule": "Schedule",
+      "runs": "Runs"
+    },
+    "overview": {
+      "key": "Key",
+      "declared": "Declared schedule",
+      "offByDefault": "off by default",
+      "retryAt": "Retry",
+      "attempt_one": "attempt {{count}}",
+      "attempt_other": "attempt {{count}}",
+      "runRequested": "Run requested",
+      "timeout": "Timeout",
+      "maxAttempts": "Max attempts",
+      "revision": "Revision",
+      "lastRun": "Last run"
+    },
+    "editor": {
+      "declaredDefault": "The module declares: {{schedule}}.",
+      "kind": "Schedule type",
+      "kindEvery": "Every N minutes",
+      "kindCron": "Cron expression",
+      "everyMinutes": "Every (minutes)",
+      "cron": "Cron expression",
+      "cronHelp": "Five fields: minute hour day-of-month month day-of-week.",
+      "timezone": "Timezone",
+      "timezoneHelp": "IANA zone name. Leave empty to follow the module timezone.",
+      "preview": "Next runs",
+      "nextRuns": "Next runs",
+      "previewIdle": "Enter a valid schedule to preview its next runs.",
+      "previewLoading": "Computing…",
+      "save": "Save schedule",
+      "manualLocked": "This job runs only on request; it has no schedule to edit.",
+      "overriddenNote": "This job's schedule or enabled state was changed from what its module declares.",
+      "restoreDefaults": "Restore declared defaults",
+      "errors": {
+        "minutes": "Enter a whole number of minutes between 1 and 527040.",
+        "cron": "Enter a cron expression.",
+        "timezone": "The timezone name is too long."
+      }
+    },
+    "runs": {
+      "filterLabel": "Status",
+      "filterAria": "Filter by status",
+      "allStatuses": "All statuses",
+      "loading": "Loading runs…",
+      "loadFailed": "Failed to load the run history.",
+      "empty": "No runs recorded.",
+      "loadMore": "Load more",
+      "showDetails": "Show details",
+      "hideDetails": "Hide details",
+      "dropped": "{{count}} value(s) not recorded",
+      "columns": {
+        "started": "Started",
+        "status": "Status",
+        "trigger": "Trigger",
+        "attempt": "Attempt",
+        "duration": "Duration",
+        "details": "Details"
+      },
+      "status": {
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "timed_out": "Timed out",
+        "abandoned": "Abandoned",
+        "interrupted": "Interrupted",
+        "skipped": "Skipped"
+      },
+      "trigger": {
+        "schedule": "Schedule",
+        "manual": "Manual",
+        "retry": "Retry",
+        "catchup": "Catch-up"
+      }
+    },
+    "toasts": {
+      "runRequested": "{{title}} will run on the next free replica.",
+      "reset": "{{title}} restored to its declared defaults.",
+      "scheduleSaved": "Schedule of {{title}} saved."
+    },
+    "errors": {
+      "generic": "The operation failed. Try again."
     }
   },
   "adminObservability": {
@@ -2057,7 +2362,8 @@
         "toastUnlocked": "Account unlocked successfully",
         "toastFailure": "Unable to modify account status",
         "errorGeneric": "Error during operation"
-      }
+      },
+      "dataSubjectRequests": "Data subject requests"
     }
   },
   "adminUsers": {
@@ -2075,16 +2381,13 @@
       "labelEmail": "Email",
       "labelPhone": "Phone",
       "labelUsername": "Username",
-      "labelPin": "PIN",
       "labelRole": "Role",
       "requiredMark": "*",
       "placeholderFullName": "e.g. John Smith",
       "placeholderEmail": "john.smith@example.com",
       "placeholderPhone": "+1 555 1234567",
       "placeholderUsername": "johnsmith",
-      "placeholderPin": "12345",
       "helpUsername": "Username will be used for system login",
-      "helpPin": "5-digit numeric code for access",
       "cancel": "Cancel",
       "submit": "Create User",
       "submitting": "Creating…",
@@ -2220,12 +2523,13 @@
       "retention": "Retention",
       "auditEvents": "Audit Events",
       "policies": "Policies",
-      "changeRequests": "Requests"
+      "changeRequests": "Requests",
+      "subject": "Subject"
     },
     "stats": {
       "pendingErasures": {
         "title": "Pending Erasures",
-        "subtitle": "Awaiting review",
+        "subtitle": "Awaiting review or retry",
         "badge": "Needs attention"
       },
       "activeHolds": {
@@ -2249,6 +2553,8 @@
       "completed": "Completed",
       "executed": "Executed",
       "rejected": "Rejected",
+      "incomplete": "Incomplete",
+      "closed_partial": "Closed (partial)",
       "active": "Active",
       "released": "Released",
       "success": "Success",
@@ -2261,7 +2567,8 @@
         "reason": "Reason",
         "status": "Status",
         "requested": "Requested",
-        "actions": "Actions"
+        "actions": "Actions",
+        "approvals": "Approvals"
       },
       "execute": "Execute",
       "reject": "Reject",
@@ -2269,9 +2576,115 @@
       "executeError": "Execute failed (or blocked by a legal hold)",
       "rejectSuccess": "Request rejected",
       "rejectError": "Reject failed",
-      "emptyMessage": "No pending erasure requests.",
-      "emptyHint": "Data-subject erasure requests awaiting review will appear here.",
-      "searchPlaceholder": "Search by subject or reason"
+      "rejectTitle": "Reject this erasure request",
+      "rejectBody": "The request is closed without erasing anything. Give the reason (it is stored, with personal data masked).",
+      "close": "Close",
+      "closeTitle": "Close a partial erasure",
+      "closeBody": "These producers are no longer installed and will never finish: {{keys}}. Closing records the erasure as partial; it cannot be undone.",
+      "closeSuccess": "Erasure request closed as partial",
+      "closeError": "Close failed",
+      "retry": "Retry",
+      "executeIncomplete": "Erasure started: some producers are not done yet and will be retried",
+      "progress": "{{done}} of {{total}} producers done",
+      "nextRetry": "Next retry {{date}}",
+      "retriesExhausted": "Automatic retries exhausted",
+      "lastError": {
+        "legal_hold_active": "Blocked by a legal hold",
+        "run_failed": "Last run failed",
+        "retention_minimum": "Blocked by the minimum retention period"
+      },
+      "busy": "Another run is in progress; try again in a few minutes",
+      "source": {
+        "self_service": "Self-service",
+        "retention": "Retention",
+        "admin": "Admin"
+      },
+      "emptyMessage": "No open erasure requests.",
+      "emptyHint": "Erasure requests awaiting review or retry will appear here.",
+      "searchPlaceholder": "Search by subject or reason",
+      "approvalsNeeded": "Approvals {{have}}/{{need}}: more approvers needed before this can run",
+      "loadMore": "Load more",
+      "loadMoreError": "Could not load more requests",
+      "emptyFiltered": "No erasure requests with this status.",
+      "filter": {
+        "label": "Status filter",
+        "open": "Open",
+        "completed": "Completed",
+        "rejected": "Rejected",
+        "closed_partial": "Closed (partial)",
+        "all": "All"
+      },
+      "mode": {
+        "hard_delete": "Hard delete",
+        "anonymize": "Anonymize"
+      },
+      "open": {
+        "button": "New request",
+        "title": "Open an erasure request",
+        "subject": "Subject userUuid",
+        "mode": "Mode",
+        "reason": "Reason",
+        "required": "Required",
+        "submit": "Open request",
+        "success": "Erasure request opened",
+        "error": "Could not open the request"
+      },
+      "approve": {
+        "button": "Approve",
+        "title": "Approve erasure",
+        "note": "Note",
+        "submit": "Approve",
+        "success": "Approval recorded",
+        "error": "Approval failed"
+      },
+      "receipt": {
+        "open": "Receipt",
+        "title": "Erasure receipt",
+        "download": "Download JSON",
+        "close": "Close",
+        "completedAt": "Completed",
+        "totals": "Rows",
+        "totalsValue": "{{deleted}} deleted, {{anonymized}} anonymized",
+        "producer": "Producer",
+        "error": "Receipt unavailable"
+      },
+      "errors": {
+        "erasure_approvals_missing": "Not enough approvals: {{have}} of {{need}}",
+        "erasure_self_approval": "You cannot open, approve or execute the erasure of your own account",
+        "erasure_already_approved": "You have already approved this request",
+        "erasure_mode_mismatch": "The mode differs from the one already approved",
+        "erasure_request_exists": "An open request already exists for this subject ({{requestId}})",
+        "erasure_request_busy": "Another run is in progress; try again in a few minutes",
+        "legal_hold_active": "Blocked by a legal hold",
+        "retention_minimum_not_met": "Hard delete is not allowed before {{date}} ({{reasons}}); anonymize instead",
+        "retention_check_unavailable": "The retention check is unavailable; try again later",
+        "reason_required": "The reason or note must be 1 to 500 characters",
+        "invalid_cursor": "The page cursor is no longer valid; reload the list",
+        "erasure_receipt_unavailable": "The receipt is not available for this request",
+        "erasure_request_started": "The request has already started and can no longer be rejected",
+        "erasure_request_not_closable": "This request cannot be closed as partial",
+        "erasure_close_note_required": "A note is required to close the request",
+        "legal_hold_expiry_past": "The expiry date must be in the future",
+        "export_storage_unavailable": "Export storage is unavailable; try again later",
+        "export_erasure_in_progress": "An erasure of this subject is in progress; exports are blocked",
+        "export_expired": "This export has expired",
+        "export_not_found": "Export not found",
+        "subject_not_found": "No user matches this subject UUID."
+      },
+      "retentionReason": {
+        "platform_minimum": "platform minimum retention"
+      },
+      "outcome": {
+        "done": "Done",
+        "pending": "Pending",
+        "failed": "Failed"
+      },
+      "execute_modal": {
+        "title": "Execute erasure",
+        "mode": "Mode",
+        "locked": "Mode locked by the request",
+        "submit": "Execute"
+      }
     },
     "holds": {
       "columns": {
@@ -2280,7 +2693,8 @@
         "case": "Case",
         "status": "Status",
         "placed": "Placed",
-        "actions": "Actions"
+        "actions": "Actions",
+        "dates": "Review / expiry"
       },
       "form": {
         "subjectLabel": "Subject userUuid",
@@ -2298,7 +2712,37 @@
       "releaseError": "Release failed",
       "emptyMessage": "No active legal holds.",
       "emptyHint": "Place a hold above to block erasure of a subject under litigation.",
-      "searchPlaceholder": "Search by subject, reason or case"
+      "searchPlaceholder": "Search by subject, reason or case",
+      "reviewAt": "Review date",
+      "expiresAt": "Expiry date",
+      "reviewDue": "Review due",
+      "expired": "Expired",
+      "showReleased": "Show released",
+      "releaseModal": {
+        "title": "Release legal hold",
+        "body": "Releasing the hold lets the subject's erasure proceed. State why it is released."
+      },
+      "edit": {
+        "open": "Edit",
+        "title": "Edit legal hold",
+        "reviewAt": "Review date",
+        "expiresAt": "Expiry date",
+        "clearReviewAt": "Clear the review date",
+        "clearExpiresAt": "Clear the expiry date",
+        "expiryHint": "The hold is released automatically on this date.",
+        "submit": "Save",
+        "success": "Legal hold updated",
+        "error": "Update failed"
+      },
+      "notes": {
+        "readOnly": "This hold has ended, so notes can no longer be added.",
+        "open": "Notes ({{count}})",
+        "title": "Hold notes",
+        "empty": "No notes yet.",
+        "label": "Add a note",
+        "add": "Add note",
+        "error": "Could not add the note"
+      }
     },
     "retention": {
       "previewTitle": "Retention cleanup preview (dry run)",
@@ -2599,6 +3043,60 @@
       "applied": "Policy of the tenant updated.",
       "sentForApproval": "Request sent for approval.",
       "error": "The assignment could not be saved."
+    },
+    "subject": {
+      "userUuid": "Subject userUuid",
+      "load": "Load",
+      "emptyMessage": "No subject selected.",
+      "emptyHint": "Enter a user UUID to preview an erasure, export the subject's data or open an erasure request.",
+      "loadError": "Could not load the preview",
+      "previewTitle": "Erasure preview",
+      "hardDeleteAllowed": "Hard delete allowed",
+      "hardDeleteBlocked": "Hard delete blocked",
+      "anonymizeAllowed": "Anonymize allowed",
+      "anonymizeBlocked": "Anonymize blocked",
+      "holds": "Legal holds",
+      "noHolds": "none",
+      "retention": "Retention",
+      "retentionUnavailable": "the retention check is unavailable",
+      "noRetention": "no minimum retention applies",
+      "retainUntil": "keep until {{date}} ({{reasons}})",
+      "openRequests": "Open erasure requests",
+      "producers": {
+        "title": "Personal data by producer",
+        "note": "Counts are per producer and can overlap (some producers share rows): they are not added into a total.",
+        "empty": "No producers reported.",
+        "key": "Producer",
+        "rows": "Rows",
+        "collections": "Collections",
+        "notCountable": "not countable",
+        "search": "Search producers"
+      },
+      "exportJson": "Export JSON",
+      "exportCsv": "Export CSV",
+      "openErasure": "Open erasure request",
+      "exportModal": {
+        "title": "Export subject data ({{format}})",
+        "body": "The export is stored for a limited time and can be downloaded from the list below. State why it is needed.",
+        "submit": "Create export"
+      },
+      "exportSuccess": "Export created",
+      "exportError": "Could not create the export",
+      "downloadError": "Could not download the export",
+      "exports": {
+        "title": "Exports",
+        "empty": "No exports for this subject.",
+        "search": "Search exports",
+        "format": "Format",
+        "reason": "Reason",
+        "created": "Created",
+        "expires": "Expires",
+        "expired": "Expired",
+        "download": "Download",
+        "actions": "Actions"
+      },
+      "invalidUuid": "Enter a valid user UUID",
+      "holdExpired": "No longer blocking (expired)"
     }
   },
   "adminComplianceSoc2": {
@@ -2618,6 +3116,346 @@
       "kms_keys_active": "KMS Keys Active",
       "kms_keys_shredded": "KMS Keys Shredded",
       "audit_rows_24h": "Audit Rows (24h)"
+    }
+  },
+  "adminLlm": {
+    "pageTitle": "Language models",
+    "pageSubtitle": "Provider credentials, the models built on them and who in this organization may use each one.",
+    "noAccess": "You do not have access to the language models of this organization.",
+    "loadError": "The list could not be loaded.",
+    "tabs": {
+      "models": "Models",
+      "credentials": "Credentials",
+      "accounts": "Accounts",
+      "usage": "Usage",
+      "budget": "Budget"
+    },
+    "actions": {
+      "cancel": "Cancel",
+      "save": "Save",
+      "delete": "Delete",
+      "retry": "Retry"
+    },
+    "columns": {
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "providers": {
+      "openai": "OpenAI",
+      "anthropic": "Anthropic",
+      "gemini": "Google Gemini",
+      "ollama": "Ollama",
+      "openai_compatible": "OpenAI-compatible",
+      "mock": "Mock (non-production)"
+    },
+    "credentialKind": {
+      "org": "Organization API key",
+      "user_account": "User's ChatGPT account"
+    },
+    "access": {
+      "granted": "Only granted users",
+      "everyone": "Everyone in the organization"
+    },
+    "capabilities": {
+      "chat": "Chat",
+      "streaming": "Streaming",
+      "tools": "Tools",
+      "structuredOutput": "Structured output",
+      "embeddings": "Embeddings"
+    },
+    "effort": {
+      "default": "Provider default",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "validation": {
+      "required": "This field is required.",
+      "name": "Use 1 to 64 letters, digits, spaces, dots, underscores or dashes, starting with a letter or digit.",
+      "tooLong": "This value is too long.",
+      "url": "Enter an http or https URL, e.g. http://ollama:11434.",
+      "modelId": "Use 1 to 128 letters, digits, dots, dashes, underscores, colons or slashes.",
+      "purpose": "Use a lowercase key such as default or summarize.",
+      "number": "Enter a number.",
+      "integer": "Enter a whole number.",
+      "min": "The minimum is {{min}}.",
+      "max": "The maximum is {{max}}."
+    },
+    "errors": {
+      "generic": "The operation failed. Try again."
+    },
+    "credentials": {
+      "add": "Add credential",
+      "edit": "Edit",
+      "rotate": "Rotate key",
+      "delete": "Delete",
+      "enable": "Enable",
+      "disable": "Disable",
+      "enabled": "Credential enabled",
+      "disabled": "Credential disabled",
+      "search": "Search credentials",
+      "noSecret": "No key",
+      "secretTail": "•••• {{last4}}",
+      "noPermission": "You need the permission to manage LLM credentials.",
+      "emptyTitle": "No credentials yet",
+      "emptyHint": "Add a provider API key, then configure a model that uses it.",
+      "deleteTitle": "Delete credential",
+      "deleteConfirm": "Delete the credential \"{{name}}\"? Models can no longer use it.",
+      "deleteSuccess": "Credential deleted",
+      "saveSuccess": "Credential saved",
+      "secretHint": "Stored encrypted and never shown again. Only the last four characters are displayed.",
+      "fixedEndpoint": "This provider always uses {{url}}.",
+      "hostedDisabledWarning": "Hosted providers are disabled for this installation. Enable \"Allow hosted providers\" in the llm module settings before using this credential.",
+      "editorTitle": {
+        "create": "New credential",
+        "edit": "Edit \"{{name}}\"",
+        "rotate": "Rotate the API key of \"{{name}}\""
+      },
+      "fields": {
+        "name": "Name",
+        "provider": "Provider",
+        "baseUrl": "Base URL",
+        "baseUrlPlaceholder": "http://ollama:11434",
+        "secret": "API key"
+      },
+      "columns": {
+        "name": "Name",
+        "provider": "Provider",
+        "secret": "Key",
+        "status": "Status",
+        "updated": "Updated",
+        "lastTest": "Last test"
+      },
+      "test": "Test connection",
+      "testOk": "The credential works.",
+      "testFailed": "The test failed: {{reason}}",
+      "neverTested": "Never tested",
+      "testStatus": {
+        "ok": "OK",
+        "error": "Failed"
+      }
+    },
+    "models": {
+      "add": "Add model",
+      "edit": "Edit",
+      "delete": "Delete",
+      "grants": "Who may use it",
+      "grantsEveryone": "Everyone in the organization may use this model",
+      "search": "Search models",
+      "emptyTitle": "No models configured",
+      "emptyHint": "Define a model, its capabilities and who may use it.",
+      "needCredential": "No organization API key yet: add one under Credentials, or add a model billed to each user's own ChatGPT plan.",
+      "noPermission": "You need the permission to manage LLM models.",
+      "deleteTitle": "Delete model",
+      "deleteConfirm": "Delete the model \"{{name}}\" and its grants?",
+      "deleteSuccess": "Model deleted",
+      "saveSuccess": "Model saved",
+      "grantsSaved": "Access list saved",
+      "grantsNotSaved": "The model was saved, but its access and grants were not saved. Use \"Who may use it\" to try again.",
+      "grantsNotSavedReason": "The model was saved, but its access and grants were not saved: {{reason}} Use \"Who may use it\" to try again.",
+      "addTitle": "New model",
+      "editTitle": "Edit \"{{name}}\"",
+      "grantsTitle": "Who may use \"{{name}}\"",
+      "userAccountHint": "This model is billed to each user's own ChatGPT plan. Embeddings, temperature and max tokens are not available on that route, and the model must exist in the linked account's catalog.",
+      "purposeWithPriority": "{{purpose}} ({{priority}})",
+      "fields": {
+        "name": "Name",
+        "provider": "Provider",
+        "credentialKind": "Billed to",
+        "credential": "Credential",
+        "credentialPlaceholder": "Choose a credential",
+        "credentialDisabled": "{{name}} (disabled)",
+        "noCredentialForProvider": "No active API key for this provider. Add one under Credentials, or bill an OpenAI model to each user's own ChatGPT account.",
+        "modelId": "Model ID",
+        "modelIdPlaceholder": "gpt-5.6-terra",
+        "modelIdHint": "The provider's model slug, e.g. gpt-5.6-terra, claude-opus-5-5, gemini-2.5-pro, llama3.1.",
+        "capabilities": "Capabilities",
+        "dimensions": "Vector dimensions",
+        "temperature": "Temperature",
+        "maxOutputTokens": "Max output tokens",
+        "effort": "Reasoning effort",
+        "purposes": "Purposes and priority",
+        "purposeLabel": "Purpose {{index}}",
+        "priorityLabel": "Priority of purpose {{index}}",
+        "purposePlaceholder": "default",
+        "removePurpose": "Remove purpose",
+        "addPurpose": "Add purpose",
+        "purposesHint": "Addons ask for a purpose; the lowest priority wins. Keep one model on \"default\".",
+        "purposesHelp": "A purpose is the job a caller asks for, such as assistant or summarize. For each request the gateway uses the live models that list that purpose and support what the request needs (tools, for example), lowest priority number first; the next ones are fallbacks billed the same way. When no model lists the purpose, the request falls back to default, so keep one model on default. A purpose does not grant access: access and grants decide who may use the model.",
+        "access": "Access",
+        "grantees": "Granted users",
+        "granteesPlaceholder": "Pick members of this organization",
+        "granteesHint": "Managing a model does not grant its use.",
+        "granteesNoPermission": "You need the permission to manage LLM grants to change this list.",
+        "noMembers": "No matching members",
+        "membersError": "The members of this organization could not be loaded.",
+        "formerMember": "{{id}} (no longer a member)",
+        "membersForbidden": "Listing this organization's members needs tenant-admin access, so the grant list cannot be edited here.",
+        "accessEveryoneHint": "Every member of the organization may use this model. The granted users are kept and apply again if you switch back."
+      },
+      "columns": {
+        "name": "Name",
+        "model": "Model",
+        "billing": "Billed to",
+        "purposes": "Purposes",
+        "access": "Granted",
+        "status": "Status"
+      },
+      "enable": "Enable",
+      "disable": "Disable",
+      "enabled": "Model enabled",
+      "disabled": "Model disabled",
+      "discover": "Fetch from provider",
+      "discoverFound_one": "{{count}} model found: pick one or type any slug.",
+      "discoverFound_other": "{{count}} models found: pick one or type any slug.",
+      "discoverNone": "The provider listed no models.",
+      "discoverNeedCredential": "Choose an active credential first.",
+      "discoverNoPermission": "Fetching the model list needs the permission to manage LLM credentials."
+    },
+    "usage": {
+      "stats": {
+        "requests": {
+          "title": "Requests this month",
+          "subtitle": "UTC month {{period}}"
+        },
+        "consumed": {
+          "title": "Tokens consumed",
+          "subtitle": "Org keys {{org}} · user accounts {{user}}"
+        },
+        "reserved": {
+          "title": "Tokens reserved",
+          "subtitle": "Held by calls still in flight"
+        },
+        "budget": {
+          "title": "Budget used",
+          "none": "No budget",
+          "unlimited": "No monthly limit is set",
+          "exhausted": "Exhausted",
+          "subtitle": "{{consumed}} consumed · {{reserved}} reserved · limit {{limit}}"
+        }
+      },
+      "admissionNote": "The limit is an admission check: a call is admitted by reserving its estimate, so real consumption can exceed the reservation and, briefly, the limit.",
+      "period": "Period",
+      "periods": {
+        "30d": "Last 30 days",
+        "90d": "Last 90 days",
+        "month": "This month (UTC)"
+      },
+      "groupByLabel": "Group by",
+      "groupBy": {
+        "model": "Model",
+        "user": "User",
+        "caller": "Caller"
+      },
+      "noKey": {
+        "model": "No model",
+        "user": "No user (system call)",
+        "caller": "No caller"
+      },
+      "unknownModel": "{{id}} (deleted model)",
+      "columns": {
+        "requests": "Requests",
+        "inputTokens": "Input tokens",
+        "outputTokens": "Output tokens",
+        "total": "Total tokens"
+      },
+      "series": {
+        "input": "Input tokens",
+        "output": "Output tokens"
+      },
+      "chartTitle": "Input and output tokens",
+      "search": "Search usage",
+      "emptyTitle": "No usage in this period",
+      "emptyHint": "Calls show up here once a model has answered.",
+      "modelNamesError": "The model names could not be loaded, so rows show model IDs."
+    },
+    "budget": {
+      "semantics": "The limit counts input and output tokens of every model, on organization keys and on users' own accounts, per UTC calendar month. Each call reserves its estimate before it runs and is charged its real usage when it ends.",
+      "none": "This organization has no budget, so LLM usage is unlimited. Save a limit to create one.",
+      "lastUpdated": "Last changed on {{date}} by {{user}}.",
+      "saveSuccess": "Budget saved",
+      "noPermission": "You need the permission to manage the LLM budget to change it.",
+      "fields": {
+        "limit": "Monthly token limit",
+        "limitHint": "Input plus output tokens per UTC month.",
+        "warnPct": "Warning threshold (%)",
+        "warnPctHint": "The recipients are notified once consumption reaches this share of the limit. 0 disables the warning.",
+        "action": "When a call does not fit",
+        "recipients": "Also notify",
+        "recipientsPlaceholder": "Pick members of this organization",
+        "recipientsHint": "The owners and admins of the organization are always notified.",
+        "noMembers": "No matching members",
+        "membersError": "The members of this organization could not be loaded.",
+        "membersForbidden": "Listing this organization's members needs tenant-admin access, so the extra recipients cannot be edited here.",
+        "formerMember": "{{id}} (no longer a member)"
+      },
+      "actions": {
+        "block": "Block the call",
+        "warn_only": "Warn only"
+      },
+      "actionHints": {
+        "block": "A call that does not fit the remaining balance is refused with \"budget exceeded\".",
+        "warn_only": "Every call is admitted, even past the limit; the recipients are only notified."
+      },
+      "validation": {
+        "maxRecipients": "At most {{max}} extra recipients."
+      }
+    },
+    "prompt": {
+      "action": "Try a prompt",
+      "title": "Try \"{{name}}\"",
+      "field": "Prompt",
+      "hint": "Sent once as a single user message and stored nowhere. Grants are ignored; the call counts against the budget.",
+      "run": "Run",
+      "running": "Running…",
+      "close": "Close",
+      "answer": "Answer",
+      "empty": "The model returned no text.",
+      "answeredBy": "Answered by {{name}} ({{modelId}}).",
+      "fallback": "Answered by a fallback model, not by {{name}}: the pinned model failed.",
+      "usage": "{{input}} input · {{output}} output tokens",
+      "finishReason": "Finish reason: {{reason}}",
+      "truncated": "The answer was cut at 64 KiB.",
+      "tooLong": "Use at most {{max}} characters.",
+      "disabledModel": "Enable the model to try it."
+    },
+    "accounts": {
+      "intro": "ChatGPT accounts the organization's members linked with Sign in with ChatGPT. Tokens never leave the server; this list shows none.",
+      "mode": "Sign in with ChatGPT: {{mode}}",
+      "modes": {
+        "disabled": "off",
+        "loopback_local": "automatic return (local installation)",
+        "hosted_paste": "paste flow"
+      },
+      "disabledHint": "Members cannot link ChatGPT accounts until it is turned on.",
+      "openSettings": "Open the llm module settings",
+      "emptyTitle": "No member has linked a ChatGPT account.",
+      "emptyHint": "Members link their accounts from their security settings.",
+      "search": "Search accounts",
+      "planGranted": "Granted",
+      "planNotGranted": "Not granted",
+      "neverUsed": "Never",
+      "columns": {
+        "user": "Member",
+        "account": "Account",
+        "status": "Status",
+        "planUsage": "Plan usage",
+        "lastUsed": "Last used"
+      },
+      "status": {
+        "active": "Active",
+        "plan_disabled": "Plan usage not granted",
+        "needs_reauth": "Sign-in needed",
+        "revoked": "Revoked"
+      },
+      "forceUnlink": "Force unlink",
+      "forceUnlinkTitle": "Force unlink {{label}}?",
+      "forceUnlinkBody": "{{label}} of {{user}} is revoked at OpenAI and removed. Models billed to that member's plan stop working until they link an account again.",
+      "forceUnlinkSuccess": "The account was unlinked.",
+      "noPermission": "Force unlink needs the permission to manage linked accounts."
     }
   },
   "adminModules": {
@@ -2774,7 +3612,14 @@
         "goToError": "Go to {{group}}",
         "reloadReview": "Reload & review"
       },
+      "busyLeave": {
+        "title": "Saving in progress",
+        "body": "A change is still being saved. Leaving now may leave it unconfirmed.",
+        "stay": "Stay",
+        "leave": "Leave anyway"
+      },
       "rail": {
+        "extensions": "Extensions",
         "overview": "Overview",
         "configuration": "Configuration",
         "module": "Module",
@@ -3354,5 +4199,321 @@
     "errors": {
       "generic": "The operation failed."
     }
+  },
+  "pinMethod": {
+    "title": "PIN sign-in",
+    "cardTitle": "PIN sign-in",
+    "badgeSet": "Set",
+    "badgeNotSet": "Not set",
+    "badgeLocked": "Locked",
+    "updatedAt": "Last changed {{date}}.",
+    "notSetAdmin": "This user has no PIN. Set one to let them sign in on a field device with username and PIN.",
+    "notSetSelf": "You have no PIN. Set one to sign in on a field device with your username and PIN.",
+    "lockedUntil": "Locked after too many wrong attempts until {{when}}.",
+    "weakNote": "A PIN is a weak sign-in method: it never counts as two-factor authentication, and a PIN session cannot change credentials.",
+    "setButton": "Set PIN",
+    "replaceButton": "Change PIN",
+    "codeButton": "Device enrollment code",
+    "removeButton": "Remove PIN",
+    "cancel": "Cancel",
+    "unavailable": "PIN sign-in is switched off on this surface. A PIN can be prepared now and will work once an administrator turns the method on.",
+    "loadError": "Could not load the PIN state.",
+    "retry": "Retry",
+    "toastSet": "PIN set. Open PIN sessions were signed out.",
+    "toastReplaced": "PIN changed. Open PIN sessions were signed out.",
+    "toastRemoved": "PIN and enrolled devices removed.",
+    "toastDeviceRevoked": "Device revoked. Its PIN sessions were signed out.",
+    "clientModalTitle": "PIN sign-in — {{email}}",
+    "setModal": {
+      "titleSet": "Set PIN",
+      "titleReplace": "Change PIN",
+      "intro": "Choose {{count}} digits. Avoid repeated digits and sequences such as 12345.",
+      "labelPin": "New PIN",
+      "labelConfirm": "Repeat the PIN",
+      "replaceNote": "Changing the PIN signs out every session opened with the old one. Enrolled devices stay enrolled.",
+      "submit": "Save PIN",
+      "errorRequired": "Enter the PIN.",
+      "errorDigits": "Use digits only.",
+      "errorLength": "The PIN must be exactly {{count}} digits.",
+      "errorMismatch": "The two PINs do not match."
+    },
+    "codeModal": {
+      "title": "Device enrollment code",
+      "intro": "Type this code in the app on the device, together with the username. It works once and is not shown again.",
+      "expires": "Valid until {{when}}.",
+      "done": "Done"
+    },
+    "removeModal": {
+      "title": "Remove PIN?",
+      "body": "The PIN and every enrolled device are removed, and open PIN sessions are signed out. Other sign-in methods are not affected.",
+      "submit": "Remove"
+    },
+    "devices": {
+      "heading": "Enrolled devices",
+      "introRequired": "The PIN works only on these devices. Enroll a device with a one-time code.",
+      "introOptional": "Device binding is off on this surface: the PIN works on any device. Enrolled devices are still listed.",
+      "empty": "No device enrolled.",
+      "colDevice": "Device",
+      "colPlatform": "Platform",
+      "colVia": "Enrolled by",
+      "colEnrolled": "Enrolled",
+      "colLastUsed": "Last used",
+      "revoke": "Revoke",
+      "viaAdmin": "Administrator",
+      "viaSelf": "User"
+    },
+    "errors": {
+      "auth_pin_invalid": "The PIN must be exactly the configured number of digits.",
+      "auth_pin_too_weak": "Choose a PIN that is not a repeated digit or a sequence.",
+      "auth_pin_username_required": "The user needs a username first: it is the PIN sign-in identifier.",
+      "auth_pin_username_not_unique": "Another user has the same username. Give this user a unique username first.",
+      "auth_pin_not_allowed": "This user cannot have a PIN: privileged roles, service accounts and users without the PIN sign-in permission use stronger methods.",
+      "auth_pin_not_set": "There is no PIN yet.",
+      "auth_pin_session_forbidden": "You signed in with a PIN. Sign in with your password or another strong method to manage your PIN.",
+      "auth_pin_device_not_found": "That device is no longer enrolled.",
+      "user_target_tier_forbidden": "You cannot change the PIN of a user whose role is higher than yours.",
+      "unknown": "The PIN operation failed."
+    }
+  },
+  "adminRetrieval": {
+    "pageTitle": "Retrieval",
+    "pageSubtitle": "Semantic search indexes: engine and inference health, corpora, indexing progress and the audited search log.",
+    "tabs": {
+      "corpora": "Corpora",
+      "indexing": "Indexing",
+      "searchLog": "Search log"
+    },
+    "noAccess": "You do not have access to any retrieval view.",
+    "errors": {
+      "generic": "The operation failed."
+    },
+    "engine": {
+      "title": "Vector engine",
+      "ok": "Reachable",
+      "not_configured": "Not configured",
+      "unavailable": "Unavailable"
+    },
+    "inference": {
+      "title": "Inference endpoints",
+      "status": {
+        "ok": "Healthy",
+        "not_configured": "Not configured",
+        "unavailable": "Unavailable",
+        "mismatch": "Profile mismatch",
+        "wrong_kind": "Wrong endpoint kind"
+      },
+      "healthy": "{{ok}} of {{total}} healthy",
+      "none": "No inference endpoint in use",
+      "columns": {
+        "endpoint": "Endpoint",
+        "kind": "Used for",
+        "status": "Status",
+        "profile": "Profile",
+        "boundary": "Boundary"
+      },
+      "kinds": {
+        "embed": "Embedding",
+        "rerank": "Rerank"
+      },
+      "boundaries": {
+        "local": "Local",
+        "hosted": "Hosted"
+      }
+    },
+    "corpora": {
+      "title": "Corpora",
+      "states": {
+        "uninitialized": "Not built",
+        "active": "Active",
+        "profile_changed": "Profile changed",
+        "error": "Error"
+      },
+      "reasons": {
+        "locality": "Locality violation",
+        "endpoint_unknown": "Unknown endpoint",
+        "endpoint_kind": "Wrong endpoint kind",
+        "unknown_state": "Unknown state"
+      },
+      "notConfigured": "The vector engine is not configured on this installation. Corpora are listed, but nothing is indexed or searchable until it is.",
+      "empty": "No corpus is registered or stored.",
+      "search": "Search corpora…",
+      "notRegistered": "Not registered",
+      "ownerRunning": "Running",
+      "ownerStopped": "Not running",
+      "outboxOldest": "oldest {{date}}",
+      "tenants": "{{done}} done · {{building}} building",
+      "columns": {
+        "name": "Corpus",
+        "owner": "Owner",
+        "state": "State",
+        "generation": "Generation",
+        "outbox": "Pending updates",
+        "tenants": "Organizations",
+        "actions": "Actions"
+      },
+      "dropTitle": "Drop corpus",
+      "dropConfirm": "Drop the stored state of {{name}}? Generations {{generations}} and their collections are deleted, with every organization's pending updates and build progress for it. The search log is kept. Only drop it once no running server registers this corpus: during a rolling deploy, a server that still registers it rebuilds it from scratch.",
+      "dropSuccess": "Corpus {{name}} dropped."
+    },
+    "searchLog": {
+      "title": "Search log",
+      "outcome": {
+        "ok": "OK",
+        "degraded": "Degraded",
+        "error": "Error"
+      },
+      "errorKind": {
+        "not_configured": "Not configured",
+        "unavailable": "Unavailable",
+        "principals": "Principals lookup failed",
+        "visibility_check": "Visibility check failed",
+        "canceled": "Cancelled"
+      },
+      "audited": "Each view of this log is recorded in the audit trail. Searches from the last few seconds may not be listed yet.",
+      "empty": "No search matches these filters.",
+      "stepUpNeeded": "Viewing the search log requires a fresh verification.",
+      "durationMs": "{{ms}} ms",
+      "filters": {
+        "userUuid": "User UUID",
+        "since": "From",
+        "until": "To",
+        "datePlaceholder": "yyyy-mm-dd",
+        "invalidUuid": "Enter a valid UUID.",
+        "untilBeforeSince": "The end date is before the start date."
+      },
+      "columns": {
+        "createdAt": "Time",
+        "user": "User",
+        "corpus": "Corpus",
+        "query": "Query",
+        "returned": "Returned",
+        "subjects": "Subjects",
+        "duration": "Duration",
+        "outcome": "Outcome",
+        "details": "Details"
+      },
+      "details": {
+        "show": "Show details",
+        "hide": "Hide details",
+        "showAria": "Show details of the search at {{date}}",
+        "hideAria": "Hide details of the search at {{date}}",
+        "mode": "Mode",
+        "principals": "Principals",
+        "returned": "Returned sources",
+        "subjects": "Subjects",
+        "filter": "Filter",
+        "none": "None"
+      }
+    },
+    "loadError": "The retrieval data could not be loaded.",
+    "actions": {
+      "retry": "Retry",
+      "diagnose": "Diagnose",
+      "diagnoseAria": "Diagnose {{name}}",
+      "drop": "Drop",
+      "dropAria": "Drop {{name}}",
+      "close": "Close",
+      "run": "Run search",
+      "running": "Searching…",
+      "apply": "Apply filters",
+      "verify": "Verify and load"
+    },
+    "erasures": {
+      "pending": "Erasures pending",
+      "fencing": "Erasures fencing"
+    },
+    "diagnostics": {
+      "title": "Diagnose {{name}}",
+      "hint": "Runs one real search as you, with your own principals. It is recorded in the search log and the audit trail.",
+      "query": "Query",
+      "mode": "Mode",
+      "limit": "Results",
+      "modes": {
+        "hybrid": "Hybrid",
+        "dense": "Dense",
+        "keyword": "Keyword"
+      },
+      "validation": {
+        "queryRequired": "Enter a query.",
+        "queryTooLong": "At most {{max}} characters.",
+        "limitRange": "Between 1 and 100."
+      },
+      "result": "Result",
+      "pinned": "Collection {{collection}} · embedding profile {{profile}}",
+      "principals": "Principals applied",
+      "degraded": "Degraded search: part of the pipeline was unavailable, so this ranking may differ from a healthy one.",
+      "noHits": "No source visible to you matches this query.",
+      "columns": {
+        "rank": "#",
+        "sourceId": "Source",
+        "chunkId": "Chunk",
+        "score": "Score",
+        "fused": "Fused",
+        "dense": "Dense",
+        "keyword": "Keyword",
+        "rerank": "Rerank",
+        "snippet": "Snippet"
+      }
+    },
+    "indexing": {
+      "empty": "No corpus is registered.",
+      "search": "Search corpora…",
+      "erasuresPending": "Erasures pending",
+      "initialBuild": {
+        "pending": "Pending",
+        "building": "Building",
+        "done": "Done"
+      },
+      "columns": {
+        "corpus": "Corpus",
+        "owner": "Owner",
+        "state": "Corpus state",
+        "initialBuild": "Initial build",
+        "points": "Indexed points",
+        "outbox": "Pending updates"
+      }
+    }
+  },
+  "adminDeliveryLog": {
+    "title": "Delivery log",
+    "subtitle": "The emails the platform tried to send in the last 90 days, with their outcome. A «suppressed» row was never sent.",
+    "col": {
+      "date": "Date",
+      "type": "Type",
+      "category": "Category",
+      "recipient": "Recipient",
+      "status": "Status",
+      "reason": "Reason",
+      "sender": "Sender"
+    },
+    "status": {
+      "sent": "Sent",
+      "suppressed": "Suppressed",
+      "failed": "Failed",
+      "queued": "Queued"
+    },
+    "type": {
+      "transactional": "Transactional",
+      "marketing": "Marketing"
+    },
+    "reason": {
+      "addressInvalid": "Address marked invalid",
+      "marketingOptout": "Unsubscribed from marketing",
+      "categoryPreference": "The user's preference for this category"
+    },
+    "filter": {
+      "address": "Search by address",
+      "status": "Status",
+      "anyStatus": "Any status",
+      "type": "Type",
+      "anyType": "Any type",
+      "category": "Category (e.g. auth.reset_password)"
+    },
+    "refresh": "Refresh",
+    "loading": "Loading the log…",
+    "loadError": "The delivery log could not be loaded.",
+    "retry": "Retry",
+    "empty": "No email in the last 90 days.",
+    "noResults": "No row matches the filters."
   }
 }

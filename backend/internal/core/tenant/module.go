@@ -113,6 +113,7 @@ func (m *Module) ConfigGroups() []module.ConfigGroup {
 func (m *Module) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{
 		module.ServiceTenantProvider,
+		module.ServiceTenantDirectoryReader,
 		module.ServiceAccessProvider,
 		module.ServiceTenantService,
 		module.ServiceBillingTenantProvider,
@@ -269,6 +270,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	}
 
 	deps.Services.Register(module.ServiceTenantProvider, iface.TenantProvider(m.svc))
+	deps.Services.Register(module.ServiceTenantDirectoryReader, iface.TenantDirectoryReader(m.svc))
 	// Polymorphic-owner capability surface lives on the same concrete
 	// Service so the entitlement projection has one writer.
 	deps.Services.Register(module.ServiceAccessProvider, iface.AccessProvider(m.svc))

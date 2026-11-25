@@ -217,7 +217,7 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Han
 				attrs = append(attrs, slog.String("audience", audience))
 			}
 
-			logger.LogAttrs(r.Context(), levelForStatus(ww.Status()), "http_request", attrs...)
+			logger.LogAttrs(r.Context(), levelForStatus(ww.Status(), snap.ExpectedUnavailable), "http_request", attrs...)
 
 			// ADR-0005 Phase B — histogram observation. Reads the route
 			// template from chi AFTER next.ServeHTTP has returned so the
@@ -257,8 +257,19 @@ func chiRoutePattern(r *http.Request) string {
 // a status — most chi paths default to 200, but a hijacked connection
 // (websocket, SSE bypass) or a panic recovered upstream may report 0;
 // log it at Info so the line is still discoverable.
-func levelForStatus(status int) slog.Level {
+//
+// One opt-in exception to the 5xx rule: a 503 whose error declared itself an
+// expected unavailability of an optional feature this installation has not
+// configured (errcode.FeatureNotConfigured) is logged at Warn — the UI renders
+// it inline and it is not a server fault. expectedUnavailable carries that
+// declaration, recorded through ctxauth.RequestAnnotations by
+// errors.RecordErrorCode; the error code is never interpreted, so a 503 that
+// did not opt in (a missing signing key, a down dependency) and every other
+// 5xx stay at Error.
+func levelForStatus(status int, expectedUnavailable bool) slog.Level {
 	switch {
+	case status == http.StatusServiceUnavailable && expectedUnavailable:
+		return slog.LevelWarn
 	case status >= 500:
 		return slog.LevelError
 	case status >= 400:

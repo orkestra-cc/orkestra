@@ -27,16 +27,87 @@ export interface AuditEventsResponse {
   offset: number;
 }
 
+export type ErasureRequestStatus =
+  'pending' | 'incomplete' | 'completed' | 'rejected' | 'closed_partial';
+export type ErasureProducerOutcome = 'done' | 'pending' | 'failed';
+export interface ErasureProducerProgress {
+  key: string;
+  subject: string;
+  outcome: ErasureProducerOutcome;
+  rowsDeleted: number;
+  rowsAnonymized: number;
+  attempts: number;
+  updatedAt: string;
+}
+export interface PurgeResult {
+  rowsDeleted: number;
+  rowsAnonymized: number;
+  collections?: string[];
+  pending?: boolean;
+}
+
+export interface ErasureApproval {
+  by: string;
+  at: string;
+  note?: string;
+}
+export type ErasureListStatus =
+  'open' | 'completed' | 'rejected' | 'closed_partial' | 'all';
+export interface ListErasureRequestsArgs {
+  status?: ErasureListStatus;
+  userUuid?: string;
+  limit?: number;
+  after?: string;
+}
+export interface ErasureReceipt {
+  requestUuid: string;
+  subjectUserUuid: string;
+  status: 'completed' | 'closed_partial';
+  mode?: string;
+  source?: string;
+  requestedBy?: string;
+  requestedAt: string;
+  completedAt?: string;
+  executedBy?: string;
+  attempts: number;
+  approvals: ErasureApproval[] | null;
+  producers:
+    | {
+        key: string;
+        outcome: ErasureProducerOutcome;
+        rowsDeleted?: number;
+        rowsAnonymized?: number;
+      }[]
+    | null;
+  abandoned: string[] | null;
+  closeNote?: string;
+  totalRowsDeleted: number;
+  totalRowsAnonymized: number;
+  generatedAt: string;
+}
+
 export interface ErasureRequest {
   uuid: string;
   userUuid: string;
   tenantId?: string;
   reason?: string;
-  status: string;
+  status: ErasureRequestStatus;
   requestedAt: string;
   resolvedAt?: string;
   resolvedBy?: string;
   mode?: string;
+  source?: 'request' | 'self_service' | 'retention' | 'admin';
+  requestedBy?: string;
+  // Missing on rows that predate the approvals workflow: counts as 1.
+  requiredApprovals?: number;
+  approvals?: ErasureApproval[];
+  progress?: ErasureProducerProgress[];
+  attempts?: number;
+  nextAttemptAt?: string;
+  lastError?: string;
+  resolutionNote?: string;
+  abandoned?: string[];
+  closable?: boolean;
 }
 
 export interface LegalHold {
@@ -48,6 +119,77 @@ export interface LegalHold {
   placedBy: string;
   placedAt: string;
   active: boolean;
+  reviewAt?: string;
+  expiresAt?: string;
+  notes?: LegalHoldNote[] | null;
+  updatedAt?: string;
+  releasedAt?: string;
+  releasedBy?: string;
+  releaseReason?: string;
+  // reviewDue / expired are computed by the server against its clock.
+  reviewDue?: boolean;
+  expired?: boolean;
+}
+
+export interface LegalHoldNote {
+  id: string;
+  by: string;
+  at: string;
+  text: string;
+}
+
+export interface ListLegalHoldsArgs {
+  userUuid?: string;
+  includeReleased?: boolean;
+}
+
+export interface UpdateLegalHoldArgs {
+  id: string;
+  reviewAt?: string;
+  expiresAt?: string;
+  clearReviewAt?: boolean;
+  clearExpiresAt?: boolean;
+}
+
+// DSRPreview is the dry-run of an erasure. Producer rows are per producer and
+// can overlap (auth instances share rows): never add them into one total.
+export interface DSRPreviewProducer {
+  key: string;
+  countable: boolean;
+  rows: number;
+  collections: string[] | null;
+  error?: string;
+}
+
+export interface DSRPreview {
+  userUuid: string;
+  legalHolds: LegalHold[] | null;
+  retention?: { retainUntil: string; reasons: string[] | null } | null;
+  retentionError?: string;
+  openRequests: ErasureRequest[] | null;
+  producers: DSRPreviewProducer[] | null;
+  hardDeleteAllowed: boolean;
+  anonymizeAllowed: boolean;
+}
+
+export type DSRExportFormat = 'json' | 'csv';
+
+export interface DSRExportRecord {
+  uuid: string;
+  userUuid: string;
+  format: DSRExportFormat;
+  requestedBy: string;
+  reason: string;
+  createdAt: string;
+  expiresAt: string;
+  sizeBytes: number;
+  producers?: string[] | null;
+  errorKeys?: string[] | null;
+}
+
+export interface DSRExportDownload {
+  url: string;
+  expiresIn: number;
 }
 
 export interface RetentionPreview {
@@ -252,64 +394,219 @@ export const complianceApi = baseApi.injectEndpoints({
       providesTags: [{ type: 'AuditEvent' as const, id: 'LIST' }]
     }),
 
-    listErasureRequests: builder.query<{ items: ErasureRequest[] }, void>({
-      query: () => ({
-        url: '/v1/admin/compliance/erasure-requests',
-        method: 'GET'
-      }),
+    listErasureRequests: builder.query<
+      { items: ErasureRequest[]; next?: string },
+      ListErasureRequestsArgs | void
+    >({
+      query: args => {
+        const sp = new URLSearchParams();
+        if (args?.status && args.status !== 'open')
+          sp.set('status', args.status);
+        if (args?.userUuid) sp.set('userUuid', args.userUuid);
+        if (args?.limit) sp.set('limit', String(args.limit));
+        if (args?.after) sp.set('after', args.after);
+        const qs = sp.toString();
+        return {
+          url: `/v1/admin/compliance/erasure-requests${qs ? `?${qs}` : ''}`,
+          method: 'GET'
+        };
+      },
       providesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
     }),
+    openErasureRequest: builder.mutation<
+      ErasureRequest,
+      { userUuid: string; reason: string; mode: string }
+    >({
+      query: body => ({
+        url: '/v1/admin/compliance/erasure-requests',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
+    approveErasureRequest: builder.mutation<
+      ErasureRequest,
+      { id: string; mode: string; note: string }
+    >({
+      query: ({ id, mode, note }) => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/approve`,
+        method: 'POST',
+        body: { mode, note }
+      }),
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
+    getErasureReceipt: builder.query<ErasureReceipt, string>({
+      query: id => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/receipt`,
+        method: 'GET'
+      })
+    }),
     executeErasureRequest: builder.mutation<
-      { purged: Record<string, unknown> },
-      { id: string; mode: string }
+      {
+        status: 'completed' | 'incomplete';
+        purged: Record<string, PurgeResult>;
+        progress: ErasureProducerProgress[];
+      },
+      // mode omitted: the backend uses the mode locked by the approvals.
+      { id: string; mode?: string }
     >({
       query: ({ id, mode }) => ({
         url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
           id
         )}/execute`,
         method: 'POST',
-        body: { mode }
+        body: mode ? { mode } : {}
+      }),
+      // An erasure deletes the subject's stored exports: refetch their list.
+      invalidatesTags: (_r, e) =>
+        e
+          ? []
+          : [
+              { type: 'ErasureRequest' as const, id: 'LIST' },
+              { type: 'DSRExport' as const, id: 'LIST' }
+            ]
+    }),
+    rejectErasureRequest: builder.mutation<void, { id: string; note: string }>({
+      query: ({ id, note }) => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/reject`,
+        method: 'POST',
+        body: { note }
       }),
       invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
     }),
-    rejectErasureRequest: builder.mutation<void, { id: string; note?: string }>(
-      {
-        query: ({ id, note }) => ({
-          url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
-            id
-          )}/reject`,
-          method: 'POST',
-          body: { note }
-        }),
-        invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
-      }
-    ),
+    closeErasureRequest: builder.mutation<
+      ErasureRequest,
+      { id: string; note: string }
+    >({
+      query: ({ id, note }) => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/close`,
+        method: 'POST',
+        body: { note }
+      }),
+      invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
 
-    listLegalHolds: builder.query<{ items: LegalHold[] }, void>({
-      query: () => ({ url: '/v1/admin/compliance/legal-holds', method: 'GET' }),
+    listLegalHolds: builder.query<
+      { items: LegalHold[] },
+      ListLegalHoldsArgs | void
+    >({
+      query: args => {
+        const sp = new URLSearchParams();
+        if (args?.userUuid) sp.set('userUuid', args.userUuid);
+        if (args?.includeReleased) sp.set('includeReleased', 'true');
+        const qs = sp.toString();
+        return {
+          url: `/v1/admin/compliance/legal-holds${qs ? `?${qs}` : ''}`,
+          method: 'GET'
+        };
+      },
       providesTags: [{ type: 'LegalHold' as const, id: 'LIST' }]
     }),
     placeLegalHold: builder.mutation<
       LegalHold,
-      { userUuid: string; reason: string; caseRef?: string }
+      {
+        userUuid: string;
+        reason: string;
+        caseRef?: string;
+        reviewAt?: string;
+        expiresAt?: string;
+      }
     >({
       query: body => ({
         url: '/v1/admin/compliance/legal-holds',
         method: 'POST',
         body
       }),
-      invalidatesTags: [{ type: 'LegalHold' as const, id: 'LIST' }]
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'LegalHold' as const, id: 'LIST' }]
     }),
+    updateLegalHold: builder.mutation<LegalHold, UpdateLegalHoldArgs>({
+      query: ({ id, ...body }) => ({
+        url: `/v1/admin/compliance/legal-holds/${encodeURIComponent(id)}`,
+        method: 'PATCH',
+        body
+      }),
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'LegalHold' as const, id: 'LIST' }]
+    }),
+    addLegalHoldNote: builder.mutation<LegalHold, { id: string; text: string }>(
+      {
+        query: ({ id, text }) => ({
+          url: `/v1/admin/compliance/legal-holds/${encodeURIComponent(
+            id
+          )}/notes`,
+          method: 'POST',
+          body: { text }
+        }),
+        invalidatesTags: (_r, e) =>
+          e ? [] : [{ type: 'LegalHold' as const, id: 'LIST' }]
+      }
+    ),
     releaseLegalHold: builder.mutation<
       void,
-      { id: string; releaseReason?: string }
+      { id: string; releaseReason: string }
     >({
       query: ({ id, releaseReason }) => ({
         url: `/v1/admin/compliance/legal-holds/${encodeURIComponent(id)}`,
         method: 'DELETE',
         body: { releaseReason }
       }),
-      invalidatesTags: [{ type: 'LegalHold' as const, id: 'LIST' }]
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'LegalHold' as const, id: 'LIST' }]
+    }),
+
+    dsrPreview: builder.query<DSRPreview, string>({
+      query: userUuid => ({
+        url: `/v1/admin/compliance/dsr/preview?userUuid=${encodeURIComponent(
+          userUuid
+        )}`,
+        method: 'GET'
+      }),
+      providesTags: [
+        { type: 'LegalHold' as const, id: 'LIST' },
+        { type: 'ErasureRequest' as const, id: 'LIST' }
+      ]
+    }),
+    listDsrExports: builder.query<{ items: DSRExportRecord[] | null }, string>({
+      query: userUuid => ({
+        url: `/v1/admin/compliance/dsr/exports?userUuid=${encodeURIComponent(
+          userUuid
+        )}`,
+        method: 'GET'
+      }),
+      providesTags: [{ type: 'DSRExport' as const, id: 'LIST' }]
+    }),
+    createDsrExport: builder.mutation<
+      DSRExportRecord,
+      { userUuid: string; format: DSRExportFormat; reason: string }
+    >({
+      query: body => ({
+        url: '/v1/admin/compliance/dsr/exports',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: (_r, e) =>
+        e ? [] : [{ type: 'DSRExport' as const, id: 'LIST' }]
+    }),
+    // The signed URL is single-purpose and short-lived: callers open it and
+    // drop it, never store or log it.
+    downloadDsrExport: builder.mutation<DSRExportDownload, string>({
+      query: id => ({
+        url: `/v1/admin/compliance/dsr/exports/${encodeURIComponent(
+          id
+        )}/download`,
+        method: 'GET'
+      })
     }),
 
     retentionPreview: builder.query<RetentionPreview, void>({
@@ -500,11 +797,22 @@ export const complianceApi = baseApi.injectEndpoints({
 export const {
   useListAuditEventsQuery,
   useListErasureRequestsQuery,
+  useLazyListErasureRequestsQuery,
+  useOpenErasureRequestMutation,
+  useApproveErasureRequestMutation,
+  useGetErasureReceiptQuery,
   useExecuteErasureRequestMutation,
   useRejectErasureRequestMutation,
+  useCloseErasureRequestMutation,
   useListLegalHoldsQuery,
   usePlaceLegalHoldMutation,
+  useUpdateLegalHoldMutation,
+  useAddLegalHoldNoteMutation,
   useReleaseLegalHoldMutation,
+  useDsrPreviewQuery,
+  useListDsrExportsQuery,
+  useCreateDsrExportMutation,
+  useDownloadDsrExportMutation,
   useRetentionPreviewQuery,
   useSoc2EvidenceQuery,
   useListCompliancePoliciesQuery,

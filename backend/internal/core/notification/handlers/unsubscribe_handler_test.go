@@ -572,3 +572,14 @@ func TestUnsubscribeGet_DuplicateTokenQueryParam_UsesFirstValue(t *testing.T) {
 		t.Fatal("the first token in a duplicated query parameter must be the one consumed")
 	}
 }
+
+func (f *unsubTestOptouts) Get(context.Context, string) (*models.MarketingOptoutDoc, error) {
+	return nil, nil
+}
+func (f *unsubTestOptouts) DeleteIfAt(context.Context, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (f *unsubTestRepo) GetByUUID(context.Context, string) (*models.UnsubscribeTokenDoc, error) {
+	return nil, repository.ErrNotFound
+}

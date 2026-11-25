@@ -10,7 +10,7 @@
 # ============================================
 # Stage 1: Build
 # ============================================
-FROM node:24-alpine AS builder
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS builder
 
 WORKDIR /app
 
@@ -29,17 +29,22 @@ RUN npm run build
 # ============================================
 # Stage 2: Serve
 # ============================================
-FROM nginx:alpine AS production
+FROM nginx:1.31.10-alpine@sha256:aceb952b920393b7d0bc7b978927fc283370bea89fb082c6fef0ce18c60f96a9 AS production
 
 # curl for healthcheck; gettext for envsubst in the entrypoint.
 RUN apk add --no-cache curl gettext
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# SPA fallback + /health endpoint.
+# SPA fallback + /health endpoint. Cache policy: /config.js no-store, hashed
+# /assets/ immutable, index.html (every SPA route) no-cache so a new build is
+# picked up on the next load instead of after a heuristic cache lifetime.
+# Locations that declare a header re-state the security ones (nginx does not
+# merge add_header across levels).
 RUN printf 'server {\n\
     listen 80;\n\
     server_name _;\n\
+    server_tokens off;\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
     add_header X-Frame-Options "SAMEORIGIN" always;\n\
@@ -55,7 +60,16 @@ RUN printf 'server {\n\
         return 200 "healthy";\n\
         add_header Content-Type text/plain;\n\
     }\n\
+    location ^~ /assets/ {\n\
+        add_header Cache-Control "public, max-age=31536000, immutable";\n\
+        add_header X-Content-Type-Options "nosniff" always;\n\
+        try_files $uri =404;\n\
+    }\n\
     location / {\n\
+        add_header Cache-Control "no-cache" always;\n\
+        add_header X-Frame-Options "SAMEORIGIN" always;\n\
+        add_header X-Content-Type-Options "nosniff" always;\n\
+        add_header X-XSS-Protection "0" always;\n\
         try_files $uri $uri/ /index.html;\n\
     }\n\
 }\n' > /etc/nginx/conf.d/default.conf

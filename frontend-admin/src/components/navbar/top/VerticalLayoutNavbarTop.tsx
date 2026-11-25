@@ -1,13 +1,11 @@
 import Logo from 'components/common/Logo';
 import { useAppContext } from 'providers/AppProvider';
 import { useEffect, useRef, useState } from 'react';
-import { Nav, Navbar } from 'react-bootstrap';
-import SearchBox from './SearchBox';
+import { Navbar } from 'react-bootstrap';
 import TopNavRightSideNavItem from './TopNavRightSideNavItem';
 import classNames from 'classnames';
 import { topNavbarBreakpoint } from 'config';
 import { navbarBreakPoint } from 'config';
-import autoCompleteInitialItem from 'data/autocomplete/autocomplete';
 
 const VerticalLayoutNavbarTop = () => {
   const {
@@ -56,15 +54,7 @@ const VerticalLayoutNavbarTop = () => {
       </Navbar.Toggle>
 
       <Logo at="navbar-top" textClass="text-primary" width={160} id="topLogo" />
-      <Nav
-        navbar
-        className={`align-items-center d-none d-${topNavbarBreakpoint}-block`}
-        as="ul"
-      >
-        <Nav.Item as="li">
-          <SearchBox autoCompleteItem={autoCompleteInitialItem} />
-        </Nav.Item>
-      </Nav>
+      {/* No search box: see NavbarTop. */}
       <TopNavRightSideNavItem />
     </Navbar>
   );

@@ -13,6 +13,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // fakeEventRepo is the in-handler-test stand-in for SecurityEventRepository.
@@ -234,6 +235,22 @@ func TestSendPasswordReset_PasswordPolicyOutcomes(t *testing.T) {
 	_, err = h.SendPasswordReset(ctx, req)
 	assertStatusAndCode(t, err, 503, "auth.policy_unavailable")
 
+}
+
+// TestAdminSends_SuppressedAddressOutcomes: a send refused because the
+// address is on the suppression list is a 409 with its own code, never the
+// "sent" body; an unreadable list is a 503. Both routes share the mapping.
+func TestAdminSends_SuppressedAddressOutcomes(t *testing.T) {
+	ctx := context.Background()
+	h := NewAdminUserAuthHandler(nil, fakeInviter{err: iface.ErrRecipientSuppressed}, nil)
+	_, err := h.SendPasswordReset(ctx, &AdminSendPasswordResetRequest{UserID: "u1"})
+	assertStatusAndCode(t, err, 409, "auth.recipient_suppressed")
+	_, err = h.ResendVerification(ctx, &AdminResendVerificationRequest{UserID: "u1"})
+	assertStatusAndCode(t, err, 409, "auth.recipient_suppressed")
+
+	h = NewAdminUserAuthHandler(nil, fakeInviter{err: fmt.Errorf("%w: boom", iface.ErrSuppressionListUnavailable)}, nil)
+	_, err = h.SendPasswordReset(ctx, &AdminSendPasswordResetRequest{UserID: "u1"})
+	assertStatusAndCode(t, err, 503, "auth.suppression_unavailable")
 }
 
 // assertStatusAndCode asserts the HTTP status and, when wantCode is

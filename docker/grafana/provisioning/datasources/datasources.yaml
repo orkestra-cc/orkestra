@@ -80,7 +80,7 @@ datasources:
       derivedFields:
         - name: trace_id
           # Match either a Loki structured-metadata trace_id label or
-          # an in-payload "trace_id":"…" field. Promtail surfaces both
+          # an in-payload "trace_id":"…" field. Alloy surfaces both
           # so either path works.
           matcherRegex: '"trace_id"\s*:\s*"([0-9a-fA-F]{32})"'
           url: '${__value.raw}'

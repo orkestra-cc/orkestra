@@ -81,9 +81,12 @@ console.example.com {
         # default in production) — 404 otherwise.
         reverse_proxy localhost:3000
     }
-    handle /health /ready /metrics {
+    handle /health /ready {
         reverse_proxy localhost:3000
     }
+    # /metrics is not proxied: in staging and production the backend does
+    # not serve it on an audience host. Scrape it from inside the network,
+    # by service name or IP (http://backend:3000/metrics).
 
     # Force HTTPS, HSTS, security headers.
     header {

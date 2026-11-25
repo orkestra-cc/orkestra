@@ -31,7 +31,12 @@ type AdminUserAuthHandler struct {
 	// back to "no rows yet" so a build without the audit pipeline
 	// returns an empty page instead of a 500.
 	eventRepo repository.SecurityEventRepository
+	// pin adds the PIN slice to the aggregator.
+	pin *services.PINAuthService
 }
+
+// SetPINService wires the operator tier's PIN service into the aggregator.
+func (h *AdminUserAuthHandler) SetPINService(pin *services.PINAuthService) { h.pin = pin }
 
 // NewAdminUserAuthHandler wires the dependencies. auth + inviter must
 // be the operator-tier instances — AdminUserAuthHandler operates on
@@ -65,6 +70,9 @@ func (h *AdminUserAuthHandler) GetAuthMethods(ctx context.Context, req *AdminAut
 	view, err := h.auth.GetUserAuthMethods(ctx, req.UserID)
 	if err != nil {
 		return nil, mapAdminUserAuthError(err)
+	}
+	if h.pin != nil {
+		view.PIN = h.pin.ViewByUUID(ctx, req.UserID)
 	}
 	return &AdminAuthMethodsResponse{Body: *view}, nil
 }
@@ -214,6 +222,13 @@ func mapAdminUserAuthError(err error) error {
 	return huma.Error500InternalServerError("admin auth action failed", err)
 }
 
+// The two suppression details are shared with the client-user routes of the
+// user module (mapInviteErr), which cannot import this package.
+const (
+	recipientSuppressedDetail    = "The email was not sent: the user's address is on the email suppression list (marked invalid). Remove it from the list before trying again."
+	suppressionUnavailableDetail = "The email suppression list could not be read, so the email was not sent; try again shortly."
+)
+
 // mapAdminInviterError mirrors the user module's mapInviteErr helper
 // for the inviter-backed routes. Kept local to avoid an import cycle
 // (user/handlers ← auth/handlers).
@@ -231,6 +246,12 @@ func mapAdminInviterError(err error, generic string) error {
 	}
 	if errors.Is(err, iface.ErrUserNotFound) {
 		return huma.Error404NotFound("user not found")
+	}
+	if errors.Is(err, iface.ErrRecipientSuppressed) {
+		return errcode.Conflict(errcode.AuthRecipientSuppressed, recipientSuppressedDetail)
+	}
+	if errors.Is(err, iface.ErrSuppressionListUnavailable) {
+		return errcode.ServiceUnavailable(errcode.AuthSuppressionUnavailable, suppressionUnavailableDetail)
 	}
 	if errors.Is(err, services.ErrNotificationDown) {
 		return huma.Error503ServiceUnavailable("notifications disabled")

@@ -1,0 +1,11 @@
+# The image installs its own dependencies (npm ci, then postinstall.js); the
+# host's node_modules and the dev container's .docker/node_modules must not
+# reach the build context or overwrite them with COPY . .
+node_modules
+.docker
+dist
+.vite
+.vite-cache
+.npm-cache
+*.log
+*.tsbuildinfo

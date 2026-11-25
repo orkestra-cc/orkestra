@@ -1,0 +1,340 @@
+---
+title: retrieval
+sidebar_position: 9
+---
+
+# retrieval
+
+Corpora and hybrid search over tenant data. Added to the always-loaded core by [ADR-0023](/adrs/core-retrieval-module) as the tenth core module: a module declares a **corpus** (a searchable collection of its own data) and the base indexes it and answers searches with a principal filter, over a vector engine behind a driver boundary. Inference is local by default: a corpus is `local_only` unless its owner declares `hosted_allowed`.
+
+The module is always loaded, but its infrastructure is optional. It boots with no Qdrant configured and stays healthy in that state, in the same spirit as `llm` booting with zero credentials. To run the engine and the inference servers inside the stack, see [Retrieval overlay](/operating/retrieval-overlay).
+
+## Status
+
+Delivery step 1 is in progress. This release ships:
+
+- the SDK contract (`iface.Retrieval*`) and `module.ServiceRetrieval`;
+- corpus registration and its validation;
+- the engine contract and the Qdrant driver, with a conformance suite that any driver must pass;
+- [indexing](#indexing): the transactional outbox, the index worker, chunking and the per-corpus state;
+- [search](#searching-a-corpus): `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` on the registered service, the search log and its retention;
+- [erasure and data-subject rights](#erasure-and-data-subject-rights): confirmed deletion from the index and the search log, `DeleteBySubject`, tenant offboarding and the compliance export and erasure;
+- [administration](#administration): the `/admin/retrieval` console page, the search-log view, score diagnostics, orphan cleanup and the admin HTTP API;
+- the opt-in deployment overlay (Qdrant and two local TEI inference servers) and the benchmark harness of ADR-0023 D14: see [Retrieval overlay](/operating/retrieval-overlay).
+
+It adds four [permissions](#permissions-and-who-sees-what), five operator-host [HTTP routes](#http-api) and one navigation item (`/admin/retrieval`, see [Administration](#administration)). Search itself has no generic HTTP route: a module calls it in process. It adds five [settings](#configuration), three for indexing and two for search. Data-subject erasure ([`DeleteBySubject`](#erasure-and-data-subject-rights), tenant offboarding, the GDPR export and erasure through compliance) is included.
+
+## Degraded mode
+
+`Init` never contacts Qdrant or an inference endpoint, and never returns an error: a core `Init` error is fatal, so missing infrastructure is a log line, never a failed boot.
+
+| Situation | Behaviour in this release |
+|---|---|
+| `QDRANT_URL` unset | INFO log; no engine. Corpus registration works. Health reports the module healthy: not configured is the designed degraded mode |
+| `QDRANT_URL` invalid | WARN log (the value is never logged); treated as not configured |
+| `QDRANT_API_KEY` unset | WARN log; the URL is still used |
+| Qdrant configured but unreachable | Registration still works. The module health check (`/v1/admin/modules/health`) reports the error `retrieval: the vector engine is unavailable`; `/ready` does not consult modules |
+| Qdrant older than 1.20 | The driver refuses it in its health check |
+
+Search answers `ErrRetrievalNotConfigured` when no engine is configured and `ErrRetrievalUnavailable` when it is configured but down. When a service search needs is missing at boot (authorization, membership, module status, or the `llm` inference companions), `Init` logs one warning naming them: without the first three every search fails closed, without the inference companions searches answer keyword-only and are marked degraded.
+
+## Declaring a corpus
+
+A module that owns searchable data registers a corpus in its `Init`, declares `retrieval` as a dependency so its `Init` runs after retrieval's, and resolves the registry from the service registry:
+
+```go
+func (m *Module) Dependencies() []string { return []string{"retrieval"} }
+
+func (m *Module) Init(deps *module.Dependencies) error {
+	registry, ok := module.GetTyped[iface.RetrievalCorpusRegistry](deps.Services, module.ServiceRetrieval)
+	if !ok {
+		return errors.New("notes: retrieval service not registered")
+	}
+	return registry.RegisterCorpus(iface.RetrievalCorpusSpec{
+		Name:       "notes",
+		Owner:      "notes",
+		Permission: "notes.search.read",
+		Filters: []iface.RetrievalFilterField{
+			{Name: "status", Type: iface.RetrievalFieldKeyword, Description: "Workflow status"},
+		},
+		Ingestion: iface.RetrievalIngestionProfile{
+			EmbedEndpoint: "embed-default",
+			Chunking:      iface.RetrievalChunking{Strategy: "fixed", MaxTokens: 512, Overlap: 64},
+		},
+		Source: m.source, // implements iface.RetrievalSource: Load, Enumerate, Visible
+	})
+}
+```
+
+Registration is a local, syntax-only check. It never contacts the engine or `llm`; whether the embedding endpoint exists and satisfies the corpus locality is checked by the index worker (see [Health](#health)). The rules:
+
+- The corpus name matches `^[a-z][a-z0-9_]{0,31}$` and is unique in the installation; the owner is a module name; the permission has the form `a.b[.c[.d]]` in lowercase; a `Source` is required.
+- At most 32 filter fields. Names match `^[a-z][a-zA-Z0-9_]{0,63}$` and are unique; the type is one of the six listed under [Filters](#filters); the description is 1 to 500 bytes.
+- `embedEndpoint` is required. The tokenizer is `word` (default) or `multilingual`; stemming needs a Snowball language and stop words a stop-word language. Chunking is `none` or `fixed` (`maxTokens` 1 to 4096, `overlap` below `maxTokens`). `hierarchical` chunking and enrichment are refused until delivery step 3.
+- Locality `""` becomes `local_only`. Fusion defaults to dense weight 1, keyword weight 1 and 50 candidates per arm (weights in (0, 10], candidates 1 to 500). Rerank is off by default; its `topK` defaults to 20 (1 to 200), and enabling it needs an endpoint.
+- The registry stores a normalized copy, so a later change to the caller's struct has no effect.
+
+Registration closes when the retrieval module starts: every module's `Init` has run by then, so a module retried later cannot add a corpus. An invalid or duplicate declaration, or one made after that point, fails with `iface.ErrRetrievalInvalidSpec`.
+
+## Filters
+
+A search narrows its results with an `iface.RetrievalFilter` over the fields the corpus declared. The six field types and the values the engine stores:
+
+| Type | Stored as |
+|---|---|
+| `keyword` | string |
+| `keyword[]` | list of strings |
+| `integer` | 64-bit integer |
+| `float` | 64-bit float |
+| `bool` | boolean |
+| `datetime` | RFC 3339 in, stored as Unix milliseconds UTC |
+
+A filter node is either a group (`and`, `or`, `not`) or a comparison of one field:
+
+| Op | Meaning | Value |
+|---|---|---|
+| `eq` | Equals | `value` |
+| `in` | Equals any of | `values` |
+| `lt`, `lte`, `gt`, `gte` | Range | `value`, numbers and datetimes |
+| `exists` | The field is present | none |
+
+Not every op applies to every type:
+
+| Type | Ops |
+|---|---|
+| `keyword`, `keyword[]` | `eq`, `in`, `exists` |
+| `integer` | `eq`, `in`, `lt`, `lte`, `gt`, `gte`, `exists` |
+| `float`, `datetime` | `lt`, `lte`, `gt`, `gte`, `exists` |
+| `bool` | `eq`, `exists` |
+
+Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values. An `integer` range bound (`lt`, `lte`, `gt`, `gte`) must lie within ±2^53 (9007199254740992), the range the engine compares exactly; `eq` and `in` take any 64-bit integer. `exists` takes no value; write absence as `not` around `exists`.
+
+A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values per `in`. Search validates a filter against the corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path), then compiles it into the engine form, where a field is always addressed as a declared filter field. The search log keeps the filter as its JSON text, so a filter that has no JSON form (for example a `json.Number` the encoder rejects) is refused with `iface.ErrRetrievalInvalidFilter` too.
+
+## Engine driver
+
+The engine contract (`Engine`, `Point`, `Query`, `Selector`, `Filter`) is internal to the module and engine-neutral; consumers never import it. The Qdrant driver is a REST client over `net/http` and adds no dependency. Properties that matter to an operator:
+
+- **Qdrant 1.20 or later.** The BM25 keyword arm uses the full-text index scoring introduced there. The driver's health check parses the server version, refuses an older one and lists collections to prove the API key works.
+- **Tenant isolation is built into the query.** A query without a tenant or without principals is refused. The tenant and principal scope is repeated on every search arm and at the top level, and a result outside that scope is dropped and logged as a warning. BM25 statistics are scoped to the tenant, so one tenant's documents do not shift another's scores.
+- **No secrets in errors or logs.** Driver errors are classified as unavailable or not found and never contain the Qdrant URL, the API key or a response body.
+- **Conditional writes.** A point is overwritten only when the stored source revision is not newer than the incoming one, so a stale write never replaces a newer chunk in place. A stale writer can still add chunks (ordinals the newer revision does not have, or points recreated after a delete); they carry the old revision, are dropped on read, and are removed by the next cleanup of the item's other revisions (ADR-0023 D11).
+- **Payload layout.** Runtime fields live under `_rt` (including the indexed text), declared filter fields under `f`. A user filter field is always rendered as `f.<name>`, so a caller cannot reach a runtime field.
+- **Names.** Collections are named `<prefix>_<corpus>_g<generation>`; point ids are UUIDv5 over tenant, corpus, source id and ordinal.
+
+## Indexing
+
+Indexing is asynchronous and never blocks the owner's write. An owner declares a corpus (above), then records an **intent** in the same transaction as the write that changes the item:
+
+```go
+outbox, _ := module.GetTyped[iface.RetrievalOutbox](deps.Services, module.ServiceRetrieval)
+
+// inside the transaction that saves the note
+err := outbox.Enqueue(sessCtx, iface.RetrievalIntent{
+	Corpus: "notes", SourceID: note.ID, Revision: note.Revision,
+})
+```
+
+Pass the `mongo.SessionContext` of the transaction so the intent commits or aborts with the source write. A call carries at most 1000 intents; a `SourceID` is 1 to 256 bytes of valid UTF-8 without NUL; `Revision` is zero or more and must grow with every change of the item. The tenant in the context must be internal and the corpus registered. Keep `Revision` growing even when an item is deleted and later re-created with the same id: a re-created item with a lower revision is never indexed. Recording an intent for an item that is waiting after a failure does not shorten the wait, so an item fixed after an `invalid_item` failure is retried within 30 minutes. `Enqueue` needs only the database, not Qdrant: while the engine or the embedding endpoint is down, or the owning module is stopped, intents accumulate and are processed later.
+
+The source must answer two calls:
+
+- `Load(tenantID, ids)` returns the current item for each id, or `Deleted` for one that no longer exists. It answers only for the tenant passed, with at most one entry per id; an entry that is neither deleted nor carries an item, or whose item names another id, is treated as `invalid_item`. An item has a title (cut to 512 bytes, then prefixed to every chunk), text, declared filter fields, `VisibleTo` (up to 1000 entries) and `Subjects` (up to 100), each entry 1 to 256 bytes. Each subject must be one the module can erase later: `user:<uuid>`, or `<owner>:<id>` where the owner registers a corpus (the corpus's own owner or another module's) and the id has no spaces or control characters. An item that breaks these rules is retried every 30 minutes with the code `invalid_item`.
+- `Enumerate(tenantID, cursor, limit)` pages through the tenant's items by an opaque cursor (empty to start, empty `Next` to end). The first time a corpus is indexed the worker walks it, 200 ids per page, to enqueue every existing item.
+
+### What the worker does
+
+The worker runs inside the base, one pass every `worker_poll_interval`. For each pass it checks every registered corpus (the embedding endpoint exists, is an embedding endpoint and respects the corpus locality), takes up to `worker_batch` due items round-robin across organizations, and for each item:
+
+1. removes it from the index when it is deleted or covered by an erasure record;
+2. loads it, validates it and splits the text into chunks;
+3. if the indexed text is unchanged since the last run, only refreshes the stored filters and principals and skips the embedding;
+4. otherwise embeds the chunks (32 per call, through the `llm` gateway and its budget), writes the points, and removes the points of older revisions.
+
+A worker holds a short lease on each item and checks it before every write. A worker that stalls past its lease can still finish a write after another replica took the item over; it notices the lost lease at its next lease-checked step and marks the item for another pass, so the item is processed again before it counts as clean, and an item changed during indexing is likewise simply processed again. Stopping the module still releases or reschedules the item being processed, so it does not wait for its lease to expire (except when the stop lands on the lease check itself). A failure reschedules the item with a delay of 5 seconds doubling up to 30 minutes; items are never abandoned. Logs and the stored error carry only the corpus, tenant and item id and one of a closed set of codes (`source`, `source_behind`, `invalid_item`, `embed`, `budget`, `engine`, `deadline`, `tombstone`), never the text.
+
+**Fairness.** Each pass resumes after the last organization the previous pass served, in organization ID order rather than by the age of their backlog, so a busy organization cannot starve the others: with more organizations waiting than `worker_batch`, every due organization gets a claim within `ceil(organizations / worker_batch)` passes. The initial build reads at most 16 pages per pass across all corpora and organizations and starts each pass where the previous one stopped. When an organization's `Enumerate` fails, the rest of that corpus is skipped for the pass (a wholly broken source costs one call per pass) and the next pass starts right after the failing organization, so one failing organization cannot block the others; a finished build costs nothing afterwards. Each replica keeps this position in memory.
+
+### Chunking
+
+- `none`: one chunk per item, cut at 64,512 bytes if longer.
+- `fixed`: windows of `maxTokens` tokens, consecutive windows sharing `overlap` tokens, at most 512 chunks per item. `maxTokens` is 1 to 4096; registration refuses a larger value.
+
+Tokens are counted approximately, without a model: a token is a run of non-whitespace characters of at most 32 characters (a longer run counts as consecutive 32-character pieces). One counted token is roughly one word, while the embedding model's own tokenizer produces roughly 1 to 2 tokens per word in English and Italian, so choose `maxTokens` at most half of the endpoint's maximum input; the endpoint's truncation covers any excess (the tail still reaches the keyword search, not the vector).
+
+Each chunk records where it came from as `charStart` and `charEnd`, offsets in **characters** (Unicode code points) of the item text, not bytes.
+
+### Changing the ingestion settings
+
+The index is built for one *ingestion profile*: the embedding model, the analyzer, the chunking and the enrichment. Renaming the embedding endpoint does not change it (the model does); changing the model, the analyzer or the chunking does. When the declaration no longer matches the index, the corpus becomes `profile_changed`: the worker stops writing, intents keep accumulating and the existing index keeps serving. Rebuilding into a new generation arrives in delivery step 2; until then revert the declaration.
+
+## Searching a corpus
+
+A module that searches declares `retrieval` as a dependency, resolves the search interface once and calls it with the **caller's** context: the user and the internal organization in that context decide what comes back.
+
+```go
+func (m *Module) Init(deps *module.Dependencies) error {
+	search, ok := module.GetTyped[iface.RetrievalSearch](deps.Services, module.ServiceRetrieval)
+	if !ok {
+		return errors.New("notes: retrieval service not registered")
+	}
+	m.search = search
+	return nil
+}
+
+func (m *Module) find(ctx context.Context, text string) (*iface.RetrievalSearchResult, error) {
+	res, err := m.search.Search(ctx, iface.RetrievalSearchRequest{
+		Corpus: "notes",
+		Query:  text,
+		Filter: &iface.RetrievalFilter{Field: "status", Op: iface.RetrievalOpEq, Value: "published"},
+		Limit:  10,
+	})
+	if errors.Is(err, iface.ErrRetrievalNotConfigured) {
+		return nil, err // no vector engine on this installation
+	}
+	return res, err
+}
+```
+
+**Never search inside a transaction.** Do not pass the `mongo.SessionContext` of a transaction (unlike `Enqueue`, which needs it): a successful search writes its search-log row with the context it was given, so that row would join your transaction, roll back with it, and leave a served result nobody can account for. Call `Search` before the transaction starts or after it commits, with the request context.
+
+**Request bounds.** `Query` is 1 to 2000 characters and not blank. `Limit` is 1 to 100 (0 means 10). `Mode` is `hybrid` (the default), `dense` or `keyword`. `Fusion` optionally overrides the corpus's weights (each in (0, 10]) and candidates per arm (1 to 500) for this request. `Filter` follows [Filters](#filters). A request outside these bounds fails with `iface.ErrRetrievalInvalidRequest`.
+
+**Who may search.** The organization in the context must be internal, the caller must hold the corpus's permission in it, and the corpus's owning module must be running. The caller's **principals** are resolved on every search: the user, the organization when the user is a member of it, the user's active roles in that organization, and whatever the registered principal contributors add (at most `principal_cap`). A result is returned only when one of its principals is among the item's `VisibleTo`. **Platform administrators get no bypass**: a `super_admin` resolves principals exactly like any other user and sees only what those principals allow.
+
+**Before a result is returned**, every candidate is checked against the erasure records and against the owning module's `Visible` answer, at the indexed revision, within 2 seconds; a check that fails or times out fails the search with `iface.ErrRetrievalVisibilityCheck` rather than returning unchecked data.
+
+**Results.** Each hit carries the source and chunk ids, its rank, a score (the reranker's when the corpus reranks, the fused score otherwise), a snippet of at most 300 characters around the query, its provenance (ordinal, page, character offsets) and the corpus locality.
+
+**`degraded: true`** means the result may be below the corpus's usual quality or completeness, never that it contains anything the caller may not see:
+
+- the dense arm could not run (inference down, the embedding endpoint changed model since the index was built, or it would send the text outside the corpus locality), so the search answered keyword-only;
+- the reranker failed or would break locality, so the fused order stands;
+- the checks dropped results and more permitted ones may exist;
+- the corpus has no index yet (empty hits).
+
+**Errors.** `ErrRetrievalForbidden` (external organization, no permission, no identity), `ErrRetrievalUnknownCorpus`, `ErrRetrievalInvalidRequest`, `ErrRetrievalInvalidFilter`, `ErrRetrievalCorpusUnavailable` (owner module stopped), `ErrRetrievalNotConfigured`, `ErrRetrievalUnavailable` (engine down, principals could not be resolved, the search log could not be written) and `ErrRetrievalVisibilityCheck`. Treat their text as internal: do not show it to end users.
+
+**Every search is logged.** Each search that passes the access checks writes one row to `retrieval_search_log`: who searched, the query and the filter (as its JSON text, with datetimes in RFC 3339), the principals used, which sources came back and which people (subjects) they named, the outcome and timings. A result is returned only after its row is written; if the row cannot be written, the search fails with `ErrRetrievalUnavailable`. Searches refused at the access checks are not logged. Rows are deleted after `search_log_retention_days`. Query text, principals and subjects never go to the application logs.
+
+`iface.RetrievalPrincipalResolver` (same registered service) returns the caller's principal set, for an owner that wants to check visibility the same way. It fails like search does: `ErrRetrievalForbidden` without an identity, `ErrRetrievalUnavailable` when the principals cannot be resolved (a contributor's own error text is never returned). `iface.RetrievalSearch.FilterSchema(corpus)` returns the corpus's declared filter fields.
+
+## Erasure and data-subject rights
+
+When a person, a record or a whole organization is erased, retrieval does two things: it **stops serving** the data at once, and it **deletes** it from the index and the search log, then confirms the deletion.
+
+**What an erasure guarantees.**
+
+- From the moment the erasure is recorded, no search returns the erased data and the indexer refuses to write it again. This holds even if the vector engine is down.
+- The deletion is then confirmed by counting: the data is deleted from every collection of the affected corpora, counted, and deleted and counted again after a safety wait of **16 minutes**, so that an indexing worker that was already running when the erasure was recorded cannot leave a copy behind. The wait is fixed (it is derived from the longest possible worker lease), not a setting.
+- The matching search-log rows are deleted on every pass. A search that was running while the erasure was recorded removes its own log row afterwards (one tombstone lookup per logged search); the row is written marked *unchecked* and the mark is cleared once no erasure covers it. The check is retried once; if it fails again, or the row cannot be deleted or confirmed, it keeps its mark and is deleted within about **20 minutes** (a sweep every 10 minutes deletes the unchecked rows older than 10 minutes), even after the erasure is finished. This errs on the side of privacy: rarely, a search-log row no erasure covered is lost when the database failed between writing and confirming it.
+- Erasure records are **never deleted**. A finished erasure keeps hiding the data, so a later rebuild or a restored item cannot bring it back.
+
+**How long it takes.** Retrieval's part of an erasure is normally confirmed 16 to 17 minutes after it was recorded; a GDPR erasure request in compliance then completes at compliance's next automatic run, typically about 30 minutes after the request. If the engine or the database is unavailable the pass is retried with a growing delay (15 seconds, doubling, at most 15 minutes) and the request stays pending; nothing is lost and nothing needs to be re-sent. Without a configured engine and with nothing ever indexed, the erasure completes at once. With no engine but collections that were indexed before, it stays pending until the engine is back, because the deletion cannot be confirmed.
+
+**What operators see.**
+
+- A GDPR erasure request in compliance stays `incomplete` while retrieval reports it pending, then completes by itself; the GDPR export bundle includes a `retrieval` entry with the user's own searches (organization, corpus, query, filter, result count, time) and, as place and time only, the searches by other people that returned the user.
+- The audit log has `retrieval.erasure.recorded` (when an erasure is first recorded) and `retrieval.erasure.finalized` (when the deletion is confirmed). They carry the kind of erasure, never a name, query or source id.
+- Offboarding (purging) an organization records an erasure for the whole organization. If that step failed, the module records it itself within about a minute of starting and then every 10 minutes. The log line `retrieval: tenant purge erasure is not fully wired` at startup means the tenant module lacks the purge hook or the purged-organization listing, so offboarding is not forwarded.
+- A module that owns the data calls `DeleteBySubject(ctx, tenantID, "<owner>:<id>")` (for example `crm:42`) to erase a non-user subject in one organization. The owner must be a registered corpus owner, the subject is at most 256 bytes, and platform users (`user:`) are erased only through compliance.
+
+## Administration
+
+Operators manage retrieval from the **Retrieval** page of the admin console (`/admin/retrieval`, operator host only). It has three tabs, each shown only to a caller who holds its permission; a `?tab=` value the caller may not open falls back to the first tab they can.
+
+| Tab | What it shows | Needs |
+|---|---|---|
+| Corpora | The engine and every inference endpoint with their health, and each corpus with its owner, state, active generation, embedding profile, locality, outbox backlog, tenants done or building, and the erasure counts. Per corpus: **Diagnose**, and **Drop** for an orphan | `retrieval.corpus.read` (Diagnose and Drop need `retrieval.corpus.admin`) |
+| Indexing | The current organization's view per corpus: its state (as on the Corpora tab, without the reason), the initial build, the point count and the backlog, plus its pending erasures | `retrieval.tenant.read` |
+| Search log | A paged, filterable list of the organization's searches: who, when, corpus, query, filter, mode, outcome, hits and the sources and people the results named | `retrieval.searchlog.admin` |
+
+A corpus has one of four states: `uninitialized` (nothing indexed yet), `active`, `profile_changed` (the declaration changed the ingestion profile; indexing is paused) or `error`. An `error` corpus carries the reason, `locality` (an endpoint breaks the corpus locality rule), `endpoint_unknown`, `endpoint_kind` (not an embedding endpoint) or `unknown_state`, and is shown with a danger badge rather than hidden, so a broken corpus is visible. If it still has an active generation it keeps serving it and can still be diagnosed. An **orphan** is a corpus whose state exists but which no running module registers any more.
+
+**Diagnose** runs one real search as you, through the normal pipeline, and shows each returned hit with its dense, keyword, fused and rerank scores and its snippet. It sees only what your own principals allow, so it cannot be used to read data you could not search for; and it leaves an ordinary search-log row like any search. A numeric filter value beyond 2^53 is refused (`retrieval.invalid_filter`) because the browser and the API decode JSON numbers as doubles.
+
+**Drop** removes an orphan's collections, its outbox and progress rows and finally its state. It is refused while the corpus is registered. Drop an orphan only after every replica runs a version without that corpus. Search-log rows and erasure records are kept. Dropping an already dropped orphan answers "not found", and if another replica registered the corpus again meanwhile the drop answers "still registered".
+
+**Step-up.** Diagnose, Drop and the search-log read need a second factor completed in the session and a fresh step-up (5 minutes). The console opens the step-up prompt when needed; if you dismiss it the action does not run, and the search-log tab shows a prompt to retry.
+
+**The search log is audited.** It names who searched for what and whom the results described, so every read is recorded in the audit log (`retrieval.searchlog.read`, with the filters used and the number of rows returned, never the rows). Diagnose (`retrieval.diagnostics.run`) and Drop (`retrieval.corpus.dropped`) are audited too, whether they succeed or fail. The rule is the same for all three: a request from an organization that is not the operator's own is refused before anything is recorded, and so is a search-log request whose parameters are malformed; every other request is recorded once, and a failure carries a `reason`, the same error code the API answered with (for example `retrieval.forbidden` when Diagnose is refused the corpus permission, or `retrieval.corpus_registered` for a refused Drop). The admin view hides a log row until its erasure re-check has settled (normally seconds); a row whose confirmation failed stays invisible until the unchecked sweep removes it, about 20 minutes later.
+
+### Permissions and who sees what
+
+| Permission | Scope | Allows |
+|---|---|---|
+| `retrieval.corpus.read` | platform | The corpora report (no content, no scores) |
+| `retrieval.corpus.admin` | platform | Diagnostics and orphan drop |
+| `retrieval.tenant.read` | organization | The organization's indexing state |
+| `retrieval.searchlog.admin` | organization | The organization's search log |
+
+Seeded roles (`retrieval.tenant.admin`, for reconciliation, arrives in a later delivery step):
+
+| Permission | Development and test | Production |
+|---|---|---|
+| `retrieval.corpus.read` | super_admin, administrator, developer, manager, operator, guest | same |
+| `retrieval.corpus.admin` | super_admin, administrator, developer | super_admin, administrator |
+| `retrieval.tenant.read` | every role except org_billing | same |
+| `retrieval.searchlog.admin` | super_admin, administrator, developer, org_owner, org_admin | super_admin, administrator, org_owner, org_admin |
+
+In prose: platform administrators and super admins can do everything; a developer can look at corpora everywhere but cannot diagnose or read the search log in production; organization owners and admins can read their own organization's search log; every member of an organization can see its indexing state.
+
+The navigation entry is shown to platform administrators only. An organization owner or admin without a platform role does not see it and opens `/admin/retrieval?tab=search-log` directly: the page itself gates by permission.
+
+### HTTP API
+
+All routes are on the operator host, require an internal-organization context (another kind of organization gets `403`) and are listed in the generated API reference under the tag "Retrieval Admin". Errors carry the `retrieval.*` codes.
+
+| Route | Permission | Extra gate | Error codes |
+|---|---|---|---|
+| `GET /v1/admin/retrieval/corpora` | `retrieval.corpus.read` | | `retrieval.forbidden`, `retrieval.unavailable` |
+| `POST /v1/admin/retrieval/corpora/{corpus}/diagnostics` | `retrieval.corpus.admin` | second factor, step-up | `retrieval.corpus_not_found`, `retrieval.corpus_unavailable`, `retrieval.not_configured`, `retrieval.unavailable`, `retrieval.visibility_check_failed`, `retrieval.forbidden`, `retrieval.locality_violation`, `retrieval.invalid_filter`, `retrieval.invalid_request` (the query is whitespace-only or over 2000 characters) |
+| `DELETE /v1/admin/retrieval/corpora/{corpus}` | `retrieval.corpus.admin` | second factor, step-up | `204`; `retrieval.corpus_not_found`, `retrieval.corpus_registered`, `retrieval.not_configured`, `retrieval.unavailable`, `retrieval.forbidden` |
+| `GET /v1/admin/retrieval/tenant/indexing` | `retrieval.tenant.read` | | `retrieval.forbidden`, `retrieval.unavailable` |
+| `GET /v1/admin/retrieval/search-log` | `retrieval.searchlog.admin` | second factor, step-up | `retrieval.invalid_request` (only `since` after `until`), `retrieval.forbidden`, `retrieval.unavailable` |
+
+The search-log query takes `userUuid`, `since` and `until` (RFC 3339, both inclusive), `limit` (1 to 200, default 50) and `offset` (0 to 10000, default 0), newest first, and answers `items`, `total`, `limit` and `offset`; each item carries `filter` (decoded) and `filterText` (the stored JSON, verbatim), both present or both absent. Display `filterText`: re-serializing `filter` in a client that reads JSON numbers as doubles can change an integer beyond 2^53. The diagnostics body takes `query`, an optional `filter`, `mode` and `limit` (1 to 100, default 10). A parameter or body that breaks the published schema (a malformed uuid or time, `limit` or `offset` out of range, a bad corpus name, a diagnostics `mode`, a `query` outside 1 to 8000 characters, or a `limit` out of range) is refused first with the generic `422` validation error of the API, not a `retrieval.*` code. Without a database the routes answer `503 retrieval.unavailable`.
+
+## Configuration
+
+The Qdrant settings are operator environment variables. The [retrieval overlay](/operating/retrieval-overlay) sets `QDRANT_URL` and `QDRANT_API_KEY` on the backend (with the inference endpoints of the `llm` module); set them in `docker/.env` only for a Qdrant you run elsewhere. The three worker settings (group Indexing) and the two search settings (group Search & audit) are module settings that can also be set from the environment; the worker settings are re-read on every pass and the search settings on every use, so changing them takes effect without a restart (the admin settings page shows no restart-required notice).
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `QDRANT_URL` | unset | `http` or `https` URL of the Qdrant node (single node, internal network only, version 1.20 or later). Unset means retrieval runs without an engine |
+| `QDRANT_API_KEY` | unset | API key sent to Qdrant. Always set one outside local development |
+| `QDRANT_COLLECTION_PREFIX` | `orkestra` | Prefix of every collection name; `^[a-z][a-z0-9-]{0,31}$`. No underscore: corpus names may contain one, so prefix `a_b` with corpus `c` would share a collection with prefix `a` and corpus `b_c`. An invalid value logs a warning and the default is used |
+
+| Setting (env var) | Default | Bounds | Meaning |
+|---|---|---|---|
+| `worker_lease` (`RETRIEVAL_WORKER_LEASE`) | `2m` | 30s to 15m | How long a worker owns one item while indexing it. Embedding and engine calls end a quarter of the lease before it expires |
+| `worker_batch` (`RETRIEVAL_WORKER_BATCH`) | `32` | 1 to 256 | Items indexed per pass, shared round-robin across organizations. Zero or a negative value means the default 32 |
+| `worker_poll_interval` (`RETRIEVAL_WORKER_POLL_INTERVAL`) | `5s` | 1s to 5m | Pause between passes |
+| `principal_cap` (`RETRIEVAL_PRINCIPAL_CAP`) | `256` | 16 to 4096 | Maximum number of principals (user, organization, roles, contributors) a search may carry. A caller above it gets no results (`ErrRetrievalUnavailable`) until the cap is raised: it fails closed rather than dropping principals |
+| `search_log_retention_days` (`RETRIEVAL_SEARCH_LOG_RETENTION_DAYS`) | `90` | 1 to 3650 | Search-log rows older than this are deleted daily (first run a minute after start, then every 24 hours). The log records who searched for what and which people the results named (ADR-0023 D12) |
+
+Values outside the bounds are clamped to the nearest bound, except a `worker_batch`, `principal_cap` or `search_log_retention_days` of zero or less, which falls back to the default. The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild. The collections are `retrieval_outbox`, `retrieval_tenant_progress` and `retrieval_search_log` (per organization), `retrieval_corpus_state` (one document per corpus for the installation) and `retrieval_erasures`.
+
+## Health
+
+The module health check (`/v1/admin/modules/health`) reports:
+
+| Message | Meaning and action |
+|---|---|
+| (healthy) | No engine configured (designed degraded mode), or engine reachable and every corpus can be written |
+| `retrieval: indexing disabled: <missing>` | Qdrant is configured but the worker could not start because a service it needs is absent (`LLMPinnedEmbedder`, `LLMInferenceProfiles`, `TenantIDLister`, `ModuleStatusReader`) or there is no database. With a database, intents still accumulate and are indexed once the worker runs; without one, `Enqueue` returns an error. Check that the `llm` and `tenant` modules are loaded |
+| `retrieval: the vector engine is unavailable` | Qdrant did not answer its health check within 2 seconds. Check `QDRANT_URL`, the API key, the network and the Qdrant version (1.20 or later). Driver details are in the DEBUG log |
+| `retrieval: corpus <c>: local_only corpus uses hosted endpoint "<e>"` | The corpus is `local_only` but its embedding endpoint is hosted. Point the corpus at an endpoint whose boundary is local, or have the owner declare `hosted_allowed` if sending the text to a hosted provider is acceptable |
+| `retrieval: corpus <c>: embed endpoint "<e>" is not configured` | The endpoint name does not exist in `llm`. Create it or fix the declaration |
+| `retrieval: corpus <c>: endpoint "<e>" is not an embedding endpoint` | The endpoint exists but is not an embedding endpoint. Use an embedding endpoint |
+| `retrieval: corpus <c>: inference profile unavailable` | `llm` could not resolve the endpoint (or reports no dimensions). Check the endpoint's configuration and reachability |
+| `retrieval: corpus <c>: vector engine unavailable` | Creating the corpus collection, or adding the payload index of a newly declared filter (done once per process the first time the corpus is indexed), failed. The corpus is skipped and retried on the next pass. Check Qdrant |
+| `retrieval: corpus <c>: ingestion profile changed; indexing paused until a new generation is built` | The corpus declaration changed the model, analyzer or chunking. Revert the declaration; the build of a new generation is delivery step 2. Nothing is lost: intents are kept and the current index keeps serving |
+
+Several problems are joined with `; `. A corpus whose owner module is stopped is skipped without a message; its intents wait.
+
+The health check does not cover search: a service search needs that is missing at boot is reported once by the `Init` warning (see [Degraded mode](#degraded-mode)), and a failed search-log purge is logged as a warning and retried the next day.
+
+## Legacy RAG contract
+
+`iface.RAGQueryProvider`, `SourceRef`, `RAGQueryResponse` and `module.ServiceRAGQuery` predate the core-only base and nothing in it implements them; only archived addons used them. [ADR-0023](/adrs/core-retrieval-module) (D16) marks them deprecated in favour of `iface.RetrievalSearch` and removes them in a later release. A fork that still builds an archived `rag` addon should migrate to the retrieval contract before then.

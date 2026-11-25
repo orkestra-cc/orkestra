@@ -153,11 +153,14 @@ repos:
         pass_filenames: false
 
   # --- Pre-push: full make ci for changed surfaces -------------------------
+  # Skipped when the pushed tree already passed `make ci` on this clone
+  # (scripts/ci-stamp.sh); CI_GATE_FORCE=1 forces it. Goes through the host's
+  # gate queue `ci-gate` when it is installed.
   - repo: local
     hooks:
       - id: make-ci
         name: make ci (changed surfaces)
-        entry: make ci
+        entry: scripts/ci-stamp.sh prepush
         language: system
         stages: [pre-push]
         pass_filenames: false

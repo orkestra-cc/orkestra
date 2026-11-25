@@ -114,3 +114,27 @@ func TestSenderItems_DeclarationIsValid(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeSenderProfiles_SMTP2GO(t *testing.T) {
+	t.Setenv("OAUTH_TOKEN_ENCRYPTION_KEY", testKeyHex)
+	k := func(slug, sub string) string { return module.ItemKey(SendersField, slug, sub) }
+	values := map[string]string{
+		module.RosterKey(SendersField):   "s2g-eu, s2g-default",
+		k("s2g-eu", SubProvider):         "smtp2go",
+		k("s2g-eu", SubFromAddress):      "sys@example.com",
+		k("s2g-eu", SubSMTP2GORegion):    "eu",
+		k("s2g-default", SubProvider):    "smtp2go",
+		k("s2g-default", SubFromAddress): "sys@example.com",
+	}
+	encrypted := map[string]string{k("s2g-eu", SubSMTP2GOAPIKey): encryptForTest(t, "api-key")}
+	got, err := DecodeSenderProfiles(values, encrypted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].SMTP2GOAPIKey != "api-key" || got[0].SMTP2GORegion != "eu" {
+		t.Fatalf("smtp2go fields: %+v", got[0])
+	}
+	if got[1].SMTP2GORegion != "global" || got[1].SMTP2GOAPIKey != "" {
+		t.Fatalf("an unset region resolves to the item Default (global): %+v", got[1])
+	}
+}

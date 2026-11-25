@@ -41,3 +41,38 @@ describe('runtime config — footer fields', () => {
     expect(config.startedAt).toBe('');
   });
 });
+
+// Cookies ignore the port, so two consoles on one host share every cookie
+// by name: a stack names its own from a cookie prefix.
+describe('runtime config — cookie prefix', () => {
+  beforeEach(() => {
+    delete (window as unknown as { __ORKESTRA_CONFIG__?: unknown })
+      .__ORKESTRA_CONFIG__;
+  });
+
+  const load = async (runtime: Record<string, unknown>) => {
+    (
+      window as unknown as { __ORKESTRA_CONFIG__?: unknown }
+    ).__ORKESTRA_CONFIG__ = runtime;
+    vi.resetModules();
+    return (await import('./environment')).config;
+  };
+
+  it('names the language cookie from cookiePrefix', async () => {
+    const config = await load({ cookiePrefix: 'stack-2_' });
+    expect(config.langCookieName).toBe('stack-2_admin_lang');
+  });
+
+  it('accepts every prefix the backend accepts', async () => {
+    const config = await load({ cookiePrefix: 'stack.2_' });
+    expect(config.langCookieName).toBe('stack.2_admin_lang');
+  });
+
+  it.each([undefined, '', 'a;b_', 'two words_', 'x=y_', 'a!b_', 42])(
+    'falls back to orkestra_admin_lang for %j',
+    async cookiePrefix => {
+      const config = await load({ cookiePrefix });
+      expect(config.langCookieName).toBe('orkestra_admin_lang');
+    }
+  );
+});

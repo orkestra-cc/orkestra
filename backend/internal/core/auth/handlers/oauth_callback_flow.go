@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	authutils "github.com/orkestra/backend/internal/core/auth/utils"
 	"log/slog"
 	"net/http"
 
@@ -46,11 +45,11 @@ func pkceForProvider(prov services.OAuthProviderInterface) (verifier, challenge 
 	if !prov.SupportsPKCE() {
 		return "", "", nil
 	}
-	verifier, err = authutils.GenerateCodeVerifier()
+	verifier, err = utils.GenerateCodeVerifier()
 	if err != nil {
 		return "", "", err
 	}
-	return verifier, authutils.GenerateCodeChallenge(verifier), nil
+	return verifier, utils.GenerateCodeChallenge(verifier), nil
 }
 
 // exchangeWithUserInfo is the code-exchange + userinfo-endpoint path
@@ -166,7 +165,7 @@ func (h *AuthHandler) completeOAuthCallback(w http.ResponseWriter, r *http.Reque
 		// The nonce cookie lives on this host: evict it on every terminal
 		// outcome from here on. A deferred flow's cookie lives on the
 		// client API host and is cleared by the relay endpoint.
-		w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
+		w.Header().Add("Set-Cookie", clearOAuthStateCookie(oauthStateCookieName(h.config), h.config.Auth.Cookie.Secure))
 	}
 
 	// relay hands the flow — success or failure — to the client API host.
@@ -329,13 +328,13 @@ func (h *AuthHandler) HandleOAuthRelayCompleteHTTP(w http.ResponseWriter, r *htt
 		reject("relay_tier_or_mode_mismatch")
 		return
 	}
-	if err := verifyRelayBinding(r, rec.CSRF); err != nil {
+	if err := verifyRelayBinding(r, oauthStateCookieName(h.config), rec.CSRF); err != nil {
 		reject("relay_unbound")
 		return
 	}
 	// Bound. The cookie this host set at start is spent; clear it on every
 	// outcome below.
-	w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
+	w.Header().Add("Set-Cookie", clearOAuthStateCookie(oauthStateCookieName(h.config), h.config.Auth.Cookie.Secure))
 	if rec.FailureCode != "" {
 		logger.Warn("oauth callback failed",
 			slog.String("provider", string(rec.Provider)),

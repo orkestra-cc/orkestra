@@ -7,9 +7,12 @@ import (
 	"github.com/orkestra/backend/internal/core/auth"
 	"github.com/orkestra/backend/internal/core/authz"
 	"github.com/orkestra/backend/internal/core/compliance"
+	"github.com/orkestra/backend/internal/core/jobs"
+	"github.com/orkestra/backend/internal/core/llm"
 	"github.com/orkestra/backend/internal/core/logging"
 	"github.com/orkestra/backend/internal/core/navigation"
 	"github.com/orkestra/backend/internal/core/notification"
+	"github.com/orkestra/backend/internal/core/retrieval"
 	"github.com/orkestra/backend/internal/core/tenant"
 	"github.com/orkestra/backend/internal/core/user"
 	"github.com/orkestra/backend/internal/shared/config"
@@ -17,9 +20,9 @@ import (
 )
 
 // coreModules returns the always-loaded module factories — user,
-// notification, tenant, authz, auth, navigation — bound to the live
-// application config. Order matters: each entry below depends on the
-// previous ones.
+// notification, tenant, authz, auth, navigation, logging, jobs, llm,
+// retrieval, compliance — bound to the live application config. Order
+// matters: each entry below depends on the previous ones.
 //
 //   - user: base identity (no deps)
 //   - notification: email delivery (no hard deps)
@@ -32,6 +35,17 @@ import (
 //   - logging: ADR-0005 Phase F admin surface for runtime log-level mutation
 //     (no deps; its own service is read by main.go AFTER InitAll to hot-swap
 //     the slog handler's resolver).
+//   - jobs: ADR-0024 — scheduler, run history and admin API of the background
+//     jobs modules declare through module.HasJobs. No declared deps: the job
+//     catalog (filled after InitAll), the module-state reader and the audit
+//     sink are resolved from the service registry when used, so it can sit
+//     early and still schedule the jobs of every later module.
+//   - llm: ADR-0022 — LLM credentials/models/grants per org + iface.LLMGateway.
+//     Depends on user/tenant/notification; inits BEFORE compliance so the
+//     latter can push the KMS provider and the audit sink into the gateway.
+//   - retrieval: ADR-0023 — corpora, indexing and hybrid search over tenant
+//     data (Qdrant behind an engine driver). Depends on tenant/authz/llm;
+//     inits BEFORE compliance, which pushes its audit sink into it from its own Init.
 //   - compliance: ADR-0009 — audit sink + GDPR DSR pipeline + per-tenant KMS
 //     crypto-shred + SOC2 evidence. Depends on user/auth/tenant; inits last so
 //     their PII producers and concrete services are already registered when it
@@ -45,6 +59,9 @@ func coreModules(cfg *config.Config) []func() module.Module {
 		func() module.Module { return auth.NewModule(cfg) },
 		func() module.Module { return navigation.NewModule() },
 		func() module.Module { return logging.NewModule() },
+		func() module.Module { return jobs.NewModule() },
+		func() module.Module { return llm.NewModule(llm.WithOperatorPublicURL(cfg.Server.Operator.PublicURL)) },
+		func() module.Module { return retrieval.NewModule() },
 		func() module.Module { return compliance.NewModule() },
 	}
 }

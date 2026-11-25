@@ -5,8 +5,10 @@ import (
 	"sync"
 )
 
-// RequestAnnotations carries the principal that authentication resolves
-// back up to middleware that ran before it. RequireAuth hands the next
+// RequestAnnotations carries values resolved downstream — the principal that
+// authentication resolves, and the machine-readable code of an error response
+// plus whether that error is an expected unavailability —
+// back up to middleware that ran before them. RequireAuth hands the next
 // handler a derived context, so an outer middleware such as the request
 // logger never sees the values it stamps; a pointer installed in the outer
 // context is shared with every derived one and closes that gap.
@@ -22,6 +24,13 @@ type AnnotationSnapshot struct {
 	UserID     string
 	UserRole   string
 	Audience   string
+	// ErrorCode is the code of the error response the handler wrote, "" when
+	// the response carried none (see SetErrorCode).
+	ErrorCode string
+	// ExpectedUnavailable is true when the error response declared itself an
+	// expected unavailability of an optional, unconfigured feature (see
+	// MarkExpectedUnavailable).
+	ExpectedUnavailable bool
 }
 
 type annotationsKey struct{}
@@ -63,6 +72,33 @@ func (a *RequestAnnotations) SetAudience(aud string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	setIfNotEmpty(&a.snap.Audience, aud)
+}
+
+// SetErrorCode records the machine-readable code of the error response being
+// written. The first non-empty code wins.
+func (a *RequestAnnotations) SetErrorCode(code string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.snap.ErrorCode == "" {
+		a.snap.ErrorCode = code
+	}
+}
+
+// MarkExpectedUnavailable records that the error response being written
+// declared itself an expected unavailability of an optional feature this
+// installation has not configured, so the request logger can grade it apart
+// from a real server fault. The code alone never implies it: the error must
+// opt in (errcode.FeatureNotConfigured).
+func (a *RequestAnnotations) MarkExpectedUnavailable() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.snap.ExpectedUnavailable = true
 }
 
 // Snapshot returns a copy of the recorded values.

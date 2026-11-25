@@ -6,7 +6,7 @@
 # OTEL_LOGS_ENABLED=true.
 #
 # Logs path: the self-hosted Tier-1 stack normally captures stdout via
-# Promtail (no app-side OTLP needed). The collector's logs pipeline
+# Alloy (no app-side OTLP needed). The collector's logs pipeline
 # here exists so operators who want to test the OTLP-logs path before
 # pointing at a vendor backend (Tier-2) can validate end-to-end against
 # their own Loki — flipping OTEL_LOGS_ENABLED on dev.
@@ -53,17 +53,16 @@ exporters:
     # type information.
     enable_open_metrics: true
 
-  # Logs → Loki via its push API. ADR-0005 Phase E. The collector-contrib
-  # `loki` exporter translates OTLP log records into Loki's line+labels
-  # format. Resource attributes (service.name, deployment.environment)
-  # become Loki labels automatically; per-record attributes ride along in
-  # the JSON body of each line so LogQL `| json | tenant_id="..."`
-  # queries work the same way they do for Promtail-shipped logs.
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
-    default_labels_enabled:
-      exporter: false  # collapse "exporter=otlp" — not useful
-      job: true
+  # Logs → Loki over its native OTLP endpoint. ADR-0005 Phase E. The
+  # collector-contrib `loki` exporter this used to name was removed upstream
+  # (2026-11 security audit moved the collector off 0.96.0); Loki 3.x
+  # ingests OTLP itself. Resource attributes become labels the Loki way:
+  # service.name -> service_name (the `job` label the old exporter set is
+  # gone), deployment.environment -> deployment_environment; log-record
+  # attributes become structured metadata, so `| tenant_id="..."` filters
+  # without a `| json` stage.
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
 
   # Debug logger — disabled by default. Flip on when a span silently
   # disappears and you want a tap before Tempo drops it.
@@ -76,6 +75,17 @@ extensions:
 
 service:
   extensions: [health_check]
+  # The collector's own metrics, scraped by Prometheus as otel-collector:8888
+  # (job otel-collector-self). Recent collectors serve them on localhost only
+  # unless told otherwise.
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
   pipelines:
     traces:
       receivers: [otlp]
@@ -88,4 +98,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [loki]
+      exporters: [otlphttp/loki]

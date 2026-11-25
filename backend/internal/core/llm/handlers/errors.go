@@ -1,0 +1,188 @@
+// Package handlers holds the HTTP surface of the llm module: the Tier-1
+// admin endpoints over the catalog and the self endpoint over the gateway.
+package handlers
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"math"
+	"net/http"
+	"strconv"
+
+	"github.com/orkestra/backend/internal/core/llm/models"
+	"github.com/orkestra/backend/internal/core/llm/providers"
+	"github.com/orkestra/backend/internal/core/llm/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
+)
+
+// validationDetails gives every validation sentinel the services wrap in
+// iface.ErrLLMInvalidRequest its own client-facing sentence. The sentinel
+// text is never sent: it is written for logs and may change.
+var validationDetails = []struct {
+	err    error
+	detail string
+}{
+	{models.ErrInvalidName, "The name must be 1 to 64 letters, digits, spaces, dots, underscores or dashes, starting with a letter or digit."},
+	{models.ErrInvalidProvider, "The provider is not one this installation supports."},
+	{models.ErrBaseURLFixed, "This provider has a fixed endpoint; leave the base URL empty."},
+	{models.ErrBaseURLRequired, "This provider needs a base URL."},
+	{models.ErrBaseURLNotAllowed, "This provider takes no base URL."},
+	{models.ErrSecretRequired, "This provider needs an API key."},
+	{models.ErrInvalidModelID, "The model ID must be 1 to 128 letters, digits, dots, dashes, underscores, colons or slashes."},
+	{models.ErrInvalidCredentialRef, "Choose an organization credential, or the user's own linked account without a credential."},
+	{models.ErrUserAccountProvider, "A model billed to the user's linked account must use the OpenAI provider."},
+	{models.ErrUserAccountCapabilities, "A model billed to the user's linked account cannot offer embeddings."},
+	{models.ErrUserAccountDefaults, "A model billed to the user's linked account cannot set a temperature or an output limit."},
+	{models.ErrInvalidPurposes, "Give 1 to 16 distinct purposes, each a lowercase key such as default or summarize."},
+	{models.ErrInvalidAccess, "Access must be granted users only, or everyone in the organization."},
+	{models.ErrInvalidCapabilities, "The model must offer chat or embeddings; embeddings need a dimension count above zero."},
+	{models.ErrInvalidEffort, "The effort must be empty, low, medium or high."},
+	{models.ErrInvalidReserve, "The reserved output tokens must be between 1 and 131072."},
+	{models.ErrInvalidTemperature, "The default temperature must be between 0 and 2."},
+	{models.ErrInvalidMaxOutputTokens, "The default output limit must be between 1 and 131072 tokens."},
+	{services.ErrInvalidStatus, "The status must be active or disabled."},
+	{services.ErrProviderMismatch, "The credential belongs to a different provider than the model."},
+	{services.ErrCredentialDisabled, "The model's credential is disabled; enable the credential first, or choose another one."},
+	{services.ErrModelDisabled, "The model is disabled; enable it before testing it."},
+	{services.ErrInvalidPrompt, "The test prompt must be 1 to 4000 characters."},
+	{services.ErrInvalidUsageRange, "The usage period must end after it starts and span at most 366 days."},
+	{services.ErrInvalidGroupBy, "Usage can be grouped by model, user or caller."},
+	{services.ErrInvalidBudget, "The budget needs a monthly limit of at least 1 token, a warning threshold between 0 and 100, and the action block or warn_only."},
+	{services.ErrBudgetRecipientNotMember, "Every extra budget recipient must be a member of this organization."},
+}
+
+// budgetRetryAfter is the Retry-After of llm.budget_exceeded: the budget
+// frees up at the next period or when an admin raises it, so clients are
+// told to come back in an hour rather than to retry at once.
+const budgetRetryAfter = "3600"
+
+// statusClientClosedRequest is nginx's 499 "Client Closed Request"; Go's
+// net/http has no constant for it.
+const statusClientClosedRequest = 499
+
+const invalidRequestDetail = "The request was rejected because a field is out of range or malformed."
+
+func invalidDetail(err error) string {
+	for _, v := range validationDetails {
+		if errors.Is(err, v.err) {
+			return v.detail
+		}
+	}
+	return invalidRequestDetail
+}
+
+// MapError turns service and iface sentinels into the stable llm.* codes.
+// Details are written sentences, never err.Error() (errquality R1).
+// A tenant of the wrong tier is refused with 403 like the route gate.
+// Unknown errors and a missing tenant scope (a route mounted without the
+// tenant context the repositories require) are the server's fault: a
+// generic 500 whose cause the caller logs (see failure).
+func MapError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		// The caller hung up: 499, quiet (failure logs only 5xx).
+		return errcode.New(statusClientClosedRequest, errcode.LLMRequestCanceled, "The request was cancelled before it completed.")
+	}
+	var limited *services.RateLimitedError
+	if errors.As(err, &limited) {
+		secs := int64(math.Ceil(limited.RetryAfter.Seconds()))
+		return errcode.TooManyRequests(errcode.LLMRateLimited, "Too many requests of this kind; wait a minute and try again.").
+			WithHeader("Retry-After", strconv.FormatInt(max(secs, 1), 10))
+	}
+	switch {
+	case errors.Is(err, iface.ErrLLMInvalidRequest):
+		return errcode.UnprocessableEntity(errcode.LLMInvalidRequest, invalidDetail(err))
+	case errors.Is(err, services.ErrNotFound):
+		return errcode.NotFound(errcode.LLMNotFound, "No such credential, model or linked account in this organization.")
+	case errors.Is(err, services.ErrNameInUse):
+		return errcode.Conflict(errcode.LLMNameInUse, "Another credential or model in this organization already has this name.")
+	case errors.Is(err, services.ErrCredentialInUse):
+		return errcode.Conflict(errcode.LLMCredentialInUse, "An active model still uses this credential; disable or delete the model first.")
+	case errors.Is(err, services.ErrSecretKeyMissing):
+		return errcode.ServiceUnavailable(errcode.LLMSecretKeyMissing, "API keys cannot be stored: this deployment has no secret encryption key.")
+	case errors.Is(err, services.ErrEndpointNotAllowed):
+		return errcode.UnprocessableEntity(errcode.LLMEndpointNotAllowed, "The base URL points to an address that is not allowed in this environment.")
+	case errors.Is(err, services.ErrHostedDisabled):
+		return errcode.UnprocessableEntity(errcode.LLMHostedDisabled, "Hosted providers are disabled; enable Allow hosted providers in the module settings first.")
+	case errors.Is(err, services.ErrMockNotAllowed):
+		return errcode.UnprocessableEntity(errcode.LLMMockNotAllowed, "The mock provider is not available in production-like environments.")
+	case errors.Is(err, services.ErrGrantNotMember):
+		return errcode.UnprocessableEntity(errcode.LLMGrantNotMember, "Every user granted access must be a member of this organization.")
+	case errors.Is(err, iface.ErrLLMNotConfigured):
+		return errcode.FeatureNotConfigured(errcode.LLMNotConfigured, "No language model is configured for this organization yet.")
+	case errors.Is(err, iface.ErrLLMNoEligibleModel):
+		return errcode.Forbidden(errcode.LLMNoEligibleModel, "No model you may use fits this request.")
+	case errors.Is(err, iface.ErrLLMModelAccessDenied):
+		return errcode.Forbidden(errcode.LLMModelAccessDenied, "You may not use the selected model.")
+	case errors.Is(err, iface.ErrLLMCapabilityMismatch):
+		return errcode.UnprocessableEntity(errcode.LLMCapabilityMismatch, "The request needs a capability the model does not offer.")
+	case errors.Is(err, iface.ErrLLMBudgetExceeded):
+		return errcode.TooManyRequests(errcode.LLMBudgetExceeded, "The organization's monthly LLM budget has no room for this request.").
+			WithHeader("Retry-After", budgetRetryAfter)
+	case errors.Is(err, iface.ErrLLMQuotaExhausted):
+		return errcode.TooManyRequests(errcode.LLMPlanQuotaExhausted, "The provider reports the account's quota is exhausted.")
+	case errors.Is(err, iface.ErrLLMUserAccountRequired):
+		return errcode.Conflict(errcode.LLMUserAccountRequired, "This model bills your own linked account; link one first.")
+	case errors.Is(err, iface.ErrLLMUserAccountReauth):
+		return errcode.Conflict(errcode.LLMUserAccountReauthRequired, "Your linked account needs you to sign in again.")
+	case errors.Is(err, iface.ErrLLMPlanUsageDisabled):
+		return errcode.Conflict(errcode.LLMPlanUsageDisabled, "Your linked account does not allow direct plan usage.")
+	// Sign in with ChatGPT. The exchange failure wraps provider_unavailable,
+	// so these come before it.
+	case errors.Is(err, services.ErrSIWCDisabled):
+		return errcode.NotFound(errcode.LLMSIWCDisabled, "Sign in with ChatGPT is turned off on this installation.")
+	case errors.Is(err, services.ErrSIWCUnsupportedDeployment):
+		return errcode.Conflict(errcode.LLMSIWCUnsupportedDeployment, "This installation cannot complete Sign in with ChatGPT automatically: the API must be reached as http://127.0.0.1:<port>.")
+	case errors.Is(err, services.ErrSIWCConfigInvalid):
+		return errcode.ServiceUnavailable(errcode.LLMSIWCConfigInvalid, "Sign in with ChatGPT is not configured correctly on this installation; ask an administrator to review the llm module settings.")
+	case errors.Is(err, services.ErrSIWCCallbackInvalid):
+		return errcode.UnprocessableEntity(errcode.LLMSIWCCallbackInvalid, "The pasted address is not the one the browser showed after signing in; copy the full URL from the address bar.")
+	case errors.Is(err, services.ErrSIWCStateInvalid):
+		return errcode.Conflict(errcode.LLMSIWCStateInvalid, "This sign-in attempt has expired or was already used; start linking again.")
+	case errors.Is(err, services.ErrSIWCDenied):
+		return errcode.Conflict(errcode.LLMSIWCDenied, "The authorization was declined at OpenAI.")
+	case errors.Is(err, services.ErrSIWCIDTokenInvalid):
+		return errcode.Conflict(errcode.LLMSIWCIDTokenInvalid, "The identity returned by OpenAI could not be verified for this registration.")
+	case errors.Is(err, services.ErrSIWCExchangeFailed):
+		return errcode.New(http.StatusBadGateway, errcode.LLMSIWCExchangeFailed, "OpenAI did not complete the sign-in.")
+	case errors.Is(err, iface.ErrLLMPartialOutput):
+		return errcode.New(http.StatusBadGateway, errcode.LLMPartialOutput, "The provider failed after part of the answer was sent.")
+	case errors.Is(err, providers.ErrUnauthorized):
+		// Before provider_unavailable, which it also wraps.
+		return errcode.UnprocessableEntity(errcode.LLMCredentialRejected, "The provider rejected the credential; check or rotate the API key.")
+	case errors.Is(err, iface.ErrLLMProviderUnavailable):
+		return errcode.ServiceUnavailable(errcode.LLMProviderUnavailable, "The model provider cannot be reached right now.")
+	case errors.Is(err, tenantrepo.ErrTenantKindMismatch):
+		// Same answer as the enforce-mode RequireInternalTenant gate (403, no
+		// code); reached when that gate runs in warn mode.
+		return errcode.Forbidden("", "This endpoint is available only in an internal organization.")
+	case errors.Is(err, tenantrepo.ErrTenantScopeMissing):
+		return errcode.Internal("", "The organization context of this request could not be resolved.")
+	}
+	return errcode.Internal("", "The language model settings could not be processed.")
+}
+
+// failure maps err for the client and logs the cause of every server-side
+// failure, which the response never carries. The expected not_configured
+// 503 and the 4xx outcomes are not logged, except a tenant-tier mismatch:
+// that one means the route gate let it through (warn mode), so it is a
+// WARN, mirroring the gate's own warn-mode line.
+func failure(ctx context.Context, logger *slog.Logger, op string, err error) error {
+	mapped := MapError(err)
+	if errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
+		logger.WarnContext(ctx, "llm: request refused outside an internal organization", slog.String("op", op), slog.String("error", err.Error()))
+		return mapped
+	}
+	var e *errcode.Error
+	if !errors.As(mapped, &e) || e.Status < http.StatusInternalServerError || e.ExpectedUnavailable() {
+		return mapped
+	}
+	level := slog.LevelWarn
+	if e.Status == http.StatusInternalServerError {
+		level = slog.LevelError
+	}
+	logger.Log(ctx, level, "llm: request failed", slog.String("op", op), slog.String("code", e.Code), slog.String("error", err.Error()))
+	return mapped
+}

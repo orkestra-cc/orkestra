@@ -11,27 +11,21 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// PreferenceRepository manages user notification preferences and
-// the address-level suppression list.
+// PreferenceRepository manages user notification preferences. The
+// address-level suppression list has its own SuppressionRepository.
 type PreferenceRepository interface {
 	GetPreference(ctx context.Context, userUUID, category, channel string) (*models.PreferenceDoc, error)
 	ListByUser(ctx context.Context, userUUID string) ([]*models.PreferenceDoc, error)
 	UpsertPreference(ctx context.Context, doc *models.PreferenceDoc) error
-
-	IsSuppressed(ctx context.Context, address string) (bool, error)
-	AddSuppression(ctx context.Context, doc *models.SuppressionDoc) error
-	RemoveSuppression(ctx context.Context, address string) error
 }
 
 type preferenceRepository struct {
-	prefColl       *mongo.Collection
-	suppressedColl *mongo.Collection
+	prefColl *mongo.Collection
 }
 
 func NewPreferenceRepository(db *mongo.Database) PreferenceRepository {
 	return &preferenceRepository{
-		prefColl:       db.Collection(models.NotificationPreferencesCollection),
-		suppressedColl: db.Collection(models.NotificationSuppressionsCollection),
+		prefColl: db.Collection(models.NotificationPreferencesCollection),
 	}
 }
 
@@ -89,38 +83,5 @@ func (r *preferenceRepository) UpsertPreference(ctx context.Context, doc *models
 		},
 		options.Update().SetUpsert(true),
 	)
-	return err
-}
-
-func (r *preferenceRepository) IsSuppressed(ctx context.Context, address string) (bool, error) {
-	count, err := r.suppressedColl.CountDocuments(ctx, bson.M{"address": address})
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (r *preferenceRepository) AddSuppression(ctx context.Context, doc *models.SuppressionDoc) error {
-	if doc.CreatedAt.IsZero() {
-		doc.CreatedAt = time.Now()
-	}
-	_, err := r.suppressedColl.UpdateOne(ctx,
-		bson.M{"address": doc.Address},
-		bson.M{
-			"$set": bson.M{
-				"reason":    doc.Reason,
-				"createdAt": doc.CreatedAt,
-			},
-			"$setOnInsert": bson.M{
-				"address": doc.Address,
-			},
-		},
-		options.Update().SetUpsert(true),
-	)
-	return err
-}
-
-func (r *preferenceRepository) RemoveSuppression(ctx context.Context, address string) error {
-	_, err := r.suppressedColl.DeleteOne(ctx, bson.M{"address": address})
 	return err
 }

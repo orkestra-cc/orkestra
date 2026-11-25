@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -55,6 +56,11 @@ func TestInit_WiresTheOptoutSeam(t *testing.T) {
 		t.Fatal("Init must leave the opt-out seam wired (non-nil); a nil seam fails every marketing send closed")
 	}
 
+	// The audited opt-out seam other modules resolve lazily.
+	if _, ok := module.GetTyped[iface.MarketingOptoutManager](deps.Services, module.ServiceMarketingOptoutManager); !ok {
+		t.Fatal("Init must register the MarketingOptoutManager under ServiceMarketingOptoutManager")
+	}
+
 	// Same guard for the consume path, and just as cheap: an empty token
 	// returns before any query, but only AFTER the opt-out seam is checked
 	// — so a nil error here means Init wired it, and an error means every
@@ -94,5 +100,35 @@ func TestInit_WiresTheReconciler(t *testing.T) {
 	}
 	if err := m.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop before Start: %v", err)
+	}
+}
+
+// TestInit_WiresTheSuppressionSeam pins that Init wires the email suppression
+// list into the send path and registers its manager. dispatchEmail treats a
+// nil seam as "no check" (so test-built services send), which makes a silent
+// unwiring invisible: every address someone marked invalid would be mailed
+// again. Same cheap shape as above: no query runs.
+func TestInit_WiresTheSuppressionSeam(t *testing.T) {
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://127.0.0.1:1"))
+	if err != nil {
+		t.Fatalf("mongo.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+
+	m := NewModule()
+	deps := &module.Dependencies{
+		DB:       client.Database("notification_suppression_wiring_test"),
+		Services: module.NewServiceRegistry(),
+		Platform: fakePlatform{},
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	if err := m.Init(deps); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if m.svc.Suppressions() == nil {
+		t.Fatal("Init must wire the suppression list into the send path")
+	}
+	if _, ok := module.GetTyped[iface.EmailSuppressionManager](deps.Services, module.ServiceEmailSuppressionManager); !ok {
+		t.Fatal("Init must register the EmailSuppressionManager under ServiceEmailSuppressionManager")
 	}
 }

@@ -176,7 +176,7 @@ func (r *securityEventRepository) DeleteAllByUser(ctx context.Context, userUUID 
 		return 0, errors.New("security event: userUUID is required")
 	}
 	//tenantscope:allow auth_security_events is a non-tier-split audit log keyed on userUUID alone — used by the GDPR DSR right-to-erasure pipeline; deletion follows the user record across all tenants they ever held a binding in.
-	res, err := r.collection.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.collection.DeleteMany(ctx, ByUserFilter(userUUID))
 	if err != nil {
 		return 0, err
 	}

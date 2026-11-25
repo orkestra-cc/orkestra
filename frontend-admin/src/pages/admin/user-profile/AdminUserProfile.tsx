@@ -8,10 +8,18 @@ import { useTranslation } from 'react-i18next';
 import AdminUserActions from './AdminUserActions';
 import AdminUserMetrics from './AdminUserMetrics';
 import AdminAuthMethodsCard from './AdminAuthMethodsCard';
+import AdminPinCard from './AdminPinCard';
+import { useSlotContributions } from 'modules/useSlotContributions';
+import ContributedProfileSections from 'pages/user/ContributedProfileSections';
+import {
+  USER_ADMIN_PROFILE_SECTIONS,
+  type UserProfileSectionProps
+} from 'pages/user/profileSlots';
 
 const AdminUserProfile: React.FC = () => {
   const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
+  const sections = useSlotContributions(USER_ADMIN_PROFILE_SECTIONS);
 
   const {
     data: user,
@@ -51,6 +59,11 @@ const AdminUserProfile: React.FC = () => {
         <Col lg={8}>
           <AdminProfileIntro user={user} />
           <AdminAuthMethodsCard user={user} />
+          <AdminPinCard user={user} />
+          <ContributedProfileSections<UserProfileSectionProps>
+            contributions={sections}
+            sectionProps={{ userId: user.id, user, viewer: 'admin' }}
+          />
         </Col>
         <Col lg={4}>
           <div className="sticky-sidebar">

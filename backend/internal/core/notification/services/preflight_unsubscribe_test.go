@@ -197,6 +197,11 @@ func TestPreflightDelivery_MarketingIsRefusedWhenOneClickCannotBeGuaranteed(t *t
 				if !errors.Is(err, iface.ErrSenderInvalid) {
 					t.Fatalf("sender=%q: want ErrSenderInvalid, got %v", sender, err)
 				}
+				// The precise sentinel too, so a consumer can name the
+				// missing setting instead of a malformed slug.
+				if !errors.Is(err, iface.ErrOneClickUnsubscribeUnavailable) {
+					t.Fatalf("sender=%q: want ErrOneClickUnsubscribeUnavailable, got %v", sender, err)
+				}
 			}
 			// The same profile is fine for transactional work.
 			if err := k.svc.PreflightDelivery(context.Background(), "", "auth.verify_email", models.TypeTransactional); err != nil {
@@ -259,6 +264,9 @@ func TestDispatch_MarketingIsRefusedWhenOneClickCannotBeGuaranteed(t *testing.T)
 			res, err := k.svc.Send(context.Background(), marketingTo("ada@example.test"))
 			if !errors.Is(err, iface.ErrSenderInvalid) {
 				t.Fatalf("want ErrSenderInvalid, got %v", err)
+			}
+			if !errors.Is(err, iface.ErrOneClickUnsubscribeUnavailable) {
+				t.Fatalf("want ErrOneClickUnsubscribeUnavailable, got %v", err)
 			}
 			if res != nil && res.Status == models.StatusSent {
 				t.Fatal("the send must never be recorded as sent")

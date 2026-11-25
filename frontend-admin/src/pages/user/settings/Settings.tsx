@@ -7,6 +7,13 @@ import AvatarSettings from './AvatarSettings';
 import SecuritySummaryCard from './SecuritySummaryCard';
 import { useGetCurrentUserQuery } from 'store/api/authApi';
 import { avatarColor } from 'helpers/avatarColor';
+import ModulePreferencesCards from './ModulePreferencesCards';
+import { useSlotContributions } from 'modules/useSlotContributions';
+import ContributedProfileSections from 'pages/user/ContributedProfileSections';
+import {
+  USER_SETTINGS_SECTIONS,
+  type UserSettingsSectionProps
+} from 'pages/user/profileSlots';
 
 // SettingsHero — compact identity banner with a deterministic two-tone
 // gradient seeded off the user's stable identifier (uuid > email).
@@ -61,12 +68,21 @@ const SettingsHero: React.FC = () => {
 // read of /me/auth-methods so the user can scan their posture without
 // jumping pages.
 const Settings: React.FC = () => {
+  const { data: user } = useGetCurrentUserQuery();
+  const sections = useSlotContributions(USER_SETTINGS_SECTIONS);
   return (
     <>
       <SettingsHero />
       <Row className="g-3">
         <Col lg={8}>
           <ProfileSettings />
+          <ModulePreferencesCards />
+          {user && (
+            <ContributedProfileSections<UserSettingsSectionProps>
+              contributions={sections}
+              sectionProps={{ userId: user.id }}
+            />
+          )}
         </Col>
         <Col lg={4}>
           <div className="sticky-sidebar">

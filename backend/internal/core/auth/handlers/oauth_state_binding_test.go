@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/config"
 )
 
 func stateClaims(csrf, startHost string) *services.OAuthStateClaims {
@@ -43,7 +44,7 @@ func callbackRequest(host, cookieValue string) *http.Request {
 func TestOAuthStateBinding_AcceptsMatchingCookie(t *testing.T) {
 	r := callbackRequest("console.example.com", "nonce-abc")
 
-	deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "console.example.com"))
+	deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("nonce-abc", "console.example.com"))
 	if err != nil || deferred {
 		t.Fatalf("a flow completed in the browser that started it must be bound here, not deferred: deferred=%v err=%v", deferred, err)
 	}
@@ -54,7 +55,7 @@ func TestOAuthStateBinding_RejectsForeignCookie(t *testing.T) {
 	// attacker's); the state names a different flow.
 	r := callbackRequest("console.example.com", "victims-own-nonce")
 
-	deferred, err := verifyOAuthStateBinding(r, stateClaims("attacker-nonce", "console.example.com"))
+	deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("attacker-nonce", "console.example.com"))
 	if err == nil || deferred {
 		t.Fatalf("a state whose nonce does not match this browser's cookie must be rejected, never deferred: deferred=%v err=%v", deferred, err)
 	}
@@ -66,7 +67,7 @@ func TestOAuthStateBinding_RejectsMissingCookieOnSameHost(t *testing.T) {
 	// a browser that never started one.
 	r := callbackRequest("console.example.com", "")
 
-	deferred, err := verifyOAuthStateBinding(r, stateClaims("attacker-nonce", "console.example.com"))
+	deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("attacker-nonce", "console.example.com"))
 	if err == nil || deferred {
 		t.Fatalf("a missing state cookie on the starting host must be rejected, never deferred: deferred=%v err=%v", deferred, err)
 	}
@@ -80,7 +81,7 @@ func TestOAuthStateBinding_DefersCrossHostTierSplit(t *testing.T) {
 	// endpoint on api.*, which requires the cookie. It is never accepted.
 	r := callbackRequest("console.example.com", "")
 
-	deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "api.example.com"))
+	deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("nonce-abc", "api.example.com"))
 	if err != nil || !deferred {
 		t.Fatalf("a cross-host tier-split callback must be DEFERRED, not bound or rejected: deferred=%v err=%v", deferred, err)
 	}
@@ -93,14 +94,14 @@ func TestOAuthStateBinding_CrossHostIgnoresForeignCookie(t *testing.T) {
 	// compared on the starting host.
 	r := callbackRequest("console.example.com", "some-operator-flows-nonce")
 
-	deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "api.example.com"))
+	deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("nonce-abc", "api.example.com"))
 	if err != nil || !deferred {
 		t.Fatalf("a cross-host callback must be deferred regardless of the callback host's cookie: deferred=%v err=%v", deferred, err)
 	}
 	// …and a matching cookie on the callback host is still a deferral, not
 	// a binding — the api.* cookie can only be verified on api.*.
 	r = callbackRequest("console.example.com", "nonce-abc")
-	if deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "api.example.com")); err != nil || !deferred {
+	if deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("nonce-abc", "api.example.com")); err != nil || !deferred {
 		t.Fatalf("deferred=%v err=%v", deferred, err)
 	}
 }
@@ -112,7 +113,7 @@ func TestOAuthStateBinding_RejectsLegacyStateWithNoStartHost(t *testing.T) {
 	// state is a small price next to an unbindable callback.
 	r := callbackRequest("console.example.com", "")
 
-	deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", ""))
+	deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("nonce-abc", ""))
 	if err == nil || deferred {
 		t.Fatalf("a state with no start host must not silently skip the binding check: deferred=%v err=%v", deferred, err)
 	}
@@ -123,7 +124,7 @@ func TestOAuthStateBinding_HostComparisonIgnoresPort(t *testing.T) {
 	// sees console.localhost:3000 — the same surface.
 	r := callbackRequest("console.localhost:3000", "nonce-abc")
 
-	deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "console.localhost:8080"))
+	deferred, err := verifyOAuthStateBinding(r, OAuthStateCookieName, stateClaims("nonce-abc", "console.localhost:8080"))
 	if err != nil || deferred {
 		t.Fatalf("host comparison must ignore the port: deferred=%v err=%v", deferred, err)
 	}
@@ -133,19 +134,54 @@ func TestVerifyRelayBinding(t *testing.T) {
 	// The relay endpoint runs on the start host, so the cookie is REQUIRED.
 	r := httptest.NewRequest(http.MethodGet, "/v1/auth/client/oauth/complete?relay=x", nil)
 	r.Host = "api.example.com"
-	if err := verifyRelayBinding(r, "nonce-abc"); err == nil {
+	if err := verifyRelayBinding(r, OAuthStateCookieName, "nonce-abc"); err == nil {
 		t.Fatal("a relay without the start-host state cookie must be refused")
 	}
 	r.AddCookie(&http.Cookie{Name: OAuthStateCookieName, Value: "victims-own-nonce"})
-	if err := verifyRelayBinding(r, "nonce-abc"); err == nil {
+	if err := verifyRelayBinding(r, OAuthStateCookieName, "nonce-abc"); err == nil {
 		t.Fatal("a foreign nonce must be refused")
 	}
 	r2 := httptest.NewRequest(http.MethodGet, "/v1/auth/client/oauth/complete?relay=x", nil)
 	r2.AddCookie(&http.Cookie{Name: OAuthStateCookieName, Value: "nonce-abc"})
-	if err := verifyRelayBinding(r2, "nonce-abc"); err != nil {
+	if err := verifyRelayBinding(r2, OAuthStateCookieName, "nonce-abc"); err != nil {
 		t.Fatalf("matching nonce must bind: %v", err)
 	}
-	if err := verifyRelayBinding(r2, ""); err == nil {
+	if err := verifyRelayBinding(r2, OAuthStateCookieName, ""); err == nil {
 		t.Fatal("a record without a nonce can never bind")
+	}
+}
+
+// Two stacks on one host share cookies by name, whatever their ports, so a
+// stack with its own COOKIE_NAME_PREFIX reads only its own state cookie: a
+// sibling stack's nonce must not bind, or block, its flows.
+func TestOAuthStateBinding_ReadsOnlyTheConfiguredCookie(t *testing.T) {
+	const name = "stack2_oauth_state"
+	sibling := callbackRequest("console.example.com", "nonce-abc")
+	if _, err := verifyOAuthStateBinding(sibling, name, stateClaims("nonce-abc", "console.example.com")); err == nil {
+		t.Fatal("a nonce under another stack's cookie name must not bind this stack's flow")
+	}
+	own := httptest.NewRequest(http.MethodGet, "/v1/auth/oauth/google/callback", nil)
+	own.Host = "console.example.com"
+	own.AddCookie(&http.Cookie{Name: OAuthStateCookieName, Value: "siblings-nonce"})
+	own.AddCookie(&http.Cookie{Name: name, Value: "nonce-abc"})
+	if deferred, err := verifyOAuthStateBinding(own, name, stateClaims("nonce-abc", "console.example.com")); err != nil || deferred {
+		t.Fatalf("the stack's own cookie must bind: deferred=%v err=%v", deferred, err)
+	}
+	if err := verifyRelayBinding(sibling, name, "nonce-abc"); err == nil {
+		t.Fatal("the relay must not accept another stack's state cookie")
+	}
+	if err := verifyRelayBinding(own, name, "nonce-abc"); err != nil {
+		t.Fatalf("the relay must accept the stack's own cookie: %v", err)
+	}
+}
+
+func TestOAuthStateCookieName_FallsBackToTheDefault(t *testing.T) {
+	cfg := &config.Config{}
+	if got := oauthStateCookieName(cfg); got != OAuthStateCookieName {
+		t.Errorf("unset name = %q, want %q", got, OAuthStateCookieName)
+	}
+	cfg.Auth.Cookie.OAuthStateName = "stack2_oauth_state"
+	if got := oauthStateCookieName(cfg); got != "stack2_oauth_state" {
+		t.Errorf("configured name = %q, want stack2_oauth_state", got)
 	}
 }

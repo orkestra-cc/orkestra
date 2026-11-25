@@ -26,29 +26,36 @@ func NewNotificationHandler(svc *services.NotificationService) *NotificationHand
 // --- Admin endpoints ---
 
 type listNotificationsRequest struct {
-	Category string `query:"category" doc:"Filter by category"`
-	Status   string `query:"status" doc:"Filter by status"`
+	Category string `query:"category" doc:"Filter by category (exact)"`
+	Status   string `query:"status" doc:"Filter by status: queued, sent, failed, suppressed"`
+	Type     string `query:"type" doc:"Filter by send type: transactional, marketing"`
 	Sender   string `query:"sender" doc:"Filter by sender profile slug"`
-	Limit    int64  `query:"limit" doc:"Max rows (default 100)"`
+	Address  string `query:"address" maxLength:"254" doc:"Keep rows whose recipient address contains this text (case-insensitive, literal)"`
+	Skip     int64  `query:"skip" minimum:"0" doc:"Rows to skip, for paging (default 0)"`
+	Limit    int64  `query:"limit" doc:"Max rows (default 100, at most 500)"`
 }
 
 type listNotificationsResponse struct {
 	Body struct {
 		Items []*models.NotificationDoc `json:"items"`
+		Total int64                     `json:"total" doc:"Rows the filters match, across every page"`
 	}
 }
 
 func (h *NotificationHandler) ListNotifications(ctx context.Context, req *listNotificationsRequest) (*listNotificationsResponse, error) {
-	items, err := h.svc.LogRepo().List(ctx, repository.Filter{
-		Category:   req.Category,
-		Status:     req.Status,
-		SenderSlug: req.Sender,
-	}, req.Limit)
+	items, total, err := h.svc.LogRepo().Page(ctx, repository.Filter{
+		Category:        req.Category,
+		Status:          req.Status,
+		Type:            req.Type,
+		SenderSlug:      req.Sender,
+		AddressContains: req.Address,
+	}, req.Skip, req.Limit)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list notifications failed", err)
 	}
 	resp := &listNotificationsResponse{}
 	resp.Body.Items = items
+	resp.Body.Total = total
 	return resp, nil
 }
 
@@ -85,6 +92,10 @@ func (h *NotificationHandler) SendTestEmail(ctx context.Context, req *testEmailR
 	res, err := h.svc.SendTest(ctx, services.TestSendInput{To: req.Body.To, Subject: subject, BodyText: body, Sender: req.Body.Sender})
 	if err != nil {
 		switch {
+		case errors.Is(err, services.ErrAddressSuppressed):
+			return nil, errcode.UnprocessableEntity(errcode.NotificationAddressSuppressed, "That address is on the suppression list (marked invalid) and receives no email, a test included.")
+		case errors.Is(err, services.ErrSuppressionLookupUnavailable):
+			return nil, errcode.ServiceUnavailable(errcode.NotificationSuppressionUnavailable, "The suppression list could not be read, so the test was not sent.")
 		case errors.Is(err, services.ErrSenderNotFound):
 			return nil, errcode.NotFound(errcode.NotificationSenderNotFound, "No sender profile has that slug.")
 		case errors.Is(err, services.ErrNoSenderForCategory), errors.Is(err, services.ErrUnknownDriver), errors.Is(err, services.ErrSenderNotConfigured):
@@ -335,6 +346,7 @@ func (h *NotificationHandler) RegisterAdminRoutes(api huma.API) {
 		Method:      http.MethodGet,
 		Path:        "/v1/notifications",
 		Summary:     "List notification delivery log",
+		Description: "One page of the delivery log, newest first, with the number of rows the filters match. A suppressed row carries the reason in `error`: `address_invalid` (the address is on the suppression list), `marketing_optout`, or a category preference. Platform-wide: the log spans every tenant.",
 		Tags:        []string{"Notifications"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.ListNotifications)

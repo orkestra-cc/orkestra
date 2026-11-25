@@ -6,4 +6,4 @@ args = ["mcp-server", "--force-roots-fallback"]
 
 [mcp_servers.integrated-browser-mcp]
 command = "sh"
-args = ["-lc", "exec mise exec -- node \"$HOME/.integrated-browser-mcp/mcp-server.mjs\""]
+args = ["-lc", "if command -v mise >/dev/null 2>&1; then exec mise exec -- node \"$HOME/.integrated-browser-mcp/mcp-server.mjs\"; else exec node \"$HOME/.integrated-browser-mcp/mcp-server.mjs\"; fi"]

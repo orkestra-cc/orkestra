@@ -23,22 +23,38 @@ export interface ApiErrorBody {
  * Opt-in: existing core call sites keep their inline `t('errors.<code>')`
  * logic; new addon code (and any core site that wants the namespaced path)
  * calls this instead.
+ *
+ * `opts.includeDetail` is a second opt-in, for a caller that wants BOTH the
+ * localized message AND the backend's own `detail` — e.g. an addon error
+ * whose `detail` names the specific offending value (a token, a field) that
+ * the localized copy alone can't say. It only appends anything when a
+ * localized message was actually found and a `detail` is present; every
+ * other caller (the default) keeps returning the localized message alone.
  */
 export function resolveErrorMessage(
   err: ApiErrorBody | undefined | null,
-  fallback?: string
+  fallback?: string,
+  opts?: { includeDetail?: boolean }
 ): string {
   const code = err?.code;
+  let localized: string | undefined;
   if (code) {
     const dot = code.indexOf('.');
     if (dot > 0) {
       const ns = code.slice(0, dot);
       const rest = code.slice(dot + 1);
       const nsKey = `${ns}:errors.${rest}`;
-      if (i18n.exists(nsKey)) return i18n.t(nsKey);
+      if (i18n.exists(nsKey)) localized = i18n.t(nsKey);
     }
-    const coreKey = `errors.${code}`;
-    if (i18n.exists(coreKey)) return i18n.t(coreKey);
+    if (localized === undefined) {
+      const coreKey = `errors.${code}`;
+      if (i18n.exists(coreKey)) localized = i18n.t(coreKey);
+    }
+  }
+  if (localized !== undefined) {
+    return opts?.includeDetail && err?.detail
+      ? `${localized} — ${err.detail}`
+      : localized;
   }
   return err?.detail || fallback || code || '';
 }

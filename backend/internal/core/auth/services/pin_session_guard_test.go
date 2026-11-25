@@ -1,0 +1,339 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/orkestra/backend/internal/core/auth/repository"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+)
+
+// unreadableMemberships fails the membership lookup.
+type unreadableMemberships struct{ gateTenantProvider }
+
+func (unreadableMemberships) ListUserMemberships(context.Context, string) ([]iface.TenantMembership, error) {
+	return nil, errors.New("tenant store down")
+}
+
+// A failed membership lookup refuses eligibility: read as "no
+// memberships" it would let an org_owner hold a PIN during an outage.
+func TestPIN_UnreadableMembershipsRefuse(t *testing.T) {
+	f := newPINFixture(t, nil)
+	f.svc.login.tenantProvider = unreadableMemberships{}
+	if err := f.svc.AdminSetPIN(context.Background(), "admin-1", pinWorkerUUID, goodPIN); !errors.Is(err, ErrAuthPolicyUnavailable) {
+		t.Fatalf("AdminSetPIN = %v, want ErrAuthPolicyUnavailable", err)
+	}
+	if f.user(t).PINHash != "" {
+		t.Fatal("pin written although memberships could not be read")
+	}
+}
+
+// CheckPINSession: a refresh continues only while the PIN, the device and
+// the eligibility the session signed in under still hold.
+func TestPIN_CheckPINSession(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	f.enrolledDevice(t)
+	if err := f.svc.CheckPINSession(ctx, pinWorkerUUID, "tab-1"); err != nil {
+		t.Fatalf("a valid PIN session must continue: %v", err)
+	}
+	if err := f.svc.CheckPINSession(ctx, pinWorkerUUID, "tab-unknown"); !errors.Is(err, ErrRefreshSessionInactive) {
+		t.Fatalf("revoked device = %v, want ErrRefreshSessionInactive", err)
+	}
+
+	// A privileged membership acquired after sign-in ends the session.
+	f.svc.login.tenantProvider = obligatedByMembership{}
+	if err := f.svc.CheckPINSession(ctx, pinWorkerUUID, "tab-1"); !errors.Is(err, ErrRefreshSessionInactive) {
+		t.Fatalf("org_owner since sign-in = %v, want ErrRefreshSessionInactive", err)
+	}
+	// An unreadable membership store cannot decide: retry, do not sign out.
+	f.svc.login.tenantProvider = unreadableMemberships{}
+	if err := f.svc.CheckPINSession(ctx, pinWorkerUUID, "tab-1"); !errors.Is(err, ErrSessionEnforcementUnavailable) {
+		t.Fatalf("membership outage = %v, want ErrSessionEnforcementUnavailable", err)
+	}
+	f.svc.login.tenantProvider = nil
+
+	// A promotion out of the field roles ends it too.
+	f.users.byUUID[pinWorkerUUID].Role = "manager"
+	if err := f.svc.CheckPINSession(ctx, pinWorkerUUID, "tab-1"); !errors.Is(err, ErrRefreshSessionInactive) {
+		t.Fatalf("promoted user = %v, want ErrRefreshSessionInactive", err)
+	}
+	f.users.byUUID[pinWorkerUUID].Role = "operator"
+
+	// So does the PIN's removal.
+	if err := f.svc.AdminRemovePIN(ctx, "admin-1", pinWorkerUUID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.CheckPINSession(ctx, pinWorkerUUID, "tab-1"); !errors.Is(err, ErrRefreshSessionInactive) {
+		t.Fatalf("removed PIN = %v, want ErrRefreshSessionInactive", err)
+	}
+}
+
+// Failure writes are bound to the hash the attempt was verified against:
+// an attempt that began before the PIN was replaced neither locks nor
+// removes the new one.
+func TestPIN_OldFailuresLeaveANewPINAlone(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	if err := f.svc.AdminSetPIN(ctx, "admin-1", pinWorkerUUID, goodPIN); err != nil {
+		t.Fatal(err)
+	}
+	old := f.user(t).PINHash
+	if err := f.svc.AdminSetPIN(ctx, "admin-1", pinWorkerUUID, "73915"); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.disablePIN(ctx, pinWorkerUUID, old, 10)
+	if f.user(t).PINHash == "" {
+		t.Fatal("an attempt counted against the old PIN removed the new one")
+	}
+	f.svc.recordPINFailure(ctx, "10.0.0.1", AttemptKeyPIN(f.svc.audience, pinWorker), pinWorkerUUID, old, 5)
+	if u := f.user(t); u.PINLockedUntil != nil && time.Now().Before(*u.PINLockedUntil) {
+		t.Fatal("an attempt counted against the old PIN locked the new one")
+	}
+}
+
+// A PIN replaced while a sign-in was verifying the old one: no session.
+func TestPIN_CredentialChangedDuringSignIn(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	f.enrolledDevice(t)
+	// The sign-in's own read: a copy, not the fake's live row.
+	snapshot := *f.user(t)
+	user := &snapshot
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	device, err := f.devices.Find(ctx, pinWorkerUUID, "tab-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.credentialStillCurrent(ctx, user, device); err != nil {
+		t.Fatalf("unchanged credential: %v", err)
+	}
+	if err := f.svc.AdminSetPIN(ctx, "admin-1", pinWorkerUUID, "73915"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.credentialStillCurrent(ctx, user, device); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("replaced PIN = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// The PIN route applies the geo block the password route does, before
+// counting anything.
+func TestPIN_CountryBlocked(t *testing.T) {
+	f := newPINFixture(t, map[string]string{"geoBlockCountries": "kp"})
+	secret := f.enrolledDevice(t)
+	f.svc.login.geoResolver = newGateGeoResolver(map[string]string{"10.0.0.1": "KP"})
+	if _, err := f.login(goodPIN, secret); !errors.Is(err, ErrCountryBlocked) {
+		t.Fatalf("login from a blocked country = %v, want ErrCountryBlocked", err)
+	}
+	f.svc.login.geoResolver = newGateGeoResolver(map[string]string{"10.0.0.1": "IT"})
+	if _, err := f.login(goodPIN, secret); err != nil {
+		t.Fatalf("login from an allowed country: %v", err)
+	}
+}
+
+// A dormant account is disabled by a PIN sign-in exactly as by a password
+// one, and the sign-in is refused.
+func TestPIN_InactiveAccountAutoDisabled(t *testing.T) {
+	f := newPINFixture(t, map[string]string{"inactiveAccountAutoDisableDays": "30"})
+	secret := f.enrolledDevice(t)
+	old := time.Now().Add(-60 * 24 * time.Hour)
+	f.users.byUUID[pinWorkerUUID].LastLogin = &old
+	if _, err := f.login(goodPIN, secret); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("dormant login = %v, want ErrInvalidCredentials", err)
+	}
+	if f.user(t).IsActive {
+		t.Fatal("the dormant account was not disabled")
+	}
+}
+
+// An explicitly empty toggle reads as its default, as the save-time
+// validation accepts it: no outage on the PIN routes.
+func TestPIN_EmptyToggleReadsAsDefault(t *testing.T) {
+	f := newPINFixture(t, map[string]string{"pinRequiresTrustedDevice": ""})
+	require, err := f.svc.policy.PINRequiresTrustedDevice(context.Background())
+	if err != nil || !require {
+		t.Fatalf("empty pinRequiresTrustedDevice = %v, %v; want the default true", require, err)
+	}
+}
+
+// An enrollment code is bound to the PIN it was issued for: once that PIN
+// is replaced the code enrolls nothing.
+func TestPIN_EnrollmentCodeBoundToItsPIN(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	if err := f.svc.AdminSetPIN(ctx, "admin-1", pinWorkerUUID, goodPIN); err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := f.svc.IssueEnrollmentCode(ctx, "admin-1", pinWorkerUUID, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.AdminSetPIN(ctx, "admin-1", pinWorkerUUID, "73915"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.svc.EnrollDevice(ctx, PINDeviceEnrollInput{Username: pinWorker, Code: code, DeviceID: "tab-2", IP: "10.0.0.1"})
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("code issued for the replaced PIN = %v, want ErrInvalidCredentials", err)
+	}
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	if _, err := f.devices.Find(ctx, pinWorkerUUID, "tab-2"); err == nil {
+		t.Fatal("a device was enrolled with a code for the replaced PIN")
+	}
+}
+
+// pinFlipUsers serves the PIN service's user reads and replaces the
+// worker's PIN hash once `after` reads have gone by: a credential change
+// landing in the middle of a sign-in or an enrollment.
+type pinFlipUsers struct {
+	pinUsersCopying
+	mu    *sync.Mutex
+	reads *int
+	after int
+}
+
+func (u pinFlipUsers) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
+	u.mu.Lock()
+	*u.reads++
+	flip := *u.reads > u.after
+	u.mu.Unlock()
+	row, err := u.pinUsersCopying.GetUserByID(ctx, id)
+	if err == nil && row != nil && flip {
+		row.PINHash = "replaced-meanwhile"
+	}
+	return row, err
+}
+
+func flipUsersAfter(f *pinFixture, after int) {
+	reads := 0
+	f.svc.users = pinFlipUsers{pinUsersCopying: pinUsersCopying{f.users}, mu: &sync.Mutex{}, reads: &reads, after: after}
+}
+
+// A PIN replaced after the last pre-issue read but before the session was
+// stored: the session just minted is ended and the sign-in refused.
+func TestPIN_CredentialChangedWhileIssuing(t *testing.T) {
+	f := newPINFixture(t, nil)
+	secret := f.enrolledDevice(t)
+	flipUsersAfter(f, 1) // the pre-issue re-read sees the PIN, the post-issue one does not
+	if _, err := f.login(goodPIN, secret); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("login = %v, want ErrInvalidCredentials", err)
+	}
+	found := false
+	for _, c := range f.revoker.calls {
+		if strings.HasSuffix(c, "|pin_changed_during_sign_in") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the session minted for a replaced PIN was not revoked: %v", f.revoker.calls)
+	}
+}
+
+// A PIN replaced while an enrollment code was being redeemed: the device
+// written for it is removed and nothing is returned.
+func TestPIN_CredentialChangedWhileEnrolling(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	if err := f.svc.AdminSetPIN(ctx, "admin-1", pinWorkerUUID, goodPIN); err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := f.svc.IssueEnrollmentCode(ctx, "admin-1", pinWorkerUUID, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flipUsersAfter(f, 0)
+	if _, err := f.svc.EnrollDevice(ctx, PINDeviceEnrollInput{Username: pinWorker, Code: code, DeviceID: "tab-3", IP: "10.0.0.1"}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("enroll = %v, want ErrInvalidCredentials", err)
+	}
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	if _, err := f.devices.Find(ctx, pinWorkerUUID, "tab-3"); err == nil {
+		t.Fatal("the device enrolled for a replaced PIN was kept")
+	}
+}
+
+// The admin view's canManage is user.update at global scope.
+func TestPIN_CanManage(t *testing.T) {
+	f := newPINFixture(t, nil)
+	if f.svc.CanManage(context.Background(), "admin-1") {
+		t.Fatal("canManage without user.update")
+	}
+	f.authz.grants = map[string]bool{"user.update": true}
+	if !f.svc.CanManage(context.Background(), "admin-1") {
+		t.Fatal("no canManage with user.update")
+	}
+	if f.svc.CanManage(context.Background(), "") {
+		t.Fatal("canManage for an anonymous caller")
+	}
+}
+
+// A device re-enrolled while a sign-in was verifying its old secret: the
+// secret is gone, so no session is issued for it.
+func TestPIN_DeviceReenrolledDuringSignIn(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	f.enrolledDevice(t)
+	snapshot := *f.user(t)
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	device, err := f.devices.Find(ctx, pinWorkerUUID, "tab-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := *device
+	f.devices.mu.Lock()
+	row := f.devices.rows[f.devices.key(pinWorkerUUID, "tab-1")]
+	row.SecretHash = "re-enrolled"
+	f.devices.rows[f.devices.key(pinWorkerUUID, "tab-1")] = row
+	f.devices.mu.Unlock()
+	if err := f.svc.credentialStillCurrent(ctx, &snapshot, &old); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("re-enrolled device = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// pinFailingUsers fails every user read after the first `after`.
+type pinFailingUsers struct {
+	pinUsersCopying
+	reads *int
+	after int
+}
+
+func (u pinFailingUsers) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
+	*u.reads++
+	if *u.reads > u.after {
+		return nil, errors.New("store down")
+	}
+	return u.pinUsersCopying.GetUserByID(ctx, id)
+}
+
+// A failed re-read after issuance is not evidence the credential moved:
+// the sign-in stands and no session is revoked.
+func TestPIN_ReadFailureAfterIssueRevokesNothing(t *testing.T) {
+	f := newPINFixture(t, nil)
+	secret := f.enrolledDevice(t)
+	reads := 0
+	f.svc.users = pinFailingUsers{pinUsersCopying: pinUsersCopying{f.users}, reads: &reads, after: 1}
+	before := len(f.revoker.calls)
+	if _, err := f.login(goodPIN, secret); err != nil {
+		t.Fatalf("login with a failing post-issue read: %v", err)
+	}
+	if got := f.revoker.calls[before:]; len(got) != 0 {
+		t.Fatalf("sessions revoked on a read failure: %v", got)
+	}
+}
+
+// The rollback of an enrollment whose PIN changed removes only the row it
+// wrote, never a newer enrollment of the same device.
+func TestPIN_EnrollmentRollbackSparesANewerEnrollment(t *testing.T) {
+	ctx := context.Background()
+	f := newPINFixture(t, nil)
+	f.enrolledDevice(t)
+	if err := f.devices.DeleteIfSecret(ctx, pinWorkerUUID, "tab-1", "someone-elses-secret"); !errors.Is(err, repository.ErrPINDeviceNotFound) {
+		t.Fatalf("DeleteIfSecret with another secret = %v, want ErrPINDeviceNotFound", err)
+	}
+	//tenantscope:allow PIN devices are keyed on the user, like the user rows they belong to
+	if _, err := f.devices.Find(ctx, pinWorkerUUID, "tab-1"); err != nil {
+		t.Fatalf("the newer enrollment was removed: %v", err)
+	}
+}

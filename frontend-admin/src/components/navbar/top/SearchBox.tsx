@@ -1,3 +1,9 @@
+// The theme's search box. Only the reference demo (reference/components/ui/
+// Search.tsx, routed in development builds or with VITE_ENABLE_REFERENCE)
+// mounts it: it searches whatever list it is given, and the only list there is
+// the theme's demo data
+// (data/autocomplete/autocomplete.js). The console's top bar stopped mounting
+// it on 2026-11-13; mount it there again only behind a real global search.
 import { Fragment, useEffect, useState } from 'react';
 import classNames from 'classnames';
 import { Form, Dropdown } from 'react-bootstrap';

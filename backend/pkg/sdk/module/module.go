@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/pkg/sdk/capability"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/jobs"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -99,6 +100,17 @@ type HasCapabilities interface {
 	Capabilities() []capability.Capability
 }
 
+// HasJobs lets a module contribute background jobs (scheduled or manual) to
+// the core jobs module. The registry collects them after Init into the
+// *jobs.Catalog published as ServiceJobCatalog.
+type HasJobs interface {
+	Jobs() []jobs.Definition
+}
+
+// HasProfileSections and HasUserPreferences (user_preferences.go) let a
+// module contribute sections to the user profile pages and declare
+// per-user preference fields; the registry collects both after Init.
+
 // HasDependencies lets a module declare other modules that must init
 // before it. The registry's topological sort consumes this declaration.
 type HasDependencies interface {
@@ -176,8 +188,9 @@ type HasInfraContainers interface {
 // before the registry brings up its infra containers. Returning an
 // error here surfaces directly to the admin UI without side effects.
 //
-// Typical use: agents requires aimodels to have a default LLM
-// configured; Preflight() returns a descriptive error otherwise.
+// Typical use: an addon that calls iface.LLMGateway
+// (ServiceLLMGateway) requires an active model to be configured;
+// Preflight() returns a descriptive error otherwise.
 type HasPreflight interface {
 	Preflight(ctx context.Context) error
 }
@@ -266,6 +279,8 @@ func (BaseModule) Collections() []CollectionSpec         { return nil }
 func (BaseModule) NavItems() []NavItemSpec               { return nil }
 func (BaseModule) Permissions() []iface.PermissionSpec   { return nil }
 func (BaseModule) Capabilities() []capability.Capability { return nil }
+func (BaseModule) ProfileSections() []ProfileSectionSpec { return nil }
+func (BaseModule) UserPreferenceFields() []ConfigField   { return nil }
 func (BaseModule) Dependencies() []string                { return nil }
 func (BaseModule) ProvidedServices() []ServiceKey        { return nil }
 func (BaseModule) RequiredServices() []ServiceKey        { return nil }
@@ -352,6 +367,14 @@ func PermissionsOf(m Module) []iface.PermissionSpec {
 func CapabilitiesOf(m Module) []capability.Capability {
 	if c, ok := m.(HasCapabilities); ok {
 		return c.Capabilities()
+	}
+	return nil
+}
+
+// JobsOf returns the module's job definitions, or nil.
+func JobsOf(m Module) []jobs.Definition {
+	if c, ok := m.(HasJobs); ok {
+		return c.Jobs()
 	}
 	return nil
 }

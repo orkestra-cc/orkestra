@@ -2,10 +2,19 @@ package services
 
 import (
 	"context"
+	"fmt"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+)
+
+// Producer keys for the two auth instances, one per audience tier. Both share
+// Subject "auth"; compliance tracks and exports each by its key. Incomplete
+// erasure requests store these, so they must never change.
+const (
+	PIIProducerKeyOperator = "auth.operator"
+	PIIProducerKeyClient   = "auth.client"
 )
 
 // piiProducer implements iface.PIIProducer for the auth module. It
@@ -20,6 +29,7 @@ import (
 // fingerprints, timestamps, user agents, backup-code counts) is
 // included.
 type piiProducer struct {
+	key         string
 	refresh     repository.RefreshTokenRepository
 	sessions    repository.AuthSessionRepository
 	emails      repository.EmailTokenRepository
@@ -35,12 +45,31 @@ type piiProducer struct {
 	sessionsCollection string
 	emailsCollection   string
 	mfaCollection      string
+
+	// pinDevices is the tier's PIN device registry,
+	// wired with SetPINDevices. The PIN hash itself lives on the user row
+	// and is never exported (a server secret, like the password hash).
+	pinDevices           repository.PINDeviceRepository
+	pinDevicesCollection string
+}
+
+// PINDeviceAware is implemented by the auth PII producer so module.go can
+// hand it the PIN device registry after construction.
+type PINDeviceAware interface {
+	SetPINDevices(repo repository.PINDeviceRepository, collection string)
+}
+
+// SetPINDevices adds the tier's PIN device registry to export and purge.
+func (p *piiProducer) SetPINDevices(repo repository.PINDeviceRepository, collection string) {
+	p.pinDevices = repo
+	p.pinDevicesCollection = collection
 }
 
 // NewPIIProducer builds the auth PII producer for a single tier. Pass
 // the tier's collection-name constants (operator_* or client_*) so the
 // DSR audit row labels are accurate.
 func NewPIIProducer(
+	key string,
 	refresh repository.RefreshTokenRepository,
 	sessions repository.AuthSessionRepository,
 	emails repository.EmailTokenRepository,
@@ -50,6 +79,7 @@ func NewPIIProducer(
 	refreshCollection, sessionsCollection, emailsCollection, mfaCollection string,
 ) iface.PIIProducer {
 	return &piiProducer{
+		key:                key,
 		refresh:            refresh,
 		sessions:           sessions,
 		emails:             emails,
@@ -63,8 +93,13 @@ func NewPIIProducer(
 	}
 }
 
-// Subject is the stable bundle-key identifier for this producer.
+// Subject names the kind of data held. Both tiers share it; audit rows and
+// export bundles reference it, so it stays "auth".
 func (p *piiProducer) Subject() string { return "auth" }
+
+// ProducerKey identifies this tier's instance to compliance (see
+// iface.PIIProducerKeyer).
+func (p *piiProducer) ProducerKey() string { return p.key }
 
 // ExportPersonalData returns every auth-owned record tied to userUUID.
 // Token hashes are scrubbed (users can't do anything with them and they
@@ -135,6 +170,24 @@ func (p *piiProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 		grants, err := p.deviceTrust.ListActiveByUser(ctx, userUUID)
 		if err == nil && len(grants) > 0 {
 			out["deviceTrust"] = scrubDeviceTrust(grants)
+		}
+	}
+
+	if p.pinDevices != nil {
+		devices, err := p.pinDevices.ListByUser(ctx, userUUID)
+		if err == nil && len(devices) > 0 {
+			rows := make([]map[string]any, 0, len(devices))
+			for _, d := range devices {
+				rows = append(rows, map[string]any{
+					"deviceId":   d.DeviceID,
+					"deviceName": d.DeviceName,
+					"platform":   d.Platform,
+					"via":        d.Via,
+					"createdAt":  d.CreatedAt,
+					"lastUsedAt": d.LastUsedAt,
+				})
+			}
+			out["pinDevices"] = rows
 		}
 	}
 
@@ -223,7 +276,66 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 		}
 	}
 
+	if p.pinDevices != nil {
+		n, err := p.pinDevices.DeleteAllByUser(ctx, userUUID)
+		if err != nil {
+			return iface.PurgeResult{}, err
+		}
+		if n > 0 {
+			rows += n
+			collections = append(collections, p.pinDevicesCollection)
+		}
+	}
+
 	return iface.PurgeResult{RowsDeleted: int(rows), Collections: collections}, nil
+}
+
+// subjectRowCounter is what each repository (and the security-event service)
+// offers next to DeleteAllByUser: the count of rows that delete would remove,
+// built from the same filter (repository.ByUserFilter). It is a separate
+// optional interface so a repository fake that predates the dry-run still
+// satisfies the repository contracts.
+type subjectRowCounter interface {
+	CountByUser(ctx context.Context, userUUID string) (int64, error)
+}
+
+// CountPersonalData implements iface.PIIProducerCounter: the rows
+// PurgePersonalData would delete for the subject, per collection, counted with
+// the filters the purge uses. Mode-agnostic like the purge. The device-trust
+// grants and security events are shared by the two tier instances, as in the
+// purge, so each instance reports them.
+func (p *piiProducer) CountPersonalData(ctx context.Context, userUUID string) (iface.PersonalDataCount, error) {
+	var out iface.PersonalDataCount
+	sources := []struct {
+		repo       any
+		collection string
+	}{
+		{p.refresh, p.refreshCollection},
+		{p.sessions, p.sessionsCollection},
+		{p.emails, p.emailsCollection},
+		{p.mfa, p.mfaCollection},
+		{p.events, authModels.SecurityEventsCollection},
+		{p.deviceTrust, authModels.DeviceTrustCollection},
+		{p.pinDevices, p.pinDevicesCollection},
+	}
+	for _, src := range sources {
+		if src.repo == nil {
+			continue
+		}
+		c, ok := src.repo.(subjectRowCounter)
+		if !ok {
+			return iface.PersonalDataCount{}, fmt.Errorf("auth: %s cannot be counted", src.collection)
+		}
+		n, err := c.CountByUser(ctx, userUUID)
+		if err != nil {
+			return iface.PersonalDataCount{}, err
+		}
+		if n > 0 {
+			out.Rows += int(n)
+			out.Collections = append(out.Collections, src.collection)
+		}
+	}
+	return out, nil
 }
 
 // --- internal scrubbers ---
@@ -292,4 +404,7 @@ func scrubDeviceTrust(grants []*authModels.DeviceTrustDoc) []map[string]any {
 }
 
 // compile-time assertion: iface.PIIProducer is satisfied by piiProducer.
-var _ iface.PIIProducer = (*piiProducer)(nil)
+var (
+	_ iface.PIIProducer        = (*piiProducer)(nil)
+	_ iface.PIIProducerCounter = (*piiProducer)(nil)
+)

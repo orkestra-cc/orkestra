@@ -239,6 +239,8 @@ func main() {
 	platformChecks := registerPDFRenderer(svcRegistry, cfg.PDFRenderer, logger)
 
 	modRegistry := module.NewModuleRegistry(logger)
+	// Consumed by retrieval to keep intents of stopped owners (ADR-0023 D7).
+	svcRegistry.Register(module.ServiceModuleStatus, modRegistry)
 	modRegistry.SetConfigService(configService)
 	modRegistry.SetContainerManager(container.NewManager(logger))
 	modDeps := &module.Dependencies{
@@ -379,6 +381,12 @@ func main() {
 	if lookup, ok := module.GetTyped[authMiddleware.MFAEnrollmentLookup](svcRegistry, module.ServiceMFAEnrollmentLookup); ok {
 		authMW.SetMFAEnrollmentLookup(lookup)
 	}
+	// Password-set lookup: on the no-factor branch, a caller with no
+	// password (OAuth-only) gets mfa_enrollment_required instead of a
+	// reconfirm modal it cannot answer. Optional, like the lookup above.
+	if lookup, ok := module.GetTyped[authMiddleware.PasswordSetLookup](svcRegistry, module.ServicePasswordSetLookup); ok {
+		authMW.SetPasswordSetLookup(lookup)
+	}
 	// MFA-epoch lookup (spec §4.3 D16). Unlike the two setters below this is
 	// tier-DISPATCHING, not tier-agnostic: the auth module builds it from
 	// both tiers' user providers because this one middleware instance serves
@@ -406,7 +414,7 @@ func main() {
 	if userProv, ok := module.GetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService); ok {
 		authMW.SetUserProvider(userProv)
 	}
-	deviceMW := authMiddleware.NewDeviceMiddleware(errorManager)
+	deviceMW := authMiddleware.NewDeviceMiddleware(errorManager, cfg.Auth.Cookie.DeviceName, cfg.Auth.Cookie.Secure)
 
 	// ADR-0003 PR-C: build two audience-scoped surfaces (operator + client),
 	// each with its own chi.Mux + huma.API + protected sub-router. Both run
@@ -424,7 +432,11 @@ func main() {
 	// for anonymous callers. Installed on the shared config so both audience
 	// surfaces and every module sub-router inherit it.
 	apiConfig.Transformers = append(apiConfig.Transformers,
-		errors.HumaErrorDetailPolicy(cfg.IsProductionLike(), logger))
+		errors.HumaErrorDetailPolicy(cfg.IsProductionLike(), logger),
+		// Hands the error code to the access logger, so a 503 that opted in
+		// as an unconfigured optional feature (errcode.FeatureNotConfigured)
+		// is logged at WARN, not ERROR.
+		errors.RecordErrorCode())
 	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		"bearerAuth": {
 			Type:         "http",
@@ -635,11 +647,13 @@ func main() {
 	// complete route inventory, and the docs page runs a third-party bundle
 	// on the API origin — the origin that holds the HttpOnly refresh cookie
 	// — so an internet-reachable deployment must opt in explicitly and gate
-	// both paths at the edge. OPENAPI_DUMP below is unaffected: it reads the
-	// in-memory document, not the route.
+	// both paths at the edge. Off means off for huma's own copies too
+	// (/openapi.*, /openapi-3.0.*, /schemas/*): setupMiddleware mounts
+	// denySpecRoutes on both audience muxes. OPENAPI_DUMP below is
+	// unaffected: it reads the in-memory document, not the route.
 	if cfg.Server.APIDocsEnabled {
 		if cfg.IsProductionLike() {
-			logger.Warn("API docs enabled on a production-like environment; gate /docs and /openapi.json at the edge",
+			logger.Warn("API docs enabled on a production-like environment; gate /docs, /openapi* and /schemas/* at the edge",
 				slog.String("env", cfg.Server.Environment))
 		}
 		registerDocsEndpoints(operatorMux, operatorAPI)
@@ -671,7 +685,8 @@ func main() {
 			log.Fatalf("openapi marshal: %v", err)
 		}
 		b = append(b, '\n')
-		if err := os.WriteFile(path, b, 0o600); err != nil {
+		// OPENAPI_DUMP_PATH comes from whoever runs `make openapi-dump`, never from a request.
+		if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // G703: operator-set dump path
 			log.Fatalf("openapi write: %v", err)
 		}
 		logger.Info("openapi dump",
@@ -680,16 +695,18 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Phase 5.3: Prometheus /metrics endpoint. Mounted on the operator
-	// mux for in-product browsing AND on the LAN ops handler so a
-	// Prometheus scrape against orkestra-backend:3000/metrics works
+	// Phase 5.3: Prometheus /metrics endpoint. Served by the LAN ops handler,
+	// so a Prometheus scrape against orkestra-backend:3000/metrics works
 	// without spoofing the operator Host header (Prometheus has no
-	// per-scrape Host override). Kept off the client mux so a browser
-	// hitting api.orkestra.com/metrics still 404s — the reverse proxy +
-	// hostMux gate together preserve the "don't leak cardinality on the
-	// public client surface" intent. METRICS_ENABLED is respected but
-	// defaults to true because a scrape on a disabled handler just
-	// yields 404 — cheap enough to leave on in every environment.
+	// per-scrape Host override). The audience hosts do not serve it
+	// outside development: they are internet-facing origins, and a
+	// tunnel or a proxy that forwards every path would publish the route
+	// templates, the job names and the auth counters. In development the
+	// operator mux serves it too (mountOperatorMetrics), because there the
+	// host mux sends an unmatched host to the operator mux. Never on the
+	// client mux. METRICS_ENABLED is respected but defaults to true because
+	// a scrape on a disabled handler just yields 404 — cheap enough to leave
+	// on in every environment.
 	var metricsHandler http.Handler
 	if os.Getenv("METRICS_ENABLED") != "false" {
 		mc := metrics.Default()
@@ -700,7 +717,7 @@ func main() {
 		stopLag := mc.Start(15 * time.Second)
 		defer stopLag()
 		metricsHandler = mc.Handler()
-		operatorMux.Handle("/metrics", metricsHandler)
+		mountOperatorMetrics(operatorMux, metricsHandler, cfg)
 	}
 
 	// Host mux dispatches by Host header. In dev (ENV=development) an

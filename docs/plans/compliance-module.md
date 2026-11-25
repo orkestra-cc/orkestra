@@ -34,14 +34,20 @@ ADR-0006 removed the compliance addon but left the `iface.PIIProducer` producer 
 
 *All of the above: `go build ./...`, `go vet`, and the compliance package tests pass.*
 
-## Phase 5 — grafts (shipped, except export→blob)
+## Phase 5 — grafts (shipped)
 
 Shipped — `go build ./...` / `go vet` / package tests green. New files under `internal/core/compliance/`:
 - ✅ **Legal hold** — `models/legal_hold.go`, `repository/legal_hold_repo.go`, `services/legal_hold.go`, `handlers/legal_hold_handler.go`. Collection `compliance_legal_holds` (`(userUuid,active)` index). `DSRService.Erase` checks `IsHeld(userUUID)` (via `SetLegalHoldChecker`) → `ErrLegalHoldActive` → `409`. Place/release admin routes behind `system.compliance.legalhold.manage` + `RequireStepUp`.
 - ✅ **Retention auto-cleanup** — `services/retention.go`; module implements `Startable`/`Stoppable` (24h `time.Ticker`). Reaps anonymized tombstones (`operator_users`/`client_users` `deletedAt < now - retention_years`) by hard-erasing through the DSR pipeline (so the legal-hold gate applies). Config: `retention_years` (5), `auto_cleanup_enabled` (**false**). Dry-run preview `GET /v1/admin/compliance/retention/preview`.
 - ✅ **Erasure-request workflow** — `models/erasure_request.go` + repo + service + handler. Collection `compliance_erasure_requests`. Client lodges `POST /v1/me/dsr/erasure-request`; operator lists (`GET /v1/admin/compliance/erasure-requests`) and executes/rejects (`…/{id}/execute|reject`, choosing `EraseMode`) behind `system.compliance.dsr.manage` + `RequireStepUp`.
 - ✅ **Config schema** additions: `auto_cleanup_enabled`, `retention_years`, `export_retention_days`, `soc2_enabled`.
-- ⏸ **Export → blob — deferred.** The inline synchronous export (`POST /v1/me/dsr/export`) already satisfies right-of-access (Art. 15) — it returns the full bundle. Blob+TTL is an optimization for large payloads. Blocked on a seam gap: `blob.Store` exposes only client-driven `PresignPut` (no server-side `Put`), so a server-assembled bundle can't be written without either extending the interface or doing a presigned-PUT-then-HTTP-PUT from the backend. Tracked as a follow-up; `export_retention_days` config is already in place for when it lands.
+- ✅ **Export → blob** — shipped with the admin-side DSR (ADR-0009 D7): operator export on behalf of the subject stored in the `dsr-exports` bucket for `export_retention_days`, 5-minute download links, hourly cleanup job and erasure of stored exports. The inline `POST /v1/me/dsr/export` stays for self-service.
+
+### Remaining follow-ups
+- Data subjects that are not users (people without an account).
+- Module-declared retention classes and compliance statistics.
+- Notifications for legal-hold review dates and expiry.
+- Per-subject crypto-shred (KMS is per tenant today).
 
 ## Planned (phase 6 — frontend + docs)
 - `frontend-admin/src/pages/admin/compliance/` (audit events, DSR, legal holds, retention preview; SOC2 page when enabled) + `store/api/complianceApi.ts` + routes. Nav is backend-driven.

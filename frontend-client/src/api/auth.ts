@@ -474,7 +474,8 @@ export { browserNavigation };
 
 // initiateOAuthLogin starts a web OAuth login: POST {provider} to
 // /v1/auth/client/oauth/login — credentials:'include' is load-bearing,
-// the response sets the HttpOnly `orkestra_oauth_state` cookie the relay
+// the response sets the HttpOnly state cookie (`orkestra_oauth_state` unless
+// COOKIE_NAME_PREFIX renames it) the relay
 // endpoint later REQUIRES — then stashes the validated `next` target and
 // leaves for the IdP's authorization URL. Nothing about the destination
 // is sent: the backend redirects to the configured tier SPA. Errors carry

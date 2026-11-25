@@ -1,4 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
+import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useLocation } from 'react-router';
+import { http, HttpResponse } from 'msw';
+import { server } from 'test/server';
 import { renderWithProviders } from 'test/render';
 import NineDotMenu from './NineDotMenu';
 
@@ -43,6 +48,35 @@ const tenantState = (impersonating: boolean) => ({
 });
 
 describe('NineDotMenu', () => {
+  it('opens and closes without changing the current path, query or hash', async () => {
+    server.use(
+      http.get('*/v1/admin/tenants', () => HttpResponse.json({ tenants: [] }))
+    );
+    const Location = () => {
+      const { pathname, search, hash } = useLocation();
+      return <output data-testid="location">{pathname + search + hash}</output>;
+    };
+    const initialUrl = '/workspace?run=example&tab=history#section';
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <NineDotMenu />
+        <Location />
+      </>,
+      {
+        preloadedState: { tenant: tenantState(false) },
+        routerEntries: [initialUrl]
+      }
+    );
+    const toggle = screen.getByTitle('Workspaces');
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('location')).toHaveTextContent(initialUrl);
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('location')).toHaveTextContent(initialUrl);
+  });
+
   it('fills the dots with an existing theme token while impersonating', () => {
     const { container } = renderWithProviders(<NineDotMenu />, {
       preloadedState: { tenant: tenantState(true) }

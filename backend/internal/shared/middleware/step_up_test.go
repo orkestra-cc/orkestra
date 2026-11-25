@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -350,6 +351,65 @@ func TestRequireStepUp_ReauthAllowedKeepsPasswordConfirm(t *testing.T) {
 	}
 }
 
+// runStepUpWithPassword is the no-factor branch with a password-set lookup
+// wired: hasPassword/pwErr are what the lookup answers.
+func runStepUpWithPassword(t *testing.T, hasPassword bool, pwErr error) (bool, int, map[string]any) {
+	t.Helper()
+	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
+	m.SetMFAEnrollmentLookup(func(_ context.Context, _, _ string) (bool, error) { return false, nil })
+	m.SetStepUpPolicy(&fakeStepUpPolicy{})
+	var gotAudience, gotUser string
+	m.SetPasswordSetLookup(func(_ context.Context, audience, userUUID string) (bool, error) {
+		gotAudience, gotUser = audience, userUUID
+		return hasPassword, pwErr
+	})
+	claims := &authModels.JWTClaims{UserUUID: "u-1", Audience: "operator", AMR: []string{"oauth"}}
+	called, status, body := runStepUpThrough(t, m, claims)
+	if gotAudience != "operator" || gotUser != "u-1" {
+		t.Fatalf("lookup asked for %q/%q, want operator/u-1", gotAudience, gotUser)
+	}
+	return called, status, body
+}
+
+// An OAuth-only account has no password to reconfirm: offering the
+// password modal would be a dead end, so the answer is "enroll a factor",
+// the same envelope the gate gives when the password method is disabled.
+func TestRequireStepUp_NoFactorNoPasswordBecomesEnrollmentRequired(t *testing.T) {
+	called, status, body := runStepUpWithPassword(t, false, nil)
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusForbidden || body["code"] != "mfa_enrollment_required" {
+		t.Fatalf("want 403 mfa_enrollment_required, got %d %v", status, body["code"])
+	}
+	if detail, _ := body["detail"].(string); !strings.Contains(detail, "no password") {
+		t.Fatalf("detail = %q, want the no-password reason", detail)
+	}
+}
+
+func TestRequireStepUp_NoFactorWithPasswordKeepsPasswordConfirm(t *testing.T) {
+	called, status, body := runStepUpWithPassword(t, true, nil)
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusUnauthorized || body["code"] != "password_confirm_required" {
+		t.Fatalf("want 401 password_confirm_required, got %d %v", status, body["code"])
+	}
+}
+
+// A failed lookup keeps today's answer: the reconfirm endpoint still
+// verifies the password, so offering it never weakens the gate, and a
+// transient outage must not send a password user to enroll a factor.
+func TestRequireStepUp_PasswordLookupErrorKeepsPasswordConfirm(t *testing.T) {
+	called, status, body := runStepUpWithPassword(t, false, errors.New("mongo down"))
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusUnauthorized || body["code"] != "password_confirm_required" {
+		t.Fatalf("want 401 password_confirm_required, got %d %v", status, body["code"])
+	}
+}
+
 // runRequireMFA wires a minimal AuthMiddleware, optionally sets a step-up
 // policy (so RequireMFA can consult the master switch), seeds the request
 // with claims, and invokes RequireMFA(). Returns (downstreamRan, status, body).
@@ -561,6 +621,24 @@ func TestRequireEnrolmentProof_NoFactorFreshAuthTimePasses(t *testing.T) {
 	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+// A PIN session's fresh auth_time is a sign-in with a weak secret and
+// must never let the caller add a factor.
+func TestRequireEnrolmentProof_NoFactorFreshPINSessionIsReauth(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{authModels.AMRPIN}, AuthTime: time.Now().Add(-time.Minute).Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "reauthentication_required")
+}
+
+// A PIN session is never step-up: no second factor, no last_otp_at.
+func TestRequireStepUp_PINSessionIsRefused(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{authModels.AMRPIN}, AuthTime: time.Now().Unix()}
+	if called, status, _ := runStepUp(t, 5*time.Minute, claims); called {
+		t.Fatalf("a PIN session passed RequireStepUp (status %d)", status)
 	}
 }
 

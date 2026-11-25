@@ -130,6 +130,29 @@ type NotificationService struct {
 	// through. It does not — see the fail-closed branch there. Transactional
 	// sends never touch this field regardless of whether it is wired.
 	optouts repository.MarketingOptoutRepository
+
+	// suppressions is the email suppression list, checked before EVERY email
+	// (transactional included) and by SendTest. nil until SetSuppressions
+	// wires it; module.go always does, and TestInit_WiresTheSuppressionSeam
+	// pins that. Unlike optouts a nil seam is "no check", not a refusal: a
+	// test-built service sends, and an unwired production service would not
+	// silently stop password resets for everyone.
+	suppressions repository.SuppressionRepository
+
+	// push is nil until SetPush wires it; SendPush then reports
+	// ErrPushUnavailable.
+	push *PushService
+}
+
+// SetPush wires the push channel (iface.PushSender).
+func (s *NotificationService) SetPush(p *PushService) { s.push = p }
+
+// SendPush implements iface.PushSender by delegating to the push service.
+func (s *NotificationService) SendPush(ctx context.Context, req iface.PushRequest) (*iface.PushResult, error) {
+	if s.push == nil {
+		return nil, fmt.Errorf("%w: push service not wired", iface.ErrPushUnavailable)
+	}
+	return s.push.SendPush(ctx, req)
 }
 
 func NewNotificationService(
@@ -170,6 +193,28 @@ func NewNotificationService(
 // are unaffected either way.
 func (s *NotificationService) SetOptouts(o repository.MarketingOptoutRepository) {
 	s.optouts = o
+}
+
+// SetSuppressions wires the email suppression list post-construction.
+func (s *NotificationService) SetSuppressions(r repository.SuppressionRepository) {
+	s.suppressions = r
+}
+
+// Suppressions exposes the wired suppression list (nil when unwired).
+func (s *NotificationService) Suppressions() repository.SuppressionRepository { return s.suppressions }
+
+// checkSuppressed reports whether address is on the email suppression list.
+// An unreadable list is ErrSuppressionLookupUnavailable: the caller refuses
+// the send rather than risk mailing an address someone marked invalid.
+func (s *NotificationService) checkSuppressed(ctx context.Context, address string) (bool, error) {
+	if s.suppressions == nil {
+		return false, nil
+	}
+	suppressed, err := s.suppressions.IsSuppressed(ctx, address)
+	if err != nil {
+		return false, ErrSuppressionLookupUnavailable
+	}
+	return suppressed, nil
 }
 
 // IsConfigured keeps its pre-ADR-0019 meaning: the default ("*") profile
@@ -399,6 +444,21 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		Subject:           in.Subject,
 		IdempotencyKey:    in.IdempotencyKey,
 		CreatedAt:         time.Now(),
+	}
+
+	// Email suppression list: an address on it receives nothing, whatever
+	// the type — transactional mail (verification, password reset, security
+	// notices) included. Checked first, so the row names this reason rather
+	// than a preference or opt-out. Fail-closed when the list is unreadable.
+	suppressed, err := s.checkSuppressed(ctx, in.Recipient.Address)
+	if err != nil {
+		return s.failSend(ctx, logDoc, SenderProfile{}, err)
+	}
+	if suppressed {
+		logDoc.Status = models.StatusSuppressed
+		logDoc.Error = iface.SuppressedAddressInvalid
+		_ = s.logRepo.Create(ctx, logDoc)
+		return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status, Error: logDoc.Error}, nil
 	}
 
 	// Preference check (marketing only).
@@ -635,6 +695,14 @@ var ErrSendFailed = errors.New("notification: send failed")
 // the send was refused rather than risked.
 var ErrOptoutLookupUnavailable = errors.New("notification: marketing opt-out lookup unavailable")
 
+// ErrSuppressionLookupUnavailable: the email suppression list could not be
+// read, so the send was refused rather than risked.
+var ErrSuppressionLookupUnavailable = errors.New("notification: suppression list lookup unavailable")
+
+// ErrAddressSuppressed: SendTest was asked to mail an address on the email
+// suppression list.
+var ErrAddressSuppressed = errors.New("notification: address is on the suppression list")
+
 // ErrUnsubscribeTokenUnavailable: a marketing send needed a one-click
 // unsubscribe token (for the List-Unsubscribe header) and IssueToken could
 // not mint one. Distinct from iface.ErrSenderInvalid: the sender profile
@@ -648,19 +716,21 @@ var ErrUnsubscribeTokenUnavailable = errors.New("notification: unsubscribe token
 // on the wire, or there is no public API base URL to point them at — while
 // require_one_click_unsubscribe is on.
 //
-// It WRAPS iface.ErrSenderInvalid rather than standing beside it, for two
-// reasons at once: every consumer outside this module matches the iface
-// sentinel it already knows (and newDispatchError therefore records
-// iface.ErrSenderInvalid as the DispatchError's sentinel, unchanged), while
-// describeSendError still gives this cause a bounded reason of its own so the
-// delivery log does not read like a malformed sender slug.
+// It IS iface.ErrOneClickUnsubscribeUnavailable, which wraps
+// iface.ErrSenderInvalid rather than standing beside it: newDispatchError
+// records the one-click sentinel (listed first in trustedSentinels) and
+// DispatchError.Is follows its chain, so every consumer that only knows the
+// older sentinel keeps refusing the send while one that matches the new one
+// first can name the missing setting; describeSendError gives this cause a
+// bounded reason of its own so the delivery log does not read like a
+// malformed sender slug.
 //
 // The wrap order puts THIS message first and the sentinel's second. %w
 // renders the wrapped error's text where the verb sits, so the other order
 // made preflightFail produce "sender slug malformed: one-click unsubscribe
 // cannot be guaranteed: ..." — leading a reader with a malformed slug that
 // does not exist. errors.Is is unaffected by the order.
-var ErrOneClickUnsubscribeUnavailable = fmt.Errorf("one-click unsubscribe cannot be guaranteed for this marketing send: %w", iface.ErrSenderInvalid)
+var ErrOneClickUnsubscribeUnavailable = iface.ErrOneClickUnsubscribeUnavailable
 
 // oneClickPolicy answers what the requirement is RIGHT NOW. It prefers the
 // configured source — see Options.OneClickSource for why a value captured at
@@ -689,6 +759,9 @@ func (s *NotificationService) oneClickPolicy(ctx context.Context) OneClickPolicy
 // error through mapBySlugErr before failing, and both of that mapper's
 // outputs must be trusted here or the mapping is invisible to errors.Is.
 var trustedSentinels = []error{
+	// Before iface.ErrSenderInvalid, which it wraps: the first match is the
+	// one recorded, and DispatchError.Is still answers for the wrapped one.
+	iface.ErrOneClickUnsubscribeUnavailable,
 	ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured,
 	iface.ErrSenderInvalid, iface.ErrSenderNotEligible, iface.ErrSenderNotFound, iface.ErrSenderUnavailable,
 	ErrOptoutLookupUnavailable, ErrUnsubscribeTokenUnavailable,
@@ -708,7 +781,11 @@ type DispatchError struct {
 
 func (e *DispatchError) Error() string { return e.Reason }
 
-func (e *DispatchError) Is(target error) bool { return target == ErrSendFailed || e.sentinel == target }
+// Is follows the sentinel's own chain, so the one-click sentinel also
+// answers for the iface.ErrSenderInvalid it wraps.
+func (e *DispatchError) Is(target error) bool {
+	return target == ErrSendFailed || (e.sentinel != nil && errors.Is(e.sentinel, target))
+}
 
 func newDispatchError(profile SenderProfile, err error) *DispatchError {
 	sentinel := ErrSendFailed
@@ -731,8 +808,11 @@ func (s *NotificationService) failSend(ctx context.Context, logDoc *models.Notif
 	logDoc.Error = de.Reason
 	// The classified cause rides beside the bounded Error so the idempotent
 	// replay can return it (NotificationResult.FailureReason).
-	if errors.Is(err, ErrAttachmentRejected) {
+	switch {
+	case errors.Is(err, ErrAttachmentRejected):
 		logDoc.FailureReason = iface.FailureAttachmentRejected
+	case isTransientSendFailure(err):
+		logDoc.FailureReason = iface.FailureTransient
 	}
 	_ = s.logRepo.Create(ctx, logDoc)
 	s.logger.Warn("notification: send failed",
@@ -1038,11 +1118,20 @@ type TestSendResult struct {
 
 // SendTest sends through the default profile, bypassing preferences,
 // idempotency and the delivery log exactly as the /test endpoint always has.
+// The suppression list is NOT bypassed: an address on it receives no email,
+// a test included (ErrAddressSuppressed).
 func (s *NotificationService) SendTest(ctx context.Context, in TestSendInput) (TestSendResult, error) {
 	var (
 		profile SenderProfile
 		err     error
 	)
+	suppressed, err := s.checkSuppressed(ctx, in.To)
+	if err != nil {
+		return TestSendResult{Diagnostic: "err=suppression_lookup_unavailable"}, err
+	}
+	if suppressed {
+		return TestSendResult{Diagnostic: iface.SuppressedAddressInvalid}, ErrAddressSuppressed
+	}
 	if in.Sender != "" {
 		profile, err = s.resolver.BySlug(ctx, in.Sender)
 	} else {

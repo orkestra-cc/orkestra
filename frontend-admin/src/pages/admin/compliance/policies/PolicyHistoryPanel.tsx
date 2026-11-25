@@ -8,8 +8,8 @@ import {
   useListPolicyVersionsQuery,
   type PolicyVersion
 } from 'store/api/complianceApi';
-import ComplianceEmptyState from '../ComplianceEmptyState';
-import ComplianceTable from '../ComplianceTable';
+import EmptyState from 'components/common/EmptyState';
+import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { formatDateTime } from '../complianceFormat';
 
 // PolicyHistoryPanel lists the immutable versions: author, approver (four
@@ -68,12 +68,12 @@ const PolicyHistoryPanel = ({ policyId }: { policyId: string }) => {
   if (isLoading) return <Spinner animation="border" size="sm" />;
   const items = data?.items ?? [];
   return items.length === 0 ? (
-    <ComplianceEmptyState
+    <EmptyState
       icon={faClockRotateLeft}
       message={t('adminCompliance.history.emptyMessage')}
     />
   ) : (
-    <ComplianceTable
+    <SearchablePagedTable
       data={items}
       columns={columns}
       searchPlaceholder={t('adminCompliance.history.searchPlaceholder')}

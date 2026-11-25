@@ -702,7 +702,7 @@ func (r *refreshTokenRepository) RevokeTokensBySession(ctx context.Context, sess
 // requires the rows to be gone.
 func (r *refreshTokenRepository) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
-	res, err := r.collection.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.collection.DeleteMany(ctx, ByUserFilter(userUUID))
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete refresh tokens by user: %w", err)
 	}

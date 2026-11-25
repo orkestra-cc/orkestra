@@ -19,6 +19,7 @@ import OrkestraLoader from 'components/common/OrkestraLoader';
 import Error401 from 'components/errors/Error401';
 import Error404 from 'components/errors/Error404';
 import Error500 from 'components/errors/Error500';
+import RouteErrorPage from 'components/errors/RouteErrorPage';
 
 import Login from 'components/authentication/Login';
 import Register from 'components/authentication/Register';
@@ -35,6 +36,9 @@ const SOC2EvidencePage = lazy(() => import('pages/admin/compliance/soc2'));
 const CompliancePolicyPage = lazy(
   () => import('pages/admin/compliance/policies')
 );
+const LlmAdminPage = lazy(() => import('pages/admin/llm'));
+const RetrievalAdminPage = lazy(() => import('pages/admin/retrieval'));
+const DeliveryLogPage = lazy(() => import('pages/admin/delivery-log'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
@@ -71,11 +75,7 @@ export function buildCoreRoutes(
   return [
     {
       element: <App />,
-      errorElement: (
-        <ErrorLayout>
-          <Error500 />
-        </ErrorLayout>
-      ),
+      errorElement: <RouteErrorPage />,
       children: [
         {
           path: 'landing',
@@ -126,7 +126,11 @@ export function buildCoreRoutes(
                   element: (
                     <ProtectedRoute
                       requiredPermissions={[
-                        ['super_admin', 'administrator', 'developer']
+                        // Platform roles that hold user.read at global scope
+                        // (authz rule 2b): a manager runs the operators without
+                        // being an administrator. Role names, not `user.read`:
+                        // /authz/me is tenant-scoped and never lists global keys.
+                        ['super_admin', 'administrator', 'developer', 'manager']
                       ]}
                     >
                       <Suspense
@@ -185,6 +189,78 @@ export function buildCoreRoutes(
                         fallback={<OrkestraLoader />}
                       >
                         <CompliancePolicyPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // Delivery log of the notification module (read-only):
+                  // GET /v1/notifications needs notification.log.read.
+                  path: 'delivery-log',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'notification.log.read',
+                          'super_admin',
+                          'administrator',
+                          'developer'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-delivery-log"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <DeliveryLogPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0022 — LLM credentials, models and grants.
+                  path: 'llm',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'llm.admin.read',
+                          'super_admin',
+                          'administrator',
+                          'developer'
+                        ]
+                      ]}
+                    >
+                      <Suspense key="admin-llm" fallback={<OrkestraLoader />}>
+                        <LlmAdminPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0023 — retrieval corpora, indexing and search log.
+                  // The page gates each tab by its own permission, so an
+                  // org owner or admin with retrieval.searchlog.admin and
+                  // no platform role reaches ?tab=search-log directly.
+                  path: 'retrieval',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'retrieval.corpus.read',
+                          'retrieval.tenant.read',
+                          'retrieval.searchlog.admin',
+                          'super_admin',
+                          'administrator',
+                          'developer'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-retrieval"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <RetrievalAdminPage />
                       </Suspense>
                     </ProtectedRoute>
                   )
@@ -408,7 +484,8 @@ export function buildCoreRoutes(
                   element: (
                     <ProtectedRoute
                       requiredPermissions={[
-                        ['super_admin', 'administrator', 'developer']
+                        // Same audience as /admin/users (user.read at global scope).
+                        ['super_admin', 'administrator', 'developer', 'manager']
                       ]}
                     >
                       <Suspense

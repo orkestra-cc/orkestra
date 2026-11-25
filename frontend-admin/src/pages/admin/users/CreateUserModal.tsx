@@ -32,7 +32,6 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
     email: '',
     username: '',
     phone: '',
-    pin: '',
     role: 'operator'
   });
 
@@ -73,7 +72,6 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
         email: '',
         username: '',
         phone: '',
-        pin: '',
         role: 'operator'
       });
       onHide();
@@ -89,7 +87,6 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
       email: '',
       username: '',
       phone: '',
-      pin: '',
       role: 'operator'
     });
     setError('');
@@ -169,22 +166,6 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
             />
             <Form.Text className="text-muted">
               {t('adminUsers.createModal.helpUsername')}
-            </Form.Text>
-          </Form.Group>
-
-          <Form.Group className="mb-3">
-            <Form.Label>{t('adminUsers.createModal.labelPin')}</Form.Label>
-            <Form.Control
-              type="text"
-              name="pin"
-              value={formData.pin}
-              onChange={handleChange}
-              placeholder={t('adminUsers.createModal.placeholderPin')}
-              pattern="\d{5}"
-              maxLength={5}
-            />
-            <Form.Text className="text-muted">
-              {t('adminUsers.createModal.helpPin')}
             </Form.Text>
           </Form.Group>
 

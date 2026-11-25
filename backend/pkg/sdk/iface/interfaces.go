@@ -12,6 +12,7 @@ package iface
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -202,6 +203,52 @@ type InitialPasswordSetter interface {
 
 var ErrPasswordAlreadySet = errors.New("password already set")
 
+// PINCredentialStore is the storage half of the PIN sign-in method,
+// resolved by the auth module from the tier's user provider by type
+// assertion (the InitialPasswordSetter precedent: additive, so a fork's
+// UserProvider that predates it still compiles; auth then reports the PIN
+// method as unavailable). Every method addresses one tier's collection.
+type PINCredentialStore interface {
+	// GetUserForPINAuth returns the raw user (hashes and lockout fields
+	// included) whose username is exactly username, excluding soft-deleted
+	// rows. ErrUserNotFound when none matches, ErrUsernameAmbiguous when
+	// more than one does: usernames are not unique in the user module, and
+	// a PIN must never authenticate as an arbitrary one of several users.
+	GetUserForPINAuth(ctx context.Context, username string) (*User, error)
+	// CountUsersByUsername counts live (not soft-deleted) users with
+	// exactly this username. Used before a PIN is set.
+	CountUsersByUsername(ctx context.Context, username string) (int64, error)
+	// SetPINHash stores a new argon2id PIN hash, stamps PINUpdatedAt and
+	// clears the PIN failure counter and lock.
+	SetPINHash(ctx context.Context, userUUID, hash string) error
+	// ClearPIN removes the PIN hash, its timestamp, counter and lock. A
+	// non-empty expectedHash makes it conditional on the stored hash still
+	// being that one (ErrPINChanged otherwise): a failure path must never
+	// remove a PIN set after the attempt it judged. "" clears whatever is
+	// stored.
+	ClearPIN(ctx context.Context, userUUID, expectedHash string) error
+	// RecordFailedPIN atomically increments PINFailedCount and returns the
+	// NEW value, so concurrent attempts each see a distinct count: the PIN
+	// service reserves an attempt with it BEFORE verifying, which is what
+	// bounds a parallel burst. ErrUserNotFound for a missing or deleted row.
+	RecordFailedPIN(ctx context.Context, userUUID string) (int, error)
+	// LockPIN sets PINLockedUntil while the stored hash is still
+	// expectedHash, the one the failed attempt was verified against;
+	// ErrPINChanged when it is not, so an old attempt never locks a newer
+	// PIN.
+	LockPIN(ctx context.Context, userUUID, expectedHash string, until time.Time) error
+	// ClearFailedPINs resets the PIN failure counter and lock.
+	ClearFailedPINs(ctx context.Context, userUUID string) error
+}
+
+// ErrUsernameAmbiguous reports that more than one live user of a tier
+// carries the same username, so a username-keyed sign-in cannot pick one.
+var ErrUsernameAmbiguous = errors.New("username matches more than one user")
+
+// ErrPINChanged reports that a conditional PIN write (ClearPIN, LockPIN)
+// found another PIN hash than the one it was bound to.
+var ErrPINChanged = errors.New("pin changed since it was read")
+
 // ---------------------------------------------------------------------------
 // MFAEpochBumper — consumed by: the auth module's MFA service and WebAuthn
 // service, on every credential removal or replacement. Narrow on purpose
@@ -336,6 +383,20 @@ var ErrPasswordLoginDisabled = errors.New("password login disabled for this surf
 // AdminAuthInviter consumers map it with errors.Is.
 var ErrAuthPolicyUnavailable = errors.New("auth policy unavailable")
 
+// ErrRecipientSuppressed reports that an AdminAuthInviter action did not
+// send its email because the user's address is on the email suppression
+// list (iface.EmailSuppressionManager): the notification module would have
+// suppressed it, and an operator must not read that as "sent". The check runs
+// before any token is minted. Only the operator-initiated actions return it;
+// the public forgot-password and resend-verification flows answer the same
+// for every address, so that they never tell who has an account.
+var ErrRecipientSuppressed = errors.New("recipient address is on the email suppression list")
+
+// ErrSuppressionListUnavailable reports that the email suppression list
+// could not be read, so an AdminAuthInviter action could not tell whether its
+// email would go out. It fails closed: nothing is minted or sent.
+var ErrSuppressionListUnavailable = errors.New("email suppression list unavailable")
+
 // ErrUserNotFound is the cross-module "this user does not exist" sentinel.
 //
 // It exists because a consumer outside the user module — auth's refresh path,
@@ -370,38 +431,14 @@ type GraphProvider interface {
 }
 
 // ---------------------------------------------------------------------------
-// AIModelProvider — consumed by: rag, sales
-// Union of the methods both modules need for embedding + LLM access.
-// ---------------------------------------------------------------------------
-
-type AIModelProvider interface {
-	GetDefaultEmbeddingProvider(ctx context.Context) (EmbeddingProvider, error)
-	GetDefaultLLMProvider(ctx context.Context) (LLMProvider, error)
-	GetLLMProvider(ctx context.Context, uuid string) (LLMProvider, error)
-	GetEmbeddingProvider(ctx context.Context, uuid string) (EmbeddingProvider, error)
-	// GetDefaultLLMConfig returns the raw configuration of the default LLM
-	// model (provider name, model name, API key, base URL). Consumed by
-	// modules that need the underlying credentials, e.g. the agents
-	// module which passes them to the Hindsight container as env vars.
-	// Returns an error if no model is marked isDefault or if the module
-	// is disabled.
-	GetDefaultLLMConfig(ctx context.Context) (LLMConfig, error)
-}
-
-// LLMConfig is a serialization-friendly projection of an aimodels record
-// containing the fields needed to configure an external LLM client.
-type LLMConfig struct {
-	Provider string // "openai" | "anthropic" | "gemini" | "ollama"
-	Model    string // e.g. "gpt-4o-mini", "claude-3-5-sonnet"
-	APIKey   string // plaintext — callers must not log this
-	BaseURL  string // optional override for self-hosted / compat endpoints
-}
-
-// ---------------------------------------------------------------------------
 // RAGQueryProvider — consumed by: agents
 // The single query method the agents module wraps in its own RAGBridge.
 // ---------------------------------------------------------------------------
 
+// RAGQueryProvider is the legacy question-answering contract the agents
+// module wraps in its own RAGBridge.
+//
+// Deprecated: use iface.RetrievalSearch, served by the core retrieval module under module.ServiceRetrieval (ADR-0023 D16). Removed in a later release.
 type RAGQueryProvider interface {
 	Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*RAGQueryResponse, error)
 }
@@ -433,6 +470,17 @@ type Attachment struct {
 // attachments (size, type, provider rejection). It is persisted on the
 // message log and returned again by an idempotent replay.
 const FailureAttachmentRejected = "attachment_rejected"
+
+// FailureTransient classifies a send that provably did NOT reach the
+// provider's queue and is expected to clear on its own: an HTTP 429 or 503
+// from the vendor itself, an SMTP 4xx temporary rejection, a connection that
+// was never established, or a store the send depends on (opt-out list,
+// unsubscribe tokens, sender config) briefly unreadable. A caller may retry
+// it under a NEW idempotency key — the failed attempt's key replays the
+// failure. Ambiguous outcomes are deliberately not transient: after a
+// timeout, an HTTP 500 or a gateway 502/504 the provider may have accepted
+// the message, and a retry could deliver it twice.
+const FailureTransient = "transient"
 
 type NotificationRequest struct {
 	Channel        string
@@ -525,6 +573,15 @@ var (
 	// 8058 one-click unsubscribe, which the notification module refuses
 	// rather than delivers, at save time and again at dispatch.
 	ErrSenderInvalid = errors.New("sender slug malformed")
+	// ErrOneClickUnsubscribeUnavailable: a marketing send would go out with
+	// no RFC 8058 one-click unsubscribe while require_one_click_unsubscribe
+	// is on — there is no usable https public API base URL to point the
+	// headers at, or the sender's driver cannot put them on the wire. It
+	// WRAPS ErrSenderInvalid, so a consumer that only knows that sentinel
+	// keeps refusing the send; a consumer that matches this one first can
+	// tell the operator what is actually missing instead of reporting a
+	// malformed slug.
+	ErrOneClickUnsubscribeUnavailable = fmt.Errorf("one-click unsubscribe cannot be guaranteed for this marketing send: %w", ErrSenderInvalid)
 	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
 	ErrSenderNotFound = errors.New("sender profile not found")
 	// ErrSenderNotEligible: the profile exists but its allowed_types does not
@@ -695,6 +752,7 @@ var ErrTenantNotFound = errors.New("tenant not found")
 type TenantProvider interface {
 	GetTenant(ctx context.Context, tenantUUID string) (*Tenant, error)
 	ListUserMemberships(ctx context.Context, userUUID string) ([]TenantMembership, error)
+	// IsMember reports a current membership: one past its expiry does not count.
 	IsMember(ctx context.Context, userUUID, tenantUUID string) (bool, error)
 	// ActivateTenant transitions a tenant from `provisioning` to `active`.
 	// Idempotent: calling it on an already-active tenant is a no-op on the
@@ -1007,6 +1065,21 @@ type AuthzCacheInvalidator interface {
 	// neither. A single bump is sufficient only when the caller is not
 	// itself the writer.
 	InvalidateUserPermissions(ctx context.Context, userUUID string) error
+}
+
+// ---------------------------------------------------------------------------
+// AuthzRoleLister — consumed by: retrieval
+//
+// Narrow capability of the authz service, resolved with module.GetTyped
+// against ServiceAuthzProvider (no method is added to AuthzProvider).
+// Retrieval uses it to expand a user's roles into role:<id> principals
+// (ADR-0023 D10). Platform roles get no bypass.
+// ---------------------------------------------------------------------------
+
+type AuthzRoleLister interface {
+	// ActiveRoleIDs lists the UUIDs of active roles bound to the user in the
+	// tenant through non-expired bindings. tenantID "" is refused.
+	ActiveRoleIDs(ctx context.Context, userUUID, tenantID string) ([]string, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,9 +1469,9 @@ type ClientSelfDeletionGate interface {
 // ---------------------------------------------------------------------------
 
 // PersonalDataBundle is the exported payload returned by the DSR
-// pipeline. Keys are producer subject names (stable identifiers like
-// "user", "auth"); values are each producer's serializable personal-data
-// projection. JSON-round-trippable so the bundle can be written to a
+// pipeline. Keys are producer keys ("user", "auth.operator", "auth.client",
+// …; see PIIProducerKeyer) plus "metadata"; values are each producer's
+// serializable personal-data projection. JSON-round-trippable so the bundle can be written to a
 // file or streamed to the DSR requester.
 type PersonalDataBundle = map[string]any
 
@@ -1427,15 +1500,22 @@ type PurgeResult struct {
 	RowsDeleted    int      `json:"rowsDeleted"`
 	RowsAnonymized int      `json:"rowsAnonymized"`
 	Collections    []string `json:"collections,omitempty"`
+	// Pending is true when the producer accepted the erasure but has not
+	// finished it (ADR-0023 D12). The request stays incomplete and the
+	// producer is called again until it reports Pending false.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // PIIProducer is implemented by modules that hold personal data tied to
 // a user UUID. The compliance module's DSR service enumerates registered
 // producers.
 type PIIProducer interface {
-	// Subject is the stable identifier used as the bundle-key for this
-	// producer's data. Must not change after first use — DSR audit rows
-	// reference it by value.
+	// Subject names the kind of data the producer holds; DSR audit rows
+	// carry it by value, so it must not change after first use. It is not
+	// the export bundle key: compliance keys the bundle by the producer key
+	// (PIIProducerKeyer, else Subject), so two producers sharing a Subject
+	// are both exported — a right-of-access answer (GDPR Art. 15) must be
+	// complete.
 	Subject() string
 
 	// ExportPersonalData returns a JSON-serializable projection of every
@@ -1449,7 +1529,63 @@ type PIIProducer interface {
 	// per the requested EraseMode (hard-delete or anonymize). GDPR
 	// right-to-erasure semantics apply. Returns a summary so the DSR audit
 	// log can record what was wiped without re-reading the rows.
+	//
+	// Idempotent: compliance calls it again for the same user and mode until
+	// the producer reports its purge done, and a call after a completed purge
+	// must succeed and report what it found. Return Pending true with a nil
+	// error when the erasure is accepted but not finished (the request stays
+	// incomplete and the producer is called again). On failure return the
+	// error together with whatever was erased before it; compliance keeps
+	// those counts.
 	PurgePersonalData(ctx context.Context, userUUID string, mode EraseMode) (PurgeResult, error)
+}
+
+// PIIProducerKeyer is an optional companion to PIIProducer, resolved by a
+// type assertion on the registered producer. A producer registered more than
+// once under the same Subject (one per tier, say) implements it so compliance
+// can track each instance's erasure on its own. The key must be unique in the
+// registry and stable across restarts: incomplete erasure requests store it.
+// Without it compliance keys the producer by Subject, suffixing later
+// duplicates "#2", "#3" in registration order. The key is also the producer's
+// key in the export bundle.
+type PIIProducerKeyer interface {
+	ProducerKey() string
+}
+
+// PersonalDataCount is what a producer holds for a subject, counted with the
+// same filters its PurgePersonalData uses. Rows is the number of records; the
+// counts carry no personal data. Collections names the stores that hold them
+// (machine labels, no personal data).
+type PersonalDataCount struct {
+	Rows        int      `json:"rows"`
+	Collections []string `json:"collections,omitempty"`
+}
+
+// PIIProducerCounter is an optional companion to PIIProducer, resolved by a
+// type assertion on the registered producer. It lets compliance show an admin
+// what a subject's erasure would touch before anything is deleted. The count
+// must mirror the filters PurgePersonalData uses: a count that includes rows
+// the purge would skip (or the reverse) misleads the operator who reviews it.
+type PIIProducerCounter interface {
+	CountPersonalData(ctx context.Context, userUUID string) (PersonalDataCount, error)
+}
+
+// RetentionObligation is data a producer must keep until Until. Reason is a
+// short machine label without personal data (for example "fiscal_records").
+type RetentionObligation struct {
+	Until  time.Time `json:"until"`
+	Reason string    `json:"reason"`
+}
+
+// PIIRetentionReporter is an optional companion to PIIProducer, resolved by a
+// type assertion on the registered producer. Compliance consults it before a
+// hard delete, so a producer that must keep records for a legal period reports
+// them here. A reporter error makes the hard-delete gate fail closed: compliance
+// refuses the hard delete rather than guessing that no obligation exists.
+// Anonymize is not affected by it.
+type PIIRetentionReporter interface {
+	// RetainUntil returns nil when the producer has no obligation for the subject.
+	RetainUntil(ctx context.Context, userUUID string) (*RetentionObligation, error)
 }
 
 // PIIProducerRegistry is the boot-time catalog of registered producers.
@@ -1512,6 +1648,13 @@ var ErrKMSKeyNotFound = newStringError("kms: key not found")
 // wrapped DEK has been scheduled for deletion (crypto-shred). Decrypt
 // returns this when called against a shredded key.
 var ErrKMSKeyDeleted = newStringError("kms: key scheduled for deletion")
+
+// ErrKMSCiphertextInvalid signals that Decrypt found the ciphertext
+// unopenable under the key: truncated, tampered with, or sealed with a
+// different key. It is a property of the stored data, distinct from a
+// shredded key (ErrKMSKeyDeleted) and from an infrastructure failure,
+// which implementations return unclassified.
+var ErrKMSCiphertextInvalid = newStringError("kms: ciphertext cannot be opened")
 
 // KMSProvider manages per-tenant envelope-encryption keys. Each
 // tenant's data is encrypted with a tenant-scoped Data Encryption Key
@@ -1627,6 +1770,124 @@ type MarketingUnsubscribeSink interface {
 type MarketingUnsubscribeSinkSetter interface {
 	SetMarketingUnsubscribeSink(MarketingUnsubscribeSink)
 }
+
+// MarketingOptoutInfo is what LookupMarketingOptout reveals about a durable
+// marketing opt-out. It carries no address and no token.
+type MarketingOptoutInfo struct {
+	// At is the latest opt-out instant (the first one is not exposed). Pass
+	// this exact value back as expectAt to LiftMarketingOptout; Mongo stores
+	// milliseconds, so do not recompute or round it.
+	At            time.Time
+	TenantID      string // attribution, "" when unknown or when writers disagreed
+	SourceContext string // producer context of the unsubscribe that created it, "" when unknown
+}
+
+// OptoutEvidence is the audit trail a caller supplies when it lifts or
+// records an opt-out.
+type OptoutEvidence struct {
+	TenantID  string // attribution stamped on a recorded opt-out, and on the audit event
+	Source    string // e.g. "crm.consent_request"
+	Reference string // e.g. a response uuid
+}
+
+// MarketingOptoutManager is the audited seam over the durable marketing
+// opt-out, for a consumer that collects consent itself. Resolved lazily via
+// module.ServiceMarketingOptoutManager. It never touches the suppression
+// list and never fires the MarketingUnsubscribeSink.
+type MarketingOptoutManager interface {
+	// LookupMarketingOptout returns (nil, nil) when the address has none.
+	LookupMarketingOptout(ctx context.Context, address string) (*MarketingOptoutInfo, error)
+	// LiftMarketingOptout deletes the opt-out only if it has not been recorded
+	// again since the caller looked (its latest instant still equals expectAt,
+	// the At that Lookup returned) and reports whether it did.
+	LiftMarketingOptout(ctx context.Context, address string, expectAt time.Time, ev OptoutEvidence) (bool, error)
+	// RecordMarketingOptout records an opt-out the caller collected. On an
+	// address that already has one it keeps the first instant but refreshes the
+	// latest instant (so an in-flight lift loses), and keeps the attribution
+	// only if it agrees with the stored one (otherwise both fields are cleared:
+	// the row becomes unattributable, never relabelled).
+	RecordMarketingOptout(ctx context.Context, address string, ev OptoutEvidence) error
+}
+
+// Reasons an address is on the email suppression list. Wire values: stored
+// on the row and shown to operators, never rename one.
+const (
+	// SuppressionReasonHardBounce: the mailbox does not exist or refuses
+	// mail permanently.
+	SuppressionReasonHardBounce = "hard_bounce"
+	// SuppressionReasonManual: an operator marked the address invalid for
+	// another reason.
+	SuppressionReasonManual = "manual"
+)
+
+// SuppressedAddressInvalid is NotificationResult.Error on a "suppressed"
+// result when the recipient is on the email suppression list. Every other
+// suppressed result (opt-out, preference) carries no Error.
+const SuppressedAddressInvalid = "address_invalid"
+
+// EmailSuppression is one row of the email suppression list.
+type EmailSuppression struct {
+	Address   string
+	Reason    string
+	At        time.Time
+	Source    string
+	ActorUUID string
+	TenantID  string
+}
+
+// SuppressionEvidence attributes a change to the suppression list. Source
+// names the path (e.g. "operator.manual", "operator.import"); ActorUUID and TenantID are
+// read from ctx when empty. None of them scopes the row: the list is
+// platform-wide.
+type SuppressionEvidence struct {
+	Reason    string // only for Suppress; empty means SuppressionReasonManual
+	Source    string
+	ActorUUID string
+	TenantID  string
+}
+
+// EmailSuppressionManager is the audited seam over the email suppression list:
+// an address on it receives no email at all, transactional included
+// (verification, password reset, security notices). Resolved lazily via
+// module.ServiceEmailSuppressionManager. Addresses are compared trimmed and
+// lowercased; a display-name form ("Name <a@b>") is reduced to its address.
+// Each call takes at most MaxSuppressionBatch addresses.
+type EmailSuppressionManager interface {
+	// LookupSuppressions returns the rows of the given addresses that are
+	// suppressed, keyed by normalized address.
+	LookupSuppressions(ctx context.Context, addresses []string) (map[string]EmailSuppression, error)
+	// SuppressAddresses adds the addresses that are not already suppressed and
+	// returns them (normalized). An existing row keeps its reason and date.
+	SuppressAddresses(ctx context.Context, addresses []string, ev SuppressionEvidence) ([]string, error)
+	// LiftSuppressions removes the addresses' rows and returns the addresses
+	// that had one (normalized).
+	LiftSuppressions(ctx context.Context, addresses []string, ev SuppressionEvidence) ([]string, error)
+	// ListSuppressions pages through the whole list in address order
+	// (keyset: pass the last address of a page as AfterAddress). It is the
+	// one read that is not keyed by address, so a consumer that shows the
+	// list decides itself what each tenant may see: the rows are
+	// platform-wide.
+	ListSuppressions(ctx context.Context, q SuppressionListQuery) ([]EmailSuppression, error)
+}
+
+// SuppressionListQuery selects one page of ListSuppressions.
+type SuppressionListQuery struct {
+	// AfterAddress returns only rows whose (normalized) address sorts after
+	// it; empty starts from the first row.
+	AfterAddress string
+	// Limit is the page size, 1..MaxSuppressionBatch; 0 or more than the
+	// bound means MaxSuppressionBatch.
+	Limit int
+	// Contains keeps rows whose address contains it, case-insensitively and
+	// literally (no pattern syntax). Empty keeps every row.
+	Contains string
+	// Reason keeps rows with that reason (SuppressionReason*). Empty keeps
+	// every row.
+	Reason string
+}
+
+// MaxSuppressionBatch bounds the addresses of one EmailSuppressionManager call.
+const MaxSuppressionBatch = 1000
 
 // TemplateView is a read projection of a notification template (campaign preview).
 type TemplateView struct {

@@ -470,6 +470,19 @@ func currentSessionSecurity(ctx context.Context) (*authModels.DeviceInfo, *authM
 
 // --- helpers ---
 
+// expiresInOf reports a freshly minted access token's remaining life in
+// seconds, read from its own exp claim: a re-mint may carry a lifetime
+// other than the configured default (a PIN session's). Falls back to
+// fallback when the token cannot be read back.
+func expiresInOf(jwt services.JWTService, token string, fallback time.Duration) int64 {
+	if claims, err := jwt.ValidateAccessToken(token); err == nil && claims.ExpiresAt > 0 {
+		if d := time.Until(time.Unix(claims.ExpiresAt, 0)); d > 0 {
+			return int64(d.Round(time.Second).Seconds())
+		}
+	}
+	return int64(fallback.Seconds())
+}
+
 func clientIPFromCtx(ctx context.Context) string {
 	if r, ok := ctx.Value("http_request").(*http.Request); ok && r != nil {
 		return utils.GetClientIP(r)

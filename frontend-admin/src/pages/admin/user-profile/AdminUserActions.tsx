@@ -12,6 +12,9 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Trans, useTranslation } from 'react-i18next';
 import { User, useUpdateUserMutation } from 'store/api/userApi';
 import { toast } from 'react-toastify';
+import { Link } from 'react-router';
+import { faIdCard } from '@fortawesome/free-solid-svg-icons';
+import { useAuth } from 'hooks/auth/useAuthRTK';
 
 const ROLE_VALUES = [
   'guest',
@@ -28,6 +31,7 @@ interface AdminUserActionsProps {
 
 const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const [updateUser, { isLoading: isUpdating }] = useUpdateUserMutation();
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -109,6 +113,18 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
               <FontAwesomeIcon icon="users" className="me-2" />
               {t('adminUserProfile.userActions.changeRole')}
             </Button>
+
+            {hasPermission('system.compliance.audit.read') && (
+              <Link
+                to={`/admin/compliance?tab=subject&userUuid=${encodeURIComponent(
+                  user.id
+                )}`}
+                className="btn btn-outline-secondary btn-sm"
+              >
+                <FontAwesomeIcon icon={faIdCard} className="me-2" />
+                {t('adminUserProfile.userActions.dataSubjectRequests')}
+              </Link>
+            )}
 
             <Dropdown>
               <Dropdown.Toggle variant="secondary" size="sm" className="w-100">

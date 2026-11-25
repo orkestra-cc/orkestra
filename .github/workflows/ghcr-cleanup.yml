@@ -34,7 +34,7 @@ jobs:
     name: Delete untagged image versions
     runs-on: ubuntu-latest
     steps:
-      - uses: dataaxiom/ghcr-cleanup-action@v1
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           # The three images the per-surface workflows publish. frontend-admin
           # publishes as `frontend` — see the NOTE in frontend-admin.yml.

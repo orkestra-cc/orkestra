@@ -220,6 +220,7 @@ func (s *unsubscribeService) Consume(ctx context.Context, raw string) error {
 		Category:        category,
 		At:              now,
 		SourceTokenUUID: doc.UUID,
+		SourceContext:   doc.Context,
 	}); err != nil {
 		// Scrubbed on both paths — the log line and the error the caller
 		// logs in turn — because a write error quotes the filter or the

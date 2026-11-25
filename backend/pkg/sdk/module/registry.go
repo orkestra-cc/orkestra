@@ -10,6 +10,7 @@ import (
 
 	"github.com/orkestra/backend/pkg/sdk/capability"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/jobs"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -192,6 +193,10 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	// Capabilities() calls must happen after Init configures the module.
 	capReg := capability.NewRegistry()
 	deps.Services.Register(ServiceCapabilityRegistry, capReg)
+	prefReg := NewUserPreferenceRegistry()
+	deps.Services.Register(ServiceUserPreferenceRegistry, prefReg)
+	jobCatalog := jobs.NewCatalog()
+	deps.Services.Register(ServiceJobCatalog, jobCatalog)
 
 	// Initialize ALL modules in registration order.
 	// Core modules: fatal on error. Non-core: attempt Init and track failures.
@@ -236,8 +241,79 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	// and Cedar policies use this catalog to validate that grants refer to
 	// a known capability and to surface the catalog in the admin UI.
 	r.registerCapabilities(capReg)
+	r.registerUserPreferences(prefReg)
+	r.registerJobs(jobCatalog)
 
 	return nil
+}
+
+// registerJobs collects the jobs modules declare. A module whose definitions
+// are invalid contributes none of them: it is logged and skipped, and never
+// blocks other modules.
+func (r *ModuleRegistry) registerJobs(catalog *jobs.Catalog) {
+	for _, m := range r.initialized {
+		r.registerModuleJobs(catalog, m)
+	}
+	r.logger.Info("Registered job catalog", slog.Int("count", len(catalog.List())))
+}
+
+// registerModuleJobs adds one module's jobs to the catalog. InitAll calls it
+// for every initialized module, RetryInit for a module recovered after a
+// failed boot.
+func (r *ModuleRegistry) registerModuleJobs(catalog *jobs.Catalog, m Module) {
+	defs := JobsOf(m)
+	if len(defs) == 0 {
+		return
+	}
+	if err := catalog.Register(m.Name(), defs); err != nil {
+		r.logger.Warn("job contribution rejected",
+			slog.String("module", m.Name()),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+// registerUserPreferences collects the optional per-user preference schemas
+// and profile sections modules declare. An invalid declaration is isolated
+// to its owner: logged, skipped, and nothing else is affected.
+func (r *ModuleRegistry) registerUserPreferences(reg *UserPreferenceRegistry) {
+	fields, sections := 0, 0
+	for _, m := range r.initialized {
+		f, s := r.registerModulePreferences(reg, m)
+		fields += f
+		sections += s
+	}
+	r.logger.Info("Registered user preference catalog",
+		slog.Int("modules_with_preferences", fields),
+		slog.Int("profile_sections", sections))
+}
+
+// registerModulePreferences adds one module's preference schema and profile
+// sections to reg, returning how many of each it accepted (the schema
+// counts once). InitAll calls it for every initialized module, RetryInit
+// for a module recovered after a failed boot.
+func (r *ModuleRegistry) registerModulePreferences(reg *UserPreferenceRegistry, m Module) (fields, sections int) {
+	if f := UserPreferenceFieldsOf(m); f != nil {
+		if err := reg.RegisterFields(m.Name(), f); err != nil {
+			r.logger.Warn("user preference schema rejected",
+				slog.String("module", m.Name()),
+				slog.String("error", err.Error()),
+			)
+		} else {
+			fields = 1
+		}
+	}
+	if s := ProfileSectionsOf(m); s != nil {
+		if err := reg.RegisterSections(m.Name(), s); err != nil {
+			r.logger.Warn("profile sections rejected",
+				slog.String("module", m.Name()),
+				slog.String("error", err.Error()),
+			)
+		} else {
+			sections = len(s)
+		}
+	}
+	return fields, sections
 }
 
 // registerCapabilities collects Capabilities() from every initialized module
@@ -519,6 +595,8 @@ func (r *ModuleRegistry) StopModule(ctx context.Context, name string) error {
 	return nil
 }
 
+var _ ModuleStatusReader = (*ModuleRegistry)(nil)
+
 // IsStarted returns true if the named module has been started.
 func (r *ModuleRegistry) IsStarted(name string) bool {
 	r.mu.RLock()
@@ -589,10 +667,25 @@ func (r *ModuleRegistry) RetryInit(name string) error {
 	// templates seeded, not silently skipped for the life of the process.
 	r.registerNotificationTemplates()
 
+	// And its preference schema and profile sections, which InitAll only
+	// collected from the modules that initialized at boot.
+	if reg, ok := GetTyped[*UserPreferenceRegistry](r.deps.Services, ServiceUserPreferenceRegistry); ok {
+		r.registerModulePreferences(reg, m)
+	}
+
+	// And its jobs, for the same reason.
+	if catalog, ok := GetTyped[*jobs.Catalog](r.deps.Services, ServiceJobCatalog); ok {
+		r.registerModuleJobs(catalog, m)
+		r.logger.Info("Registered job catalog", slog.Int("count", len(catalog.List())))
+	}
+
 	return nil
 }
 
 // StopAll shuts down all started modules in reverse initialization order.
+// Like StopModule, it marks each module not started; it does so just before
+// calling its Stop, so IsStarted already reports false while the module
+// shuts down and a consumer (the jobs scheduler) stops using it.
 func (r *ModuleRegistry) StopAll(ctx context.Context) {
 	r.mu.RLock()
 	// Build a list of started modules in init order, then reverse.
@@ -606,6 +699,9 @@ func (r *ModuleRegistry) StopAll(ctx context.Context) {
 	r.mu.RUnlock()
 
 	for _, m := range toStop {
+		r.mu.Lock()
+		delete(r.started, m.Name())
+		r.mu.Unlock()
 		if err := StopModule(ctx, m); err != nil {
 			r.logger.Error(fmt.Sprintf("Module %s stop failed", m.Name()),
 				slog.String("error", err.Error()))

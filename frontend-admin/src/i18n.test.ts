@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import i18n from './i18n';
 
 // Smoke tests for the i18n bootstrap. The seed under locales/{en,it}.json
@@ -31,5 +31,20 @@ describe('i18n bootstrap', () => {
   it('lists en + it as the supported locales', () => {
     expect(i18n.options.supportedLngs).toContain('en');
     expect(i18n.options.supportedLngs).toContain('it');
+  });
+});
+
+describe('i18n language cookie', () => {
+  it('detects and caches the language under the runtime cookie prefix', async () => {
+    const runtime = window as unknown as { __ORKESTRA_CONFIG__?: unknown };
+    runtime.__ORKESTRA_CONFIG__ = { cookiePrefix: 'stack2_' };
+    try {
+      vi.resetModules();
+      const fresh = (await import('./i18n')).default;
+      expect(fresh.options.detection?.lookupCookie).toBe('stack2_admin_lang');
+    } finally {
+      delete runtime.__ORKESTRA_CONFIG__;
+      vi.resetModules();
+    }
   });
 });

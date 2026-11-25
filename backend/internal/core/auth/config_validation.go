@@ -40,6 +40,16 @@ var authDurationBounds = []durationBound{
 		why: "below five minutes the link dies before the mail is delivered",
 	},
 	{
+		key: "pinAccessTokenTTL",
+		min: services.MinAccessTokenTTL, max: services.MaxAccessTokenTTL,
+		why: "the same bounds as every access token: a refresh loop below a minute, an entry outliving its revocation above 24h",
+	},
+	{
+		key: "pinRefreshTokenTTL",
+		min: services.MinPINRefreshTokenTTL, max: services.MaxPINRefreshTokenTTL,
+		why: "below 15 minutes a field app signs the worker out mid-task; above 7 days a PIN session would outlive a password one",
+	},
+	{
 		key: "sessionAbsoluteTTL",
 		min: services.MinSessionAbsoluteTTL, max: services.MaxSessionAbsoluteTTL,
 		why: "the maximum leaves a one-day margin below the 90-day session retention window, so retention can never delete the anchor of a session still inside the cap",
@@ -60,6 +70,9 @@ func (m *AuthModule) ValidateConfigSnapshot(_ context.Context, snap module.Confi
 		return err
 	}
 	if err := validateLockoutThresholdOrder(snap.Values); err != nil {
+		return err
+	}
+	if err := validatePINSettings(snap.Values); err != nil {
 		return err
 	}
 	return validateLoginMethodInvariant(snap, services.ReadableNonEmptyFile)
@@ -116,6 +129,32 @@ func snapshotInt(values map[string]string, key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// validatePINSettings refuses a malformed PIN toggle or a pinLength
+// outside 4–8 at write time. The runtime readers would fail closed on the
+// toggles (503) and fall back to the default length, so a bad value would
+// otherwise surface as an outage or a silently different length.
+func validatePINSettings(values map[string]string) error {
+	for _, key := range []string{"pinLoginEnabledAdmin", "pinLoginEnabledClient", "pinRequiresTrustedDevice"} {
+		raw, present := values[key]
+		if !present || strings.TrimSpace(raw) == "" {
+			continue
+		}
+		if _, err := services.StrictBool(raw); err != nil {
+			return &module.ConfigValidationError{Field: key, Message: "must be exactly true or false"}
+		}
+	}
+	if raw, present := values["pinLength"]; present && strings.TrimSpace(raw) != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || n < services.MinPINLength || n > services.MaxPINLength {
+			return &module.ConfigValidationError{
+				Field:   "pinLength",
+				Message: fmt.Sprintf("must be a whole number between %d and %d", services.MinPINLength, services.MaxPINLength),
+			}
+		}
+	}
+	return nil
 }
 
 // validateAuthDurations is the ValidateConfig loop verbatim: an empty value

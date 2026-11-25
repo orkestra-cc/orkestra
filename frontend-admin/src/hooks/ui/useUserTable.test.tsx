@@ -7,6 +7,19 @@ import { server } from 'test/server';
 import { url } from 'test/handlers';
 import UserTable from 'pages/admin/users/UserTable';
 import type { User, UserListResponse } from 'store/api/userApi';
+import { toast } from 'react-toastify';
+
+vi.mock('react-toastify', async importOriginal => {
+  const actual = await importOriginal<typeof import('react-toastify')>();
+  return {
+    ...actual,
+    toast: Object.assign(vi.fn(), {
+      ...actual.toast,
+      success: vi.fn(),
+      error: vi.fn()
+    })
+  };
+});
 
 // Two-row fixture: an admin (self) and an unverified operator (the
 // resend-verification target). Every test starts from this baseline and
@@ -203,6 +216,34 @@ describe('useUserTable row actions', () => {
     await waitFor(() => expect(resetCalled).toHaveBeenCalledTimes(1));
   });
 
+  it('never says «sent» when the address is marked invalid', async () => {
+    server.use(
+      http.post(url('/v1/admin/users/op-2/send-password-reset'), () =>
+        HttpResponse.json(
+          {
+            code: 'auth.recipient_suppressed',
+            detail: 'The email was not sent.',
+            status: 409
+          },
+          { status: 409 }
+        )
+      )
+    );
+
+    renderWithProviders(<UserTable />, { preloadedState: preloadedAuthState });
+    await waitFor(() => expect(screen.getByText('Op Two')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await openActionsForRow(user, 'Op Two');
+    await user.click(await screen.findByText('Send Password Reset'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const calls = vi.mocked(toast.error).mock.calls;
+    const message = String(calls[calls.length - 1]?.[0]);
+    expect(message).toMatch(/marked invalid/);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it('disables Delete + Deactivate on the current user row', async () => {
     renderWithProviders(<UserTable />, { preloadedState: preloadedAuthState });
     await waitFor(() =>
@@ -247,5 +288,40 @@ describe('useUserTable row actions', () => {
       name: /^delete user$/i
     });
     expect(submit).toBeDisabled();
+  });
+});
+
+describe('useUserTable for a manager', () => {
+  beforeEach(() => {
+    server.use(listHandler());
+  });
+
+  it('hides the actions a manager does not hold', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserTable />, {
+      preloadedState: {
+        auth: {
+          ...preloadedAuthState.auth,
+          user: {
+            ...preloadedAuthState.auth.user,
+            id: 'mgr-1',
+            role: 'manager'
+          }
+        }
+      }
+    });
+    await waitFor(() => expect(screen.getByText('Op Two')).toBeInTheDocument());
+    await openActionsForRow(user, 'Op Two');
+
+    // user.update: activation stays.
+    expect(await screen.findByText('Deactivate')).toBeInTheDocument();
+    for (const label of [
+      'Reset MFA',
+      'Resend Verification',
+      'Send Password Reset',
+      'Delete User'
+    ]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
   });
 });

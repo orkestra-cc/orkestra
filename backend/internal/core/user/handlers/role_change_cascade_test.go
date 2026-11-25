@@ -751,20 +751,22 @@ func TestUpdateUser_RolePatchOnAMissingUserStill404s(t *testing.T) {
 	assertStatus(t, err, http.StatusNotFound)
 }
 
-// A patch with no Role cannot lose a security effect to a failed
-// pre-read — the deactivate branch tolerates a nil snapshot by design —
-// so a profile edit must NOT be made more fragile by the guard above.
-func TestUpdateUser_NonRolePatchSurvivesAFailedPreRead(t *testing.T) {
+// A patch with no Role used to survive a failed pre-read (the deactivate
+// branch tolerates a nil snapshot by design). The target-tier guard now
+// needs the target's current role on EVERY patch — a manager must not
+// rename an administrator either — so an unreadable target refuses the
+// rename too, fail-closed and audited, instead of writing blind.
+func TestUpdateUser_NonRolePatchIsRefusedWhenThePreReadFails(t *testing.T) {
 	hn := newRoleChangeHarness(t)
 	hn.users.seed("u-1", "administrator")
 	hn.requireSeeded(t, "u-1", "administrator")
 	hn.users.failReadsFor("u-1", errors.New("mongo: connection reset"))
 
-	if err := hn.update(t, "u-1", iface.UpdateUserInput{FullName: "New Name"}); err != nil {
-		t.Fatalf("a rename must survive a pre-read failure: %v", err)
-	}
-	if got := hn.users.updateCalls(); got != 1 {
-		t.Fatalf("UpdateUser called %d times, want 1", got)
+	err := hn.update(t, "u-1", iface.UpdateUserInput{FullName: "New Name"})
+	assertStatus(t, err, http.StatusInternalServerError)
+	assertErrCode(t, err, errcode.UserRoleLookupUnavailable)
+	if got := hn.users.updateCalls(); got != 0 {
+		t.Fatalf("UpdateUser called %d times, want 0 — the guard cannot run without the target's role", got)
 	}
 }
 

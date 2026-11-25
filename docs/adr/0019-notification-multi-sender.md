@@ -12,7 +12,7 @@ public: true
 | **Date** | 2026-08-26 |
 | **Authors** | @salvatore.balestrino |
 | **Supersedes** | — |
-| **Related** | [ADR-0012](0012-module-config-group-contract.md) (config group contract — `email.provider` became an enum there, and `recordList` is the primitive this ADR consumes); [ADR-0006](0006-collapse-to-core-only-base.md) (core-only base — §Consequences records where this ADR strains it) |
+| **Related** | [ADR-0012](0012-module-config-group-contract.md) (config group contract — `email.provider` became an enum there, and `recordList` is the primitive this ADR consumes); [ADR-0006](0006-collapse-to-core-only-base.md) (core-only base — §Consequences records where this ADR strains it); the push channel (`iface.PushSender`, FCM) is a second channel of the same module, independent of sender profiles — see the module reference `docs/site/modules/core/notification.mdx` |
 
 ## Context
 

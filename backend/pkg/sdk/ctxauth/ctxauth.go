@@ -7,8 +7,9 @@
 // read ctx.Value("userUUID") directly keep working through the migration.
 // New code (and extracted addons) should use the typed getters.
 //
-// Note: the JWT-claims-derived signals (session ID, AMR, MFA enrolment)
-// stay backend-private because they depend on the auth module's claims
+// Note: the session ID is exposed here (KeySessionID) so addons can bind
+// per-device state to the session; the other JWT-claims-derived signals
+// (AMR, MFA enrolment) stay backend-private because they depend on the auth module's claims
 // type. When the SDK split goes external, exposing them needs a small
 // iface.ClaimsAccessor interface — out of scope for Phase 2b.
 package ctxauth
@@ -27,6 +28,7 @@ const (
 	KeyClientIP           = "clientIP"
 	KeyTenantKind         = "tenantKind"
 	KeyTenantImpersonated = "tenantImpersonated"
+	KeySessionID          = "sessionID" // JWT sid claim = auth session UUID
 )
 
 // GetUserUUID extracts the authenticated user's UUID from ctx.
@@ -34,6 +36,14 @@ const (
 func GetUserUUID(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(KeyUserUUID).(string)
 	return v, ok
+}
+
+// GetSessionID extracts the authenticated session's id (the JWT `sid`
+// claim, stable across refresh rotation) from ctx. ok=false when the
+// route is unauthenticated or the token carries no sid.
+func GetSessionID(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(KeySessionID).(string)
+	return v, ok && v != ""
 }
 
 // GetUserEmail extracts the authenticated user's email from ctx.

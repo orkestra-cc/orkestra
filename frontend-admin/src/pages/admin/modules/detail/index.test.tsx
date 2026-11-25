@@ -485,6 +485,47 @@ describe('ModuleDetailPage sections', () => {
   });
 });
 
+describe('ModuleDetailPage jobs workspace', () => {
+  const jobsModule = {
+    ...demoModule,
+    moduleName: 'jobs',
+    displayName: 'Jobs',
+    category: 'core',
+    configSchema: [],
+    configGroups: undefined,
+    dependsOn: []
+  } as ModuleConfig;
+
+  it('dispatches jobs to its specialized workspace', async () => {
+    stubAll(jobsModule);
+    server.use(
+      http.get(url('/v1/admin/jobs'), () => HttpResponse.json({ jobs: [] }))
+    );
+
+    renderAt('', 'jobs');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Background jobs' })
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText('No module has declared a job.')
+    ).toBeInTheDocument();
+  });
+
+  it('hands over to the generic page for ?view=settings', async () => {
+    stubAll(jobsModule);
+
+    renderAt('?view=settings', 'jobs');
+
+    expect(
+      await screen.findByRole('link', { name: 'Back to jobs' })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Background jobs' })
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe('ModuleDetailPage restart hint', () => {
   beforeEach(() => stubAll());
 

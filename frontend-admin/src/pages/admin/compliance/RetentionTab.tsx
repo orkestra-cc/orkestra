@@ -6,7 +6,7 @@ import {
   faCircleInfo
 } from '@fortawesome/free-solid-svg-icons';
 import { useRetentionPreviewQuery } from 'store/api/complianceApi';
-import ComplianceEmptyState from './ComplianceEmptyState';
+import EmptyState from 'components/common/EmptyState';
 import { formatDateTime } from './complianceFormat';
 
 // RetentionTab is a read-only dry-run: it shows which anonymized tombstones are
@@ -88,7 +88,7 @@ const RetentionTab = () => {
               </ul>
             </>
           ) : (
-            <ComplianceEmptyState
+            <EmptyState
               icon={faClockRotateLeft}
               message={t('adminCompliance.retention.emptyMessage')}
               hint={t('adminCompliance.retention.emptyHint')}

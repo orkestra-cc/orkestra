@@ -12,6 +12,8 @@ interface ModuleEnvironmentSwitcherProps {
   availableEnvironments: string[];
   selectedEnvironment: string;
   onSelect: (env: string) => void;
+  /** Lock every control (an addon section of the page is busy writing). */
+  disabled?: boolean;
 }
 
 /**
@@ -38,7 +40,8 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
   activeEnvironment,
   availableEnvironments,
   selectedEnvironment,
-  onSelect
+  onSelect,
+  disabled
 }) => {
   const { t } = useTranslation();
   const [setActive, { isLoading }] = useSetActiveEnvironmentMutation();
@@ -82,6 +85,7 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
               }
               aria-pressed={selectedEnvironment === env}
               onClick={() => onSelect(env)}
+              disabled={disabled}
               className="text-capitalize"
             >
               {env}
@@ -104,7 +108,7 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
             variant="outline-success"
             size="sm"
             onClick={() => setConfirming(true)}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
           >
             {isLoading ? (
               <Spinner animation="border" size="sm" />
@@ -146,7 +150,7 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
             variant="success"
             size="sm"
             onClick={handleSetActive}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
           >
             {t('adminModules.detail.env.promoteConfirm')}
           </Button>

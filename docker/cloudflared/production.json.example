@@ -1,0 +1,26 @@
+{
+  "_note": "Routes of the production tunnel. Copy to production.json in the fork, edit, commit. Mounted into cloudflared as its config file (JSON is YAML; cloudflared ignores the top-level keys starting with _). './orkestra.sh tunnel switch' moves the DNS of exactly these hostnames and smoke-tests each at its _smoke path (404 or 5xx = failure). Services are compose SERVICE names on the stack network, never container names. The last rule must be the catch-all. After editing: ./orkestra.sh tunnel reload. _tunnel_id: the id of this environment's tunnel (not secret: it is the CNAME target); the switch refuses a token of another tunnel. Guide: docs/runbooks/cloudflare-tunnel.md.",
+  "_tunnel_id": "TODO-tunnel-id",
+  "_smoke": {
+    "console.example.com": "/health",
+    "api.example.com": "/health",
+    "storage.example.com": "/health"
+  },
+  "ingress": [
+    {
+      "hostname": "console.example.com",
+      "service": "http://frontend-admin:80"
+    },
+    {
+      "hostname": "api.example.com",
+      "service": "http://backend:3000"
+    },
+    {
+      "hostname": "storage.example.com",
+      "service": "http://rustfs:9000"
+    },
+    {
+      "service": "http_status:404"
+    }
+  ]
+}

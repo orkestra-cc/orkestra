@@ -32,5 +32,6 @@ window.__ORKESTRA_CONFIG__ = {
   appName: 'orkestra',
   cloneVersion: 'dev',
   buildCommit: '',
-  startedAt: ''
+  startedAt: '',
+  cookiePrefix: 'orkestra_'
 };

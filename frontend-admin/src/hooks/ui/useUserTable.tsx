@@ -36,6 +36,10 @@ import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 import { formatDate, formatTime } from 'helpers/dateFormat';
 import { useAppSelector } from 'store/hooks';
 import { selectUser } from 'store/slices/authSlice';
+import {
+  suppressedSendToast,
+  useSuppressionManageLinks
+} from 'components/notification/suppressedSend';
 
 // extractToastError prefers the typed `code` returned by errcode-bearing
 // handlers (translated via the `errors.<code>` namespace), falling back
@@ -120,9 +124,18 @@ const UserActivationModal: React.FC<UserActivationModalProps> = ({
   );
 };
 
+// Platform roles that hold the administrator-only user actions: delete
+// (user.delete) and the credential triggers behind the system.users.* keys
+// (MFA reset, password reset, resend verification). A manager reaches
+// this table through user.read/update but holds none of them, so those
+// items are hidden rather than left to fail with a 403. Role names, not
+// keys: /authz/me is tenant-scoped and never lists global permissions.
+const USER_ADMIN_ROLES = ['super_admin', 'administrator', 'developer'];
+
 const useUserTable = (options?: any) => {
   const { t } = useTranslation();
   const currentUser = useAppSelector(selectUser);
+  const isUserAdmin = USER_ADMIN_ROLES.includes(currentUser?.role ?? '');
 
   const [showModal, setShowModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -132,6 +145,7 @@ const useUserTable = (options?: any) => {
   const [updateUser, { isLoading: isUpdating }] = useUpdateUserMutation();
   const [resendVerification] = useResendVerificationUserAdminMutation();
   const [sendPasswordReset] = useSendPasswordResetUserAdminMutation();
+  const suppressionLinks = useSuppressionManageLinks();
 
   // Server-side pagination + search state. The backend owns paging and
   // search (page/pageSize/search → total/totalPages), so the table holds
@@ -224,9 +238,14 @@ const useUserTable = (options?: any) => {
       );
     } catch (err) {
       toast.error(
-        t('adminUsers.rowActions.toastVerificationFailed', {
-          error: extractToastError(err, t, genericFailure)
-        })
+        suppressedSendToast(
+          err,
+          t('adminUsers.rowActions.toastVerificationFailed', {
+            error: extractToastError(err, t, genericFailure)
+          }),
+          suppressionLinks,
+          user.email
+        )
       );
     }
   };
@@ -241,9 +260,14 @@ const useUserTable = (options?: any) => {
       );
     } catch (err) {
       toast.error(
-        t('adminUsers.rowActions.toastPasswordResetFailed', {
-          error: extractToastError(err, t, genericFailure)
-        })
+        suppressedSendToast(
+          err,
+          t('adminUsers.rowActions.toastPasswordResetFailed', {
+            error: extractToastError(err, t, genericFailure)
+          }),
+          suppressionLinks,
+          user.email
+        )
       );
     }
   };
@@ -506,34 +530,39 @@ const useUserTable = (options?: any) => {
                   </Dropdown.Item>,
                   'toggle'
                 )}
-                <Dropdown.Item onClick={() => setMfaResetUser(original)}>
-                  {t('adminUsers.rowActions.resetMfa')}
-                </Dropdown.Item>
-                {!original.emailVerified && (
+                {isUserAdmin && (
+                  <Dropdown.Item onClick={() => setMfaResetUser(original)}>
+                    {t('adminUsers.rowActions.resetMfa')}
+                  </Dropdown.Item>
+                )}
+                {isUserAdmin && !original.emailVerified && (
                   <Dropdown.Item
                     onClick={() => handleResendVerification(original)}
                   >
                     {t('adminUsers.rowActions.resendVerification')}
                   </Dropdown.Item>
                 )}
-                <Dropdown.Item
-                  onClick={() => handleSendPasswordReset(original)}
-                >
-                  {t('adminUsers.rowActions.sendPasswordReset')}
-                </Dropdown.Item>
-                <Dropdown.Divider />
-                {renderSelfGuarded(
+                {isUserAdmin && (
                   <Dropdown.Item
-                    className="text-danger"
-                    onClick={() =>
-                      isSelf ? undefined : setDeleteUser(original)
-                    }
-                    disabled={isSelf}
+                    onClick={() => handleSendPasswordReset(original)}
                   >
-                    {t('adminUsers.rowActions.deleteUser')}
-                  </Dropdown.Item>,
-                  'delete'
+                    {t('adminUsers.rowActions.sendPasswordReset')}
+                  </Dropdown.Item>
                 )}
+                {isUserAdmin && <Dropdown.Divider />}
+                {isUserAdmin &&
+                  renderSelfGuarded(
+                    <Dropdown.Item
+                      className="text-danger"
+                      onClick={() =>
+                        isSelf ? undefined : setDeleteUser(original)
+                      }
+                      disabled={isSelf}
+                    >
+                      {t('adminUsers.rowActions.deleteUser')}
+                    </Dropdown.Item>,
+                    'delete'
+                  )}
               </div>
             </Dropdown.Menu>
           </Dropdown>

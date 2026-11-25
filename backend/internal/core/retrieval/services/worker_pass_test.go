@@ -1,0 +1,482 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/orkestra/backend/internal/core/retrieval/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+)
+
+func (e *workerEnv) once(t *testing.T, w *Worker) PassReport { return *e.pass(t, w) }
+
+func (e *workerEnv) enqueueFor(t *testing.T, tenant, id string, rev int64) {
+	t.Helper()
+	err := e.outbox.Enqueue(tenantCtx(context.Background(), tenant),
+		[]iface.RetrievalIntent{{Corpus: testCorpus, SourceID: id, Revision: rev}}, e.clk.Now())
+	require.NoError(t, err)
+}
+
+func (e *workerEnv) putFor(tenant, id string) {
+	it := item(1)
+	it.SourceID = id
+	e.source.put(tenant, it)
+}
+
+func TestWorker_ClaimIsFairAcrossTenants(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = nil // no initial build: it would re-queue the indexed keys
+	for i := range 5 {
+		id := fmt.Sprintf("k%d", i)
+		e.putFor("t1", id)
+		e.enqueueFor(t, "t1", id, 1)
+	}
+	e.clk.Advance(time.Second)
+	e.putFor("t2", "z")
+	e.enqueueFor(t, "t2", "z", 1)
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 2} }
+	w := e.newWorker()
+
+	rep := e.once(t, w)
+	assert.Equal(t, 2, rep.Claimed)
+	assert.Equal(t, 2, rep.Indexed)
+	clean := 0
+	for _, r := range e.outbox.rowsOf("t1", testCorpus) {
+		if !r.Dirty {
+			clean++
+		}
+	}
+	assert.Equal(t, 1, clean)
+	assert.Equal(t, false, e.outbox.row("t2", testCorpus, "z").Dirty)
+}
+
+func TestWorker_KeepsIntentsWhileOwnerStopped(t *testing.T) {
+	e := newTestWorker(t)
+	mods := e.deps.Modules.(*fakeModules)
+	e.tenants.ids = nil
+	mods.setStarted("crm", false)
+	e.source.put("t1", item(1))
+	e.enqueue(t, 1)
+
+	rep := e.once(t, e.w)
+	assert.Equal(t, 0, rep.Claimed)
+	assert.Equal(t, 0, len(e.eng.callLog()))
+	assert.Equal(t, 0, e.deps.States.(*fakeStates).writes)
+	r := e.row()
+	assert.Equal(t, true, r.Dirty)
+	assert.Equal(t, 0, r.Attempts)
+
+	mods.setStarted("crm", true)
+	rep = e.once(t, e.w)
+	assert.Equal(t, 1, rep.Indexed)
+	assert.Len(t, e.eng.points(testColl), 3)
+	assert.Equal(t, false, e.row().Dirty)
+}
+
+func TestWorker_ProfileChangedKeepsIntents(t *testing.T) {
+	e := newTestWorker(t)
+	e.indexRev1(t)
+	before := e.eng.points(testColl)
+
+	cat := e.deps.Catalog.(*fakeCatalog)
+	spec := cat.specs[0]
+	spec.Ingestion.Chunking = iface.RetrievalChunking{Strategy: "fixed", MaxTokens: 2}
+	cat.specs = []iface.RetrievalCorpusSpec{spec}
+	e.putFor("t1", "c2")
+	e.enqueueFor(t, "t1", "c2", 1)
+
+	rep := e.once(t, e.w)
+	assert.Equal(t, 0, rep.Claimed)
+	r := e.outbox.row("t1", testCorpus, "c2")
+	assert.Equal(t, true, r.Dirty)
+	assert.Equal(t, 0, r.Attempts)
+	assert.Equal(t, len(before), len(e.eng.points(testColl)))
+	assert.Equal(t, []string{"corpus crm_contacts: ingestion profile changed; indexing paused until a new generation is built"}, e.w.Problems())
+}
+
+func TestWorker_LocalOnlyCorpusWithHostedEndpointWritesNothing(t *testing.T) {
+	e := newTestWorker(t)
+	e.deps.Profiles.(*fakeProfiles).update(func(p *iface.InferenceProfile) {
+		p.Boundary = iface.InferenceBoundaryHosted
+		p.Endpoint = "embed"
+	})
+	e.source.put("t1", item(1))
+	e.enqueue(t, 1)
+
+	rep := e.once(t, e.w)
+	assert.Equal(t, 0, rep.Claimed)
+	assert.Equal(t, 0, e.eng.callCount("EnsureCollection"))
+	assert.Equal(t, 0, e.emb.callCount())
+	assert.Equal(t, true, e.row().Dirty)
+	require.Len(t, e.w.Problems(), 1)
+	assert.Contains(t, e.w.Problems()[0], "local_only corpus uses hosted endpoint")
+}
+
+func (e *workerEnv) putMany(tenant string, n int) {
+	for i := range n {
+		e.putFor(tenant, fmt.Sprintf("i%03d", i))
+	}
+}
+
+func TestBuild_EnqueuesEveryEnumeratedItemAndResumes(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1"}
+	e.putMany("t1", 450)
+
+	rep := e.once(t, e.w)
+	assert.Equal(t, 200, rep.Enqueued)
+	p := e.progress.get("t1", testCorpus, 1)
+	assert.Equal(t, "i199", p.Cursor)
+	assert.Equal(t, models.ProgressBuilding, p.Status)
+
+	w2 := e.newWorker()
+	rep = e.once(t, w2)
+	assert.Equal(t, 200, rep.Enqueued)
+	assert.Equal(t, int64(400), e.progress.get("t1", testCorpus, 1).Enqueued)
+
+	rep = e.once(t, w2)
+	assert.Equal(t, 50, rep.Enqueued)
+	p = e.progress.get("t1", testCorpus, 1)
+	assert.Equal(t, models.ProgressDone, p.Status)
+	rows := e.outbox.rowsOf("t1", testCorpus)
+	require.Len(t, rows, 450)
+	for _, r := range rows {
+		assert.Equal(t, int64(1), r.Revision)
+	}
+
+	n := len(e.source.enumerated())
+	rep = e.once(t, w2)
+	assert.Equal(t, 0, rep.Enqueued)
+	assert.Equal(t, n, len(e.source.enumerated()))
+}
+
+func TestBuild_RunsPerInternalTenantUnderItsContext(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1", "t2"}
+	e.putFor("t1", "a")
+	e.putFor("t2", "b")
+	e.once(t, e.w)
+
+	assert.Equal(t, iface.TenantKindInternal, e.tenants.kind)
+	calls := e.source.enumerated()
+	require.Len(t, calls, 2)
+	for i, tn := range []string{"t1", "t2"} {
+		assert.Equal(t, tn, calls[i].tenant)
+		assert.Equal(t, tn, calls[i].ctxTenant)
+		assert.Equal(t, "internal", calls[i].ctxKind)
+		assert.Equal(t, 200, calls[i].limit)
+		assert.Equal(t, true, calls[i].hasDeadline)
+	}
+}
+
+func TestBuild_SkipsInvalidEnumeratedIDs(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1"}
+	for _, id := range []string{"", "a\x00b", "ok"} {
+		e.putFor("t1", id)
+	}
+	rep := e.once(t, e.w)
+	assert.Equal(t, 1, rep.Enqueued)
+	rows := e.outbox.rowsOf("t1", testCorpus)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "ok", rows[0].SourceID)
+	p := e.progress.get("t1", testCorpus, 1)
+	assert.Equal(t, models.ProgressDone, p.Status)
+	assert.Equal(t, int64(1), p.Enqueued)
+}
+
+func TestBuild_EnumerateErrorReleasesTheLease(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1"}
+	e.putFor("t1", "a")
+	e.source.setEnumErr(fmt.Errorf("secret item text"))
+	rep, err := e.w.RunOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, rep.Enqueued)
+	p := e.progress.get("t1", testCorpus, 1)
+	assert.Equal(t, "", p.Cursor)
+	assert.Equal(t, models.ProgressBuilding, p.Status)
+	assert.Equal(t, "", p.LeaseOwner)
+	if s := e.logs.String(); strings.Contains(s, "secret item text") {
+		t.Fatalf("log leaks source error: %s", s)
+	}
+	e.source.setEnumErr(nil)
+	assert.Equal(t, 1, e.once(t, e.w).Enqueued)
+}
+
+func TestWorker_RunStopsOnCancel(t *testing.T) {
+	e := newTestWorker(t)
+	passes := make(chan struct{}, 8)
+	e.w.afterPass = func() { passes <- struct{}{} }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { e.w.Run(ctx); close(done) }()
+	select {
+	case <-passes:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no first pass")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// cleanTenants returns the tenants with at least one clean (indexed) key.
+func (e *workerEnv) cleanTenants(tenants ...string) map[string]bool {
+	out := map[string]bool{}
+	for _, tn := range tenants {
+		for _, r := range e.outbox.rowsOf(tn, testCorpus) {
+			if !r.Dirty {
+				out[tn] = true
+			}
+		}
+	}
+	return out
+}
+
+// With more due tenants than worker_batch, the round-robin cursor reaches
+// every tenant within ceil(tenants/batch) passes, whatever the age of the
+// others' backlogs (ADR-0023 D11 fairness).
+func TestWorker_EveryDueTenantIsServedWithinCeilTenantsOverBatchPasses(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = nil
+	tenants := []string{"t1", "t2", "t3", "t4", "t5"}
+	for _, tn := range tenants[:4] {
+		for i := range 5 {
+			id := fmt.Sprintf("k%d", i)
+			e.putFor(tn, id)
+			e.enqueueFor(t, tn, id, 1)
+		}
+	}
+	e.clk.Advance(time.Hour) // t5's single key is much fresher than every backlog
+	e.putFor("t5", "fresh")
+	e.enqueueFor(t, "t5", "fresh", 1)
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 2} }
+	w := e.newWorker()
+
+	// t1,t2 | t3,t4 | t5 (the tail of the list: the cursor wraps after it)
+	for _, want := range []int{2, 2, 1} {
+		assert.Equal(t, want, e.once(t, w).Claimed)
+	}
+	served := e.cleanTenants(tenants...)
+	for _, tn := range tenants {
+		assert.Equal(t, true, served[tn], tn)
+	}
+	assert.Equal(t, false, e.outbox.row("t5", testCorpus, "fresh").Dirty)
+	// the cursor advanced to the last tenant served each pass, then wrapped
+	// once the tail of the list was served
+	e.once(t, w)
+	assert.Equal(t, []string{"", "t2", "t4", ""}, e.outbox.dueCallsCopy())
+}
+
+// The cursor wraps within the pass when no tenant after it is due any more.
+func TestWorker_EmptyTailWrapsTheCursorInTheSamePass(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = nil
+	for _, k := range []struct{ tenant, id string }{{"t1", "a"}, {"t1", "b"}, {"t2", "a"}} {
+		e.putFor(k.tenant, k.id)
+		e.enqueueFor(t, k.tenant, k.id, 1)
+	}
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 1} }
+	w := e.newWorker()
+	assert.Equal(t, 1, e.once(t, w).Claimed) // t1; the cursor stops at t1
+
+	e.outbox.park("t2", testCorpus, "a", e.clk.Now().Add(time.Hour)) // t2 is no longer due
+	assert.Equal(t, 1, e.once(t, w).Claimed)
+	assert.Equal(t, []string{"", "t1", ""}, e.outbox.dueCallsCopy())
+	for _, r := range e.outbox.rowsOf("t1", testCorpus) {
+		assert.Equal(t, false, r.Dirty, r.SourceID)
+	}
+}
+
+// A finished build costs no store call per pass: the worker that finished it
+// remembers it, and a replica that did not learns it once (ClaimBuild + Get).
+func TestBuild_FinishedBuildIsSkippedWithoutStoreCalls(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1"}
+	e.putFor("t1", "a")
+
+	e.once(t, e.w)
+	require.Equal(t, models.ProgressDone, e.progress.get("t1", testCorpus, 1).Status)
+	claims, gets := e.progress.calls("t1", testCorpus, 1)
+	require.Equal(t, 1, claims)
+	for range 3 {
+		e.once(t, e.w)
+	}
+	c, g := e.progress.calls("t1", testCorpus, 1)
+	assert.Equal(t, claims, c)
+	assert.Equal(t, gets, g)
+
+	w2 := e.newWorker()
+	for range 3 {
+		e.once(t, w2)
+	}
+	c, g = e.progress.calls("t1", testCorpus, 1)
+	assert.Equal(t, claims+1, c)
+	assert.Equal(t, gets+1, g)
+}
+
+// A build another replica holds is not done: it is asked again next pass.
+func TestBuild_HeldBuildIsAskedAgain(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1"}
+	e.putMany("t1", 450)
+	other := e.newWorker()
+	_, err := e.progress.ClaimBuild(tenantCtx(context.Background(), "t1"), testCorpus, 1, other.owner, e.clk.Now(), testLease)
+	require.NoError(t, err)
+
+	e.once(t, e.w)
+	e.once(t, e.w)
+	c, g := e.progress.calls("t1", testCorpus, 1)
+	assert.Equal(t, 3, c) // the holder's claim and one per pass
+	assert.Equal(t, 2, g)
+	assert.Equal(t, 0, len(e.source.enumerated()))
+}
+
+func tenantIDs(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("t%02d", i)
+	}
+	return out
+}
+
+// The build pass starts each pass where the previous one stopped, so with
+// more open builds than pages per pass no tenant waits for the others to
+// finish.
+func TestBuild_RotatesTheStartAcrossPasses(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = tenantIDs(20)
+	for _, tn := range e.tenants.ids {
+		e.putMany(tn, 450) // three pages each: no build finishes in one pass
+	}
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 1} }
+	w := e.newWorker()
+
+	e.once(t, w)
+	first := e.source.enumerated()
+	require.Len(t, first, 16)
+	assert.Equal(t, "t00", first[0].tenant)
+	assert.Equal(t, "t15", first[15].tenant)
+
+	e.once(t, w)
+	second := e.source.enumerated()[16:]
+	require.Len(t, second, 16)
+	var got []string
+	for _, c := range second[:4] {
+		got = append(got, c.tenant)
+	}
+	assert.Equal(t, []string{"t16", "t17", "t18", "t19"}, got)
+	assert.Equal(t, "t00", second[4].tenant)
+	assert.Equal(t, "i199", second[4].cursor) // t00's second page
+}
+
+// A source whose Enumerate fails is called at most once per pass and does
+// not use up the page budget of the healthy corpora sorted after it.
+func TestBuild_FailingSourceDoesNotStallOtherCorpora(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = tenantIDs(20)
+	bad := newFakeSource()
+	bad.setEnumErr(errors.New("owner down"))
+	badSpec := e.spec
+	badSpec.Name, badSpec.Source = "a_bad", bad // sorts before crm_contacts
+	e.deps.Catalog = &fakeCatalog{specs: []iface.RetrievalCorpusSpec{badSpec, e.spec}}
+	for _, tn := range e.tenants.ids {
+		e.putFor(tn, "x")
+	}
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 1} }
+	w := e.newWorker()
+
+	for pass := 1; pass <= 2; pass++ {
+		e.once(t, w)
+		assert.Equal(t, pass, len(bad.enumerated()), "failing source calls after pass %d", pass)
+	}
+	for _, tn := range e.tenants.ids {
+		assert.Equal(t, models.ProgressDone, e.progress.get(tn, testCorpus, 1).Status, tn)
+	}
+}
+
+// failingTenants wraps a source and fails Enumerate for the listed tenants,
+// counting every call per tenant.
+type failingTenants struct {
+	*fakeSource
+	bad   map[string]bool
+	mu    sync.Mutex
+	calls map[string]int
+}
+
+func newFailingTenants(src *fakeSource, bad ...string) *failingTenants {
+	f := &failingTenants{fakeSource: src, bad: map[string]bool{}, calls: map[string]int{}}
+	for _, b := range bad {
+		f.bad[b] = true
+	}
+	return f
+}
+
+func (s *failingTenants) Enumerate(ctx context.Context, tenantID, cursor string, limit int) (iface.RetrievalPage, error) {
+	s.mu.Lock()
+	s.calls[tenantID]++
+	s.mu.Unlock()
+	if s.bad[tenantID] {
+		return iface.RetrievalPage{}, errors.New("tenant data broken")
+	}
+	return s.fakeSource.Enumerate(ctx, tenantID, cursor, limit)
+}
+
+// One tenant whose Enumerate keeps failing must not keep the corpus's other
+// tenants from being built: the next pass starts right after it.
+func TestBuild_OneFailingTenantDoesNotStarveItsCorpus(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t00", "t01", "t02", "t03", "t04"}
+	src := newFailingTenants(e.source, "t00")
+	e.spec.Source = src
+	e.deps.Catalog = &fakeCatalog{specs: []iface.RetrievalCorpusSpec{e.spec}}
+	for _, tn := range e.tenants.ids {
+		e.putFor(tn, "x")
+	}
+	w := e.newWorker()
+
+	for pass := 1; pass <= 2; pass++ {
+		e.once(t, w)
+		assert.Equal(t, true, src.calls["t00"] <= pass, "failing tenant calls after pass %d", pass)
+	}
+	for _, tn := range e.tenants.ids[1:] {
+		assert.Equal(t, models.ProgressDone, e.progress.get(tn, testCorpus, 1).Status, tn)
+	}
+	for range 8 {
+		e.once(t, w)
+	}
+	assert.Equal(t, true, src.calls["t00"] <= 10, "t00 calls")
+}
+
+// A corpus whose whole source fails costs one Enumerate call per pass, and
+// the tenant that is tried moves on each pass.
+func TestBuild_WholeSourceFailingCostsOneCallPerPass(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = tenantIDs(5)
+	src := newFailingTenants(e.source, e.tenants.ids...)
+	e.spec.Source = src
+	e.deps.Catalog = &fakeCatalog{specs: []iface.RetrievalCorpusSpec{e.spec}}
+	w := e.newWorker()
+
+	for pass := 1; pass <= 6; pass++ {
+		e.once(t, w)
+		total := 0
+		for _, n := range src.calls {
+			total += n
+		}
+		assert.Equal(t, pass, total, "calls after pass %d", pass)
+	}
+	for _, tn := range e.tenants.ids {
+		assert.Equal(t, true, src.calls[tn] >= 1, tn)
+	}
+	assert.Equal(t, 2, src.calls["t00"]) // t00 is retried on the sixth pass
+}

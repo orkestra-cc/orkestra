@@ -63,11 +63,19 @@ services:
       # Wraps per-tenant DEKs; losing this key invalidates every wrapped DEK.
       ORKESTRA_KMS_MASTER_KEY: ${ORKESTRA_KMS_MASTER_KEY}
 
+      # LLM module (ADR-0022) — dedicated key for provider API keys and
+      # linked-account tokens; 64 hex chars = 32 bytes.
+      LLM_SECRET_ENCRYPTION_KEY: ${LLM_SECRET_ENCRYPTION_KEY}
+
       # Cookie Configuration (maximum security)
       COOKIE_SECRET: ${COOKIE_SECRET}
-      # Refresh-cookie name — the only cookie set in the browser (the access
-      # token lives in SPA memory, so there is no access-token cookie).
-      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
+      # Cookie names. Two stacks on one host share cookies by name, whatever
+      # their ports, so each sets its own COOKIE_NAME_PREFIX (default
+      # orkestra_); the explicit names below override single cookies and
+      # default, empty, to the prefixed name.
+      COOKIE_NAME_PREFIX: ${COOKIE_NAME_PREFIX:-}
+      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-}
+      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Operators
       # MUST set both — an empty value mints the cookie without a Domain
       # attribute (scoped to the minting host). The host mux already rejects
@@ -106,6 +114,7 @@ services:
       CONSOLE_HOST: ${CONSOLE_HOST:-console.orkestra.com}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-api.orkestra.com}
       CLIENT_API_URL: ${CLIENT_API_URL:-}
+      OPERATOR_API_URL: ${OPERATOR_API_URL:-}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
 
@@ -175,6 +184,17 @@ services:
       PDF_RENDERER_USER: ${PDF_RENDERER_USER:-orkestra}
       PDF_RENDERER_PASSWORD: ${PDF_RENDERER_PASSWORD:-}
 
+      # Retrieval (ADR-0023). Empty values leave retrieval "not configured"
+      # (search answers retrieval.not_configured). docker-compose.retrieval.yml
+      # overrides QDRANT_URL, QDRANT_API_KEY, RETRIEVAL_INFERENCE_ENDPOINTS and
+      # RETRIEVAL_INFERENCE_API_KEY with the self-hosted Qdrant + TEI stack; set
+      # them in .env instead to point at an external service.
+      QDRANT_URL: ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION_PREFIX: ${QDRANT_COLLECTION_PREFIX:-}
+      RETRIEVAL_INFERENCE_ENDPOINTS: ${RETRIEVAL_INFERENCE_ENDPOINTS:-}
+      RETRIEVAL_INFERENCE_API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:-}
+
       # Module config (OAuth, SMTP, AI provider keys, per-module enable flags)
       # is owned by ConfigService and edited at /admin/modules. The module
       # ConfigSchema EnvVar fields seed those values from the host environment
@@ -230,6 +250,8 @@ services:
       ORKESTRA_APP_NAME: ${APP_NAME:-orkestra}
       ORKESTRA_CLONE_VERSION: ${ORKESTRA_CLONE_VERSION:-dev}
       ORKESTRA_BUILD_COMMIT: ${ORKESTRA_BUILD_COMMIT:-}
+      # The console's cookies follow the backend's prefix.
+      ORKESTRA_COOKIE_PREFIX: ${COOKIE_NAME_PREFIX:-}
     container_name: ${APP_NAME}-frontend-admin-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -256,6 +278,39 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Cloudflare Tunnel connector — compose profile `tunnel`, so it exists only
+  # once `./orkestra.sh tunnel switch tunnel` (or a deploy with
+  # CLOUDFLARE_TUNNEL=true) starts it; staging has the same service in
+  # docker-compose.staging.yml (keep the two equal: the test compares them).
+  # Routes come from the repo, never the dashboard: cloudflared reads
+  # docker/cloudflared/<ENV>.json (the directory is mounted, not the file, so a
+  # checkout that replaces the file is seen by the next restart). The tunnel
+  # reaches the services by name on this stack's network. No published port,
+  # and metrics on loopback only: the switch reads /ready and /metrics from
+  # inside cloudflared's network namespace. Keep the image pin equal to
+  # TUNNEL_IMAGE in orkestra.sh. Guide: docs/runbooks/cloudflare-tunnel.md.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
+    container_name: ${APP_NAME}-cloudflared-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
+    restart: unless-stopped
+    profiles:
+      - tunnel
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    # Outbound connections and an unprivileged metrics port: nothing to re-add.
+    cap_drop:
+      - ALL
+    command: tunnel --no-autoupdate --config /etc/cloudflared/${ENV}.json --metrics 127.0.0.1:20241 run
+    environment:
+      # Empty unless the tunnel is configured; orkestra.sh refuses to start
+      # the profile without it.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
 
 volumes:
   backend-uploads:

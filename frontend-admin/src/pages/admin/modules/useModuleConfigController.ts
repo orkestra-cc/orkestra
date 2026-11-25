@@ -210,6 +210,14 @@ export const useModuleConfigController = (
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [conflict, setConflict] = useState(false);
+  // The saved notice hides itself after three seconds. Owned by an effect so
+  // leaving the page cancels the timer instead of letting it set state on an
+  // unmounted controller.
+  useEffect(() => {
+    if (!success) return;
+    const timer = setTimeout(() => setSuccess(false), 3000);
+    return () => clearTimeout(timer);
+  }, [success]);
   // The draft captured by reloadAndReview, consumed by the re-seed effect
   // once the fresh baseline lands. A ref, not state: it must survive the
   // render the refetch triggers without itself causing one. Tagged with the
@@ -599,7 +607,6 @@ export const useModuleConfigController = (
       for (const name of secretNames) resetValues[name] = '';
       form.reset(resetValues);
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
     } catch (err: unknown) {
       // Two different 409s land here and the body `code` is what tells them
       // apart. The backend's `detail` is accurate but written for an API

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
@@ -69,6 +69,28 @@ const adminAuthMethods = (overrides: Record<string, unknown>) =>
       ...overrides
     })
   );
+
+describe('AdminAuthMethodsCard for a caller without system.users.admin', () => {
+  // A manager reaches the profile through user.read (authz rule 2b) but the
+  // auth-methods surface stays on system.users.admin: the 403 is an
+  // entitlement answer, not a load failure, so the card renders nothing.
+  it('403 hides the card instead of showing the retry alert', async () => {
+    server.use(
+      http.get('*/v1/admin/users/u-1/auth-methods', () =>
+        HttpResponse.json(
+          { code: 'authz.forbidden', message: 'forbidden' },
+          { status: 403 }
+        )
+      )
+    );
+    const { container } = renderWithProviders(
+      <AdminAuthMethodsCard user={targetUser} />,
+      { preloadedState: preloadedAuthState }
+    );
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(screen.queryByText(/retry/i)).not.toBeInTheDocument();
+  });
+});
 
 describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
   // Button-name matchers are the exact EN copy:

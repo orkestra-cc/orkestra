@@ -426,7 +426,7 @@ const baseQueryWithRetry: BaseQueryFn<
   string | FetchArgs,
   unknown,
   FetchBaseQueryError,
-  object,
+  { suppressErrorToast?: boolean },
   FetchBaseQueryMeta
 > = async (args, api, extraOptions) => {
   // Inject X-Tenant-ID for every tenant-scoped request. Impersonation (set
@@ -787,7 +787,11 @@ const baseQueryWithRetry: BaseQueryFn<
   }
 
   // Handle server errors with user-friendly messages
-  if (result.error && Number(result.error.status) >= 500) {
+  if (
+    result.error &&
+    Number(result.error.status) >= 500 &&
+    !extraOptions?.suppressErrorToast
+  ) {
     toast.error('Server error. Please try again later.', {
       toastId: 'server-error',
       autoClose: 5000
@@ -804,6 +808,7 @@ export const baseApi = createApi({
   // Global tag types for cache invalidation
   tagTypes: [
     'User',
+    'UserPreferences',
     'Auth',
     'Navigation',
     'Dashboard',
@@ -833,6 +838,8 @@ export const baseApi = createApi({
     'SelfAuthMethods',
     'Sessions',
     'TrustedDevices',
+    // PIN sign-in (own and admin views)
+    'Pin',
     // Tenant + authz tags
     'Org',
     'Membership',
@@ -857,9 +864,24 @@ export const baseApi = createApi({
     'AuditEvent',
     'ErasureRequest',
     'LegalHold',
+    'DSRExport',
     'CompliancePolicy',
     'CompliancePolicyAssignment',
-    'ComplianceChangeRequest'
+    'ComplianceChangeRequest',
+    // LLM — core llm module (ADR-0022)
+    'LLMCredential',
+    'LLMModel',
+    'LLMMyModels',
+    'LLMUsage',
+    'LLMBudget',
+    'LLMAccount',
+    // Retrieval — core retrieval module admin surface (ADR-0023)
+    'RetrievalCorpora',
+    'RetrievalTenantIndexing',
+    'RetrievalSearchLog',
+    // Jobs — core jobs module admin surface (job list + run history)
+    'Jobs',
+    'JobRuns'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -927,7 +949,20 @@ export const TENANT_SCOPED_TAGS = [
   'Permission',
   'EffectivePermissions',
   'AdminOrg',
-  'OrgInvite'
+  'OrgInvite',
+  // llm: every slice is the active org's (credentials, models, grants,
+  // usage, budget, linked ChatGPT accounts) and none carries the org in its
+  // cache key.
+  'LLMCredential',
+  'LLMModel',
+  'LLMMyModels',
+  'LLMUsage',
+  'LLMBudget',
+  'LLMAccount',
+  // retrieval: the tenant's indexing progress and audited searches. The
+  // corpus report ('RetrievalCorpora') is installation-wide, so it is not here.
+  'RetrievalTenantIndexing',
+  'RetrievalSearchLog'
 ] as const;
 
 // Addon-owned tenant-scoped tags. An addon declares its RTK Query tags in its

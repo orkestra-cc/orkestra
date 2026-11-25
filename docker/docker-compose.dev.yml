@@ -52,11 +52,19 @@ services:
       # DEK. Keep env-derived so operators can rotate without a rebuild.
       ORKESTRA_KMS_MASTER_KEY: ${ORKESTRA_KMS_MASTER_KEY}
 
+      # LLM module (ADR-0022) — dedicated key for provider API keys and
+      # linked-account tokens; 64 hex chars = 32 bytes.
+      LLM_SECRET_ENCRYPTION_KEY: ${LLM_SECRET_ENCRYPTION_KEY}
+
       # Cookie Configuration
       COOKIE_SECRET: ${COOKIE_SECRET}
-      # Refresh-cookie name — the only cookie set in the browser (the access
-      # token lives in SPA memory, so there is no access-token cookie).
-      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
+      # Cookie names. Two stacks on one host share cookies by name, whatever
+      # their ports, so each sets its own COOKIE_NAME_PREFIX (default
+      # orkestra_); the explicit names below override single cookies and
+      # default, empty, to the prefixed name.
+      COOKIE_NAME_PREFIX: ${COOKIE_NAME_PREFIX:-}
+      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-}
+      DEVICE_COOKIE_NAME: ${DEVICE_COOKIE_NAME:-}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Default EMPTY
       # in dev so the cookie is host-only (no Domain attribute), scoped to
       # whatever host minted it — which round-trips on localhost, *.localhost,
@@ -118,6 +126,8 @@ services:
       CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-client.localhost:3000}
       CLIENT_API_URL: ${CLIENT_API_URL:-http://client.localhost:3000}
+      # Sign in with ChatGPT loopback mode needs exactly http://127.0.0.1:<port>.
+      OPERATOR_API_URL: ${OPERATOR_API_URL:-http://127.0.0.1:${BACKEND_PORT:-3000}}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       # Default CLIENT_CORS_ORIGINS allows the new Tier-2 demo SPA at
       # http://client.localhost:8081 (served by client-frontend).
@@ -200,6 +210,17 @@ services:
       PDF_RENDERER_USER: ${PDF_RENDERER_USER:-orkestra}
       PDF_RENDERER_PASSWORD: ${PDF_RENDERER_PASSWORD:-}
 
+      # Retrieval (ADR-0023). Empty values leave retrieval "not configured"
+      # (search answers retrieval.not_configured). docker-compose.retrieval.yml
+      # overrides QDRANT_URL, QDRANT_API_KEY, RETRIEVAL_INFERENCE_ENDPOINTS and
+      # RETRIEVAL_INFERENCE_API_KEY with the self-hosted Qdrant + TEI stack; set
+      # them in .env instead to point at an external service.
+      QDRANT_URL: ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION_PREFIX: ${QDRANT_COLLECTION_PREFIX:-}
+      RETRIEVAL_INFERENCE_ENDPOINTS: ${RETRIEVAL_INFERENCE_ENDPOINTS:-}
+      RETRIEVAL_INFERENCE_API_KEY: ${RETRIEVAL_INFERENCE_API_KEY:-}
+
       # Hot reload
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server
       AIR_BIN: ./tmp/main
@@ -260,14 +281,21 @@ services:
       APP_NAME: ${APP_NAME:-orkestra}
       ORKESTRA_CLONE_VERSION: ${ORKESTRA_CLONE_VERSION:-dev}
       ORKESTRA_BUILD_COMMIT: ${ORKESTRA_BUILD_COMMIT:-}
+      # The console's cookies follow the backend's prefix.
+      ORKESTRA_COOKIE_PREFIX: ${COOKIE_NAME_PREFIX:-}
       NODE_OPTIONS: "--max-old-space-size=4096"
       # npm's cache defaults to ~/.npm in the image FS, which is unwritable
       # under a userns-remap daemon + userns_mode:host (image layers are
       # owned by the remapped range, not the real host UID 1000). Relocate
       # it onto the writable /app bind mount. Mirrors docker-compose.staging.yml.
       npm_config_cache: /app/.npm-cache
+    # Dependencies: see the frontend-deps.sh header. orkestra.sh creates the
+    # .docker/node_modules source and the node_modules mount point first, or
+    # Docker would create them as root.
     volumes:
       - ../frontend-admin:/app
+      - ../frontend-admin/.docker/node_modules:/app/node_modules
+      - ./frontend-deps.sh:/opt/orkestra/frontend-deps.sh:ro
       - ../frontend-admin/.vite-cache:/app/.vite
       - ../frontend-admin/.npm-cache:/app/.npm-cache
     # Regenerate public/config.js from the VITE_* env vars BEFORE
@@ -292,10 +320,11 @@ services:
           appName: "$${APP_NAME}",
           cloneVersion: "$${ORKESTRA_CLONE_VERSION}",
           buildCommit: "$${ORKESTRA_BUILD_COMMIT}",
-          startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')"
+          startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')",
+          cookiePrefix: "$${ORKESTRA_COOKIE_PREFIX}"
         };
         EOF
-        npm install && npm run dev -- --host 0.0.0.0
+        sh /opt/orkestra/frontend-deps.sh && npm run dev -- --host 0.0.0.0
 
   # Tier-2 (external client) demo SPA — consumes the ADR-0003 client API
   # surface (client.localhost:3000, JWT aud=client). Sibling app to the
@@ -338,8 +367,13 @@ services:
       # owned by the remapped range, not the real host UID 1000). Relocate
       # it onto the writable /app bind mount. Mirrors docker-compose.staging.yml.
       npm_config_cache: /app/.npm-cache
+    # Dependencies: see the frontend-deps.sh header. orkestra.sh creates the
+    # .docker/node_modules source and the node_modules mount point first, or
+    # Docker would create them as root.
     volumes:
       - ../frontend-client:/app
+      - ../frontend-client/.docker/node_modules:/app/node_modules
+      - ./frontend-deps.sh:/opt/orkestra/frontend-deps.sh:ro
       - ../frontend-client/.vite-cache:/app/.vite
       - ../frontend-client/.npm-cache:/app/.npm-cache
     # Regenerate public/config.js from VITE_API_BASE BEFORE `npm run dev`.
@@ -359,7 +393,7 @@ services:
           stripePublishableKey: "$${VITE_STRIPE_PUBLISHABLE_KEY}"
         };
         EOF
-        npm install && npm run dev -- --host 0.0.0.0
+        sh /opt/orkestra/frontend-deps.sh && npm run dev -- --host 0.0.0.0
     # Probes the in-process /health endpoint registered by the Vite
     # plugin in frontend-client/vite.config.ts. Must use 127.0.0.1, NOT
     # localhost: /etc/hosts maps localhost to ::1 as well, busybox wget

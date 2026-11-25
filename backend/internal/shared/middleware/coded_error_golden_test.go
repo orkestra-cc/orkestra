@@ -203,6 +203,16 @@ func TestCodedErrorEnvelopes_Golden(t *testing.T) {
 			wantBody: `{"code":"mfa_enrollment_required","detail":"your role requires a second factor; enroll one before performing this action","errors":[{"location":"require_step_up","message":"mfa enrollment required","value":"MFA_ENROLLMENT_REQUIRED"}],"status":403,"title":"mfa enrollment required","type":"about:blank"}` + "\n",
 		},
 		{
+			name:       "sendNoPasswordEnrollmentRequired",
+			emit:       func(w http.ResponseWriter) { m.sendNoPasswordEnrollmentRequired(w) },
+			wantStatus: http.StatusForbidden,
+			wantHeaders: map[string]string{
+				"Content-Type":     ctJSON,
+				"Www-Authenticate": `Bearer error="mfa_enrollment_required"`,
+			},
+			wantBody: `{"code":"mfa_enrollment_required","detail":"this account has no password to reconfirm; enroll a second factor before performing this action","errors":[{"location":"require_step_up","message":"mfa enrollment required","value":"MFA_ENROLLMENT_REQUIRED"}],"status":403,"title":"mfa enrollment required","type":"about:blank"}` + "\n",
+		},
+		{
 			name:       "sendMFARequired",
 			emit:       func(w http.ResponseWriter) { m.sendMFARequired(w, r) },
 			wantStatus: http.StatusUnauthorized,

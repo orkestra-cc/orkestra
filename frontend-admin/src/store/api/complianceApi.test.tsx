@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
@@ -79,6 +79,153 @@ describe('complianceApi', () => {
       '/v1/admin/compliance/erasure-requests/req-1/execute'
     );
     expect(captured!.body).toEqual({ mode: 'hard_delete' });
+  });
+
+  it('listErasureRequests sends status/userUuid/limit/after, omitting the default open status', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get(url('/v1/admin/compliance/erasure-requests'), ({ request }) => {
+        seen.push(new URL(request.url).search);
+        return HttpResponse.json({ items: [] });
+      })
+    );
+    const { store } = renderWithProviders(<></>);
+    const ep = complianceApi.endpoints.listErasureRequests;
+    await store.dispatch(ep.initiate()).unwrap();
+    await store
+      .dispatch(
+        ep.initiate({
+          status: 'completed',
+          userUuid: 'u-1',
+          limit: 20,
+          after: 'cur'
+        })
+      )
+      .unwrap();
+    expect(seen[0]).toBe('');
+    const sp = new URLSearchParams(seen[1]);
+    expect(Object.fromEntries(sp)).toEqual({
+      status: 'completed',
+      userUuid: 'u-1',
+      limit: '20',
+      after: 'cur'
+    });
+  });
+
+  it('openErasureRequest and approveErasureRequest POST their bodies', async () => {
+    const got: { path: string; body: unknown }[] = [];
+    server.use(
+      http.post(
+        url('/v1/admin/compliance/erasure-requests'),
+        async ({ request }) => {
+          got.push({
+            path: new URL(request.url).pathname,
+            body: await request.json()
+          });
+          return HttpResponse.json({ uuid: 'er-9' }, { status: 201 });
+        }
+      ),
+      http.post(
+        url('/v1/admin/compliance/erasure-requests/:id/approve'),
+        async ({ request }) => {
+          got.push({
+            path: new URL(request.url).pathname,
+            body: await request.json()
+          });
+          return HttpResponse.json({ uuid: 'er-9' });
+        }
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    await store
+      .dispatch(
+        complianceApi.endpoints.openErasureRequest.initiate({
+          userUuid: 'u-1',
+          reason: 'why',
+          mode: 'anonymize'
+        })
+      )
+      .unwrap();
+    await store
+      .dispatch(
+        complianceApi.endpoints.approveErasureRequest.initiate({
+          id: 'er-9',
+          mode: 'anonymize',
+          note: 'ok'
+        })
+      )
+      .unwrap();
+    expect(got).toEqual([
+      {
+        path: '/v1/admin/compliance/erasure-requests',
+        body: { userUuid: 'u-1', reason: 'why', mode: 'anonymize' }
+      },
+      {
+        path: '/v1/admin/compliance/erasure-requests/er-9/approve',
+        body: { mode: 'anonymize', note: 'ok' }
+      }
+    ]);
+  });
+
+  it('a successful execute refetches the stored exports of the subject', async () => {
+    let lists = 0;
+    server.use(
+      http.get(url('/v1/admin/compliance/dsr/exports'), () => {
+        lists++;
+        return HttpResponse.json({ items: [] });
+      }),
+      http.post(url('/v1/admin/compliance/erasure-requests/er-1/execute'), () =>
+        HttpResponse.json({ status: 'completed', purged: {}, progress: [] })
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    const sub = store.dispatch(
+      complianceApi.endpoints.listDsrExports.initiate('u-1')
+    );
+    await sub.unwrap();
+    expect(lists).toBe(1);
+    await store
+      .dispatch(
+        complianceApi.endpoints.executeErasureRequest.initiate({ id: 'er-1' })
+      )
+      .unwrap();
+    await vi.waitFor(() => expect(lists).toBe(2));
+    sub.unsubscribe();
+  });
+
+  it('executeErasureRequest omits the mode when none is given', async () => {
+    let body: unknown;
+    server.use(
+      http.post(
+        url('/v1/admin/compliance/erasure-requests/:id/execute'),
+        async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json({ status: 'completed' });
+        }
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    await store
+      .dispatch(
+        complianceApi.endpoints.executeErasureRequest.initiate({ id: 'r' })
+      )
+      .unwrap();
+    expect(body).toEqual({});
+  });
+
+  it('getErasureReceipt GETs the receipt path', async () => {
+    server.use(
+      http.get(
+        url('/v1/admin/compliance/erasure-requests/:id/receipt'),
+        ({ params }) =>
+          HttpResponse.json({ requestUuid: params.id, status: 'completed' })
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    const r = await store
+      .dispatch(complianceApi.endpoints.getErasureReceipt.initiate('er-1'))
+      .unwrap();
+    expect(r.requestUuid).toBe('er-1');
   });
 
   it('releaseLegalHold DELETEs the per-id path with the release reason', async () => {

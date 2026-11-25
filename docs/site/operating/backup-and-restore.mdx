@@ -20,8 +20,12 @@ Orkestra's stateful surfaces are:
 | **Object blobs** (avatars today, attachments tomorrow) | RustFS / S3 | ✅ yes if you have user uploads in flight |
 | **Object content** (PDF outputs, marketing imports) | filesystem (`MARKETING_IMPORT_SPOOL_DIR`) | ✅ yes if you need it long-term |
 | **JWT keys** (`docker/keys/`) | filesystem | ✅ yes — losing invalidates every issued token |
+| **Retrieval index** (`<project>_qdrant-data`, see [Retrieval overlay](/operating/retrieval-overlay#backing-up-the-index)) | Qdrant volume | ⚠️ yes if search matters — derived from MongoDB, but this release cannot rebuild it (after a loss only items that change again are re-indexed). `backup.sh` does not cover it: copy it after `./orkestra.sh retrieval down`, at the same moment as the MongoDB dump, and restore both together |
+| **Model weights** (`<project>_tei-weights`) | TEI volume | ❌ no — `./orkestra.sh retrieval up` downloads them again (~4.6 GB); offline hosts keep an [export](/operating/retrieval-overlay#offline-hosts-pre-seeding-the-weights) |
 
 **Bottom line:** back up MongoDB nightly and the contents of `docker/.env` + `docker/keys/` once. Skip Redis. Decide on the spool directory based on how much your importers matter.
+
+With the retrieval overlay, also copy `qdrant-data` together with the MongoDB dump until rebuilds arrive (delivery step 2).
 
 Orkestra ships two paths for this:
 

@@ -1,0 +1,141 @@
+package providers
+
+import (
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
+)
+
+func respWith(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"X-Request-Id": {"req_1"}}}
+}
+
+func TestReadErrorInfo_ExtractsOnlyAllowlistedFields(t *testing.T) {
+	info := ReadErrorInfo(respWith(429, `{"error":{"type":"insufficient_quota","code":"insufficient_quota","param":null,"message":"You exceeded your current quota, see sk-live-SECRET"}}`))
+	if info.Status != 429 || info.Type != "insufficient_quota" || info.Code != "insufficient_quota" || info.RequestID != "req_1" {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+func TestReadErrorInfo_RealProviderShapes(t *testing.T) {
+	t.Run("openai", func(t *testing.T) {
+		info := ReadErrorInfo(respWith(400, `{"error":{"message":"This model's maximum context length is 8192 tokens","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}`))
+		if info.Type != "invalid_request_error" || info.Code != "context_length_exceeded" || info.Param != "messages" {
+			t.Fatalf("info = %+v", info)
+		}
+	})
+	t.Run("anthropic", func(t *testing.T) {
+		resp := respWith(529, `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011"}`)
+		resp.Header = http.Header{"Request-Id": {"req_hdr"}}
+		info := ReadErrorInfo(resp)
+		if info.Status != 529 || info.Type != "overloaded_error" || info.Code != "" || info.RequestID != "req_hdr" {
+			t.Fatalf("info = %+v", info)
+		}
+	})
+	t.Run("gemini numeric code and status", func(t *testing.T) {
+		info := ReadErrorInfo(respWith(429, `{"error":{"code":429,"message":"Resource has been exhausted","status":"RESOURCE_EXHAUSTED"}}`))
+		if info.Status != 429 || info.Type != "RESOURCE_EXHAUSTED" || info.Code != "" {
+			t.Fatalf("info = %+v", info)
+		}
+	})
+	t.Run("gemini quota failure id", func(t *testing.T) {
+		info := ReadErrorInfo(respWith(429, `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"x","details":[
+ {"@type":"type.googleapis.com/google.rpc.Help","links":[{"url":"https://x"}]},
+ {"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[
+   {"quotaMetric":"m","quotaId":"free text with spaces"},
+   {"quotaMetric":"m","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}}`))
+		if info.QuotaID != "GenerateRequestsPerDayPerProjectPerModel-FreeTier" || info.Type != "RESOURCE_EXHAUSTED" {
+			t.Fatalf("info = %+v", info)
+		}
+		if info := ReadErrorInfo(respWith(429, `{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"@type":"x.QuotaFailure","violations":[{"quotaId":5}]}]}}`)); info.QuotaID != "" {
+			t.Fatalf("non-string id kept: %+v", info)
+		}
+	})
+	t.Run("details that is not a list of objects does not lose type and code", func(t *testing.T) {
+		for _, d := range []string{`"x"`, `{"a":1}`, `[1,"x"]`, `null`} {
+			info := ReadErrorInfo(respWith(429, `{"error":{"type":"insufficient_quota","code":"insufficient_quota","details":`+d+`}}`))
+			if info.Type != "insufficient_quota" || info.Code != "insufficient_quota" || info.QuotaID != "" {
+				t.Errorf("details %s: info = %+v", d, info)
+			}
+		}
+	})
+	t.Run("gemini array-wrapped (stream) error", func(t *testing.T) {
+		info := ReadErrorInfo(respWith(400, `[{"error":{"code":400,"message":"x","status":"INVALID_ARGUMENT"}}]`))
+		if info.Type != "INVALID_ARGUMENT" {
+			t.Fatalf("info = %+v", info)
+		}
+	})
+}
+
+func TestReadErrorInfo_DropsFieldsThatAreNotIdentifiers(t *testing.T) {
+	info := ReadErrorInfo(respWith(400, `{"error":{"type":"Bearer sk-live-SECRET with spaces","code":"`+strings.Repeat("a", 200)+`","param":"line1\nline2"}}`))
+	if info.Type != "" || info.Code != "" || info.Param != "" {
+		t.Fatalf("free-text must not survive: %+v", info)
+	}
+}
+
+func TestReadErrorInfo_IgnoresHugeOrNonJSONBodies(t *testing.T) {
+	info := ReadErrorInfo(respWith(503, strings.Repeat("x", 70<<10)))
+	if info.Status != 503 || info.Type != "" || info.Code != "" {
+		t.Fatalf("info = %+v", info)
+	}
+	info = ReadErrorInfo(respWith(401, "<html>nope</html>"))
+	if info.Status != 401 || info.Code != "" {
+		t.Fatalf("info = %+v", info)
+	}
+	// nil body must not panic
+	info = ReadErrorInfo(&http.Response{StatusCode: 500, Header: http.Header{}})
+	if info.Status != 500 {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+func TestClassify(t *testing.T) {
+	cases := []struct {
+		info ErrorInfo
+		want error
+	}{
+		{ErrorInfo{Status: 402}, iface.ErrLLMQuotaExhausted},
+		{ErrorInfo{Status: 429, Code: "insufficient_quota"}, iface.ErrLLMQuotaExhausted},
+		{ErrorInfo{Status: 429, Type: "billing_hard_limit_reached"}, iface.ErrLLMQuotaExhausted},
+		{ErrorInfo{Status: 429}, iface.ErrLLMProviderUnavailable},
+		{ErrorInfo{Status: 429, Type: "RESOURCE_EXHAUSTED"}, iface.ErrLLMProviderUnavailable}, // bare Gemini 429 is rate limiting (5.12)
+		{ErrorInfo{Status: 429, Type: "RESOURCE_EXHAUSTED", QuotaID: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}, iface.ErrLLMQuotaExhausted},
+		{ErrorInfo{Status: 429, Type: "RESOURCE_EXHAUSTED", QuotaID: "GenerateContentInputTokensPerModelPerMinute-FreeTier"}, iface.ErrLLMProviderUnavailable},
+		{ErrorInfo{Status: 408}, iface.ErrLLMProviderUnavailable}, // request timeout is provider-side
+		{ErrorInfo{Status: 500}, iface.ErrLLMProviderUnavailable},
+		{ErrorInfo{Status: 503, Type: "overloaded_error"}, iface.ErrLLMProviderUnavailable},
+		{ErrorInfo{Status: 401}, ErrUnauthorized},
+		{ErrorInfo{Status: 403}, ErrUnauthorized},
+		{ErrorInfo{Status: 401}, iface.ErrLLMProviderUnavailable}, // consumers see unavailable
+		{ErrorInfo{Status: 403}, iface.ErrLLMProviderUnavailable},
+		{ErrorInfo{Status: 400, Code: "context_length_exceeded"}, iface.ErrLLMCapabilityMismatch},
+		{ErrorInfo{Status: 400}, iface.ErrLLMInvalidRequest},
+		{ErrorInfo{Status: 404}, iface.ErrLLMCapabilityMismatch}, // unknown model id
+	}
+	for _, c := range cases {
+		if got := Classify(c.info); !errors.Is(got, c.want) {
+			t.Errorf("Classify(%+v) = %v, want %v", c.info, got, c.want)
+		}
+	}
+}
+
+func TestClassify_UnauthorizedIsNotAQuotaOrInvalidRequest(t *testing.T) {
+	got := Classify(ErrorInfo{Status: 401})
+	if errors.Is(got, iface.ErrLLMQuotaExhausted) || errors.Is(got, iface.ErrLLMInvalidRequest) {
+		t.Fatalf("401 misclassified: %v", got)
+	}
+}
+
+func TestClassify_MessageCarriesNoBodyText(t *testing.T) {
+	got := Classify(ErrorInfo{Status: 429, Code: "insufficient_quota", RequestID: "req_1"}).Error()
+	for _, want := range []string{"429", "insufficient_quota", "req_1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q missing from %q", want, got)
+		}
+	}
+}

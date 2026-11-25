@@ -184,7 +184,11 @@ const pairCode = `
 `;
 
 const sectionCardCode = `
-<SectionCard icon={faShieldHalved} title="CC6.1 · Logical Access">
+<SectionCard
+  icon={faShieldHalved}
+  title="CC6.1 · Logical Access"
+  subtitle="Who holds an administrative role, as of the last review"
+>
   <Table size="sm" className="mb-0 fs-10">
     <tbody>
       <tr>
@@ -359,8 +363,9 @@ const StatCards = () => {
           <p className="mb-0">
             <code>SectionCard</code> is the titled panel that sits beneath the
             KPI row: a tinted header (<code>bg-body-tertiary</code>) with an
-            icon + title, an optional <code>headerEnd</code> actions slot, and a
-            plain body.
+            icon + title, an optional muted <code>subtitle</code> under the
+            title, an optional <code>headerEnd</code> actions slot, and a plain
+            body.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body

@@ -17,6 +17,9 @@ import (
 var (
 	ErrUserNotFound      = errors.New("user not found")
 	ErrUserAlreadyExists = errors.New("user already exists")
+	// ErrUsernameAmbiguous aliases the SDK sentinel so a consumer outside
+	// this module can classify it with errors.Is.
+	ErrUsernameAmbiguous = iface.ErrUsernameAmbiguous
 	ErrInvalidUserID     = errors.New("invalid user ID")
 )
 
@@ -62,6 +65,16 @@ type UserRepository interface {
 	MarkEmailVerified(ctx context.Context, userUUID string) error
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	ClearFailedLogins(ctx context.Context, userUUID string) error
+
+	// PIN-auth operations (iface.PINCredentialStore). The PIN failure
+	// counter and lock are separate fields from the password ones.
+	GetForPINAuth(ctx context.Context, username string) (*iface.User, error)
+	CountByUsername(ctx context.Context, username string) (int64, error)
+	SetPINHash(ctx context.Context, userUUID, hash string) error
+	ClearPIN(ctx context.Context, userUUID, expectedHash string) error
+	RecordFailedPIN(ctx context.Context, userUUID string) (int, error)
+	LockPIN(ctx context.Context, userUUID, expectedHash string, until time.Time) error
+	ClearFailedPINs(ctx context.Context, userUUID string) error
 
 	// MFA grace-period operations — used by the auth module when a privileged
 	// user first logs in without an enrolled factor (set) or when an admin
@@ -275,9 +288,6 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *ifac
 	if input.Phone != "" {
 		update["$set"].(bson.M)["phone"] = input.Phone
 	}
-	if input.PIN != "" {
-		update["$set"].(bson.M)["pin"] = input.PIN
-	}
 	if input.Role != "" {
 		update["$set"].(bson.M)["role"] = input.Role
 	}
@@ -288,10 +298,10 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *ifac
 		update["$set"].(bson.M)["language"] = input.Language
 	}
 
-	filter := bson.M{
-		"uuid":      id,
-		"deletedAt": bson.M{"$exists": false},
-	}
+	// The live-row filter (uuid, not soft-deleted) plus the role
+	// precondition WithExpectedRole may have put on ctx; four lines, so the
+	// calls below keep their tenantscope baseline positions.
+	filter := liveFilter(ctx, id)
 
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
 	var updatedUser iface.User
@@ -299,7 +309,7 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *ifac
 	err := r.collection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&updatedUser)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, ErrUserNotFound
+			return nil, r.missOnLiveFilter(ctx, id)
 		}
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
@@ -338,7 +348,7 @@ func (r *mongoUserRepository) Delete(ctx context.Context, id string) error {
 // simply be soft-deleted. Idempotent: missing rows return ErrUserNotFound
 // so callers can tell a no-op from a hit.
 func (r *mongoUserRepository) HardDelete(ctx context.Context, id string) error {
-	result, err := r.collection.DeleteOne(ctx, bson.M{"uuid": id})
+	result, err := r.collection.DeleteOne(ctx, rowByUUIDFilter(id))
 	if err != nil {
 		return fmt.Errorf("failed to hard-delete user: %w", err)
 	}
@@ -361,19 +371,19 @@ func (r *mongoUserRepository) SoftDeleteAndAliasEmail(ctx context.Context, id st
 	var existing struct {
 		Email string `bson:"email"`
 	}
-	err := r.collection.FindOne(ctx, bson.M{
-		"uuid":      id,
-		"deletedAt": bson.M{"$exists": false},
-	}).Decode(&existing)
+	err := r.collection.FindOne(ctx,
+		// uuid + not soft-deleted, plus the WithExpectedRole precondition
+		liveFilter(ctx, id),
+	).Decode(&existing)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return ErrUserNotFound
+		return r.missOnLiveFilter(ctx, id)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to read user before soft-delete-and-alias: %w", err)
 	}
 	alias := fmt.Sprintf("%s+deleted-%d@orphan.local", existing.Email, now.UnixNano())
 	res, updateErr := r.collection.UpdateOne(ctx,
-		bson.M{"uuid": id, "deletedAt": bson.M{"$exists": false}},
+		liveFilter(ctx, id),
 		bson.M{"$set": bson.M{
 			"deletedAt":     now,
 			"updatedAt":     now,
@@ -385,9 +395,9 @@ func (r *mongoUserRepository) SoftDeleteAndAliasEmail(ctx context.Context, id st
 		return fmt.Errorf("failed to soft-delete-and-alias user: %w", updateErr)
 	}
 	if res.MatchedCount == 0 {
-		// The row was deleted between the read and the update — treat as
-		// already gone, the caller's intent is satisfied.
-		return ErrUserNotFound
+		// The row was deleted (or, under WithExpectedRole, re-roled)
+		// between the read and the update.
+		return r.missOnLiveFilter(ctx, id)
 	}
 	return nil
 }
@@ -1156,6 +1166,156 @@ func (r *mongoUserRepository) ClearFailedLogins(ctx context.Context, userUUID st
 	return nil
 }
 
+// GetForPINAuth returns the single live user whose username is exactly
+// username. Usernames carry no unique index, so two matches are reported
+// as ErrUsernameAmbiguous rather than resolved to an arbitrary one.
+func (r *mongoUserRepository) GetForPINAuth(ctx context.Context, username string) (*iface.User, error) {
+	if username == "" {
+		return nil, ErrUserNotFound
+	}
+	filter := bson.M{
+		"username":  username,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	cur, err := r.collection.Find(ctx, filter, options.Find().SetLimit(2))
+	if err != nil {
+		return nil, fmt.Errorf("find user for pin auth: %w", err)
+	}
+	var users []iface.User
+	if err := cur.All(ctx, &users); err != nil {
+		return nil, fmt.Errorf("decode user for pin auth: %w", err)
+	}
+	switch len(users) {
+	case 0:
+		return nil, ErrUserNotFound
+	case 1:
+		return &users[0], nil
+	default:
+		return nil, ErrUsernameAmbiguous
+	}
+}
+
+// CountByUsername counts live users carrying exactly this username.
+func (r *mongoUserRepository) CountByUsername(ctx context.Context, username string) (int64, error) {
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	n, err := r.collection.CountDocuments(ctx, bson.M{
+		"username":  username,
+		"deletedAt": bson.M{"$exists": false},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count users by username: %w", err)
+	}
+	return n, nil
+}
+
+// SetPINHash stores a new PIN hash and resets the PIN failure state.
+func (r *mongoUserRepository) SetPINHash(ctx context.Context, userUUID, hash string) error {
+	now := time.Now()
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	update := bson.M{
+		"$set":   bson.M{"pinHash": hash, "pinUpdatedAt": now, "updatedAt": now},
+		"$unset": bson.M{"pinFailedCount": "", "pinLockedUntil": ""},
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("set pin hash: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ClearPIN removes the PIN credential and its failure state.
+func (r *mongoUserRepository) ClearPIN(ctx context.Context, userUUID, expectedHash string) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	if expectedHash != "" {
+		filter["pinHash"] = expectedHash
+	}
+	update := bson.M{
+		"$set":   bson.M{"updatedAt": time.Now()},
+		"$unset": bson.M{"pinHash": "", "pinUpdatedAt": "", "pinFailedCount": "", "pinLockedUntil": ""},
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("clear pin: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return r.missOnPINHash(ctx, userUUID, expectedHash)
+	}
+	return nil
+}
+
+// RecordFailedPIN atomically increments the PIN failure counter and
+// returns the new value.
+func (r *mongoUserRepository) RecordFailedPIN(ctx context.Context, userUUID string) (int, error) {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	update := bson.M{
+		"$inc": bson.M{"pinFailedCount": 1},
+		"$set": bson.M{"updatedAt": time.Now()},
+	}
+	var out struct {
+		PINFailedCount int `bson:"pinFailedCount"`
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	err := r.collection.FindOneAndUpdate(ctx, filter, update,
+		options.FindOneAndUpdate().SetReturnDocument(options.After).SetProjection(bson.M{"pinFailedCount": 1})).Decode(&out)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, ErrUserNotFound
+		}
+		return 0, fmt.Errorf("record failed pin: %w", err)
+	}
+	return out.PINFailedCount, nil
+}
+
+// LockPIN locks the PIN method until the given time.
+func (r *mongoUserRepository) LockPIN(ctx context.Context, userUUID, expectedHash string, until time.Time) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+		"pinHash":   expectedHash,
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	result, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"pinLockedUntil": until, "updatedAt": time.Now()}})
+	if err != nil {
+		return fmt.Errorf("lock pin: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return r.missOnPINHash(ctx, userUUID, expectedHash)
+	}
+	return nil
+}
+
+// ClearFailedPINs resets the PIN failure counter and lock.
+func (r *mongoUserRepository) ClearFailedPINs(ctx context.Context, userUUID string) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	update := bson.M{
+		"$set":   bson.M{"updatedAt": time.Now()},
+		"$unset": bson.M{"pinFailedCount": "", "pinLockedUntil": ""},
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	if _, err := r.collection.UpdateOne(ctx, filter, update); err != nil {
+		return fmt.Errorf("clear failed pins: %w", err)
+	}
+	return nil
+}
+
 // SetMFAGraceStartedAt stamps the grace-period clock on the user document.
 // The caller is responsible for deciding whether the user is eligible —
 // this method only persists. Idempotency is a concern for the service layer
@@ -1296,4 +1456,72 @@ func (r *mongoUserRepository) BackfillDefaultLanguage(ctx context.Context, defau
 		return 0, fmt.Errorf("failed to backfill default language: %w", err)
 	}
 	return res.ModifiedCount, nil
+}
+
+// ErrRoleChanged: the row exists but no longer holds the role the caller
+// checked before writing (see WithExpectedRole).
+var ErrRoleChanged = errors.New("user role changed since it was read")
+
+type expectedRoleKey struct{}
+
+// WithExpectedRole makes the next Update or SoftDeleteAndAliasEmail on ctx
+// conditional on the row still holding role: the target-tier guard reads
+// the target's role, and a promotion landing between that read and the
+// write must not let a lower tier modify the user it now outranks. An
+// empty role sets no condition.
+func WithExpectedRole(ctx context.Context, role string) context.Context {
+	return context.WithValue(ctx, expectedRoleKey{}, role)
+}
+
+// ExpectedRole returns the role precondition WithExpectedRole put on ctx,
+// "" when there is none.
+func ExpectedRole(ctx context.Context) string {
+	role, _ := ctx.Value(expectedRoleKey{}).(string)
+	return role
+}
+
+// liveFilter is the filter of a write on a live user row, carrying the
+// role precondition WithExpectedRole put on ctx.
+func liveFilter(ctx context.Context, id string) bson.M {
+	filter := bson.M{"uuid": id, "deletedAt": bson.M{"$exists": false}}
+	if role := ExpectedRole(ctx); role != "" {
+		filter["role"] = role
+	}
+	return filter
+}
+
+// missOnLiveFilter classifies a write whose liveFilter matched nothing:
+// ErrRoleChanged when the live row is still there (so only the role
+// precondition failed), ErrUserNotFound otherwise.
+func (r *mongoUserRepository) missOnLiveFilter(ctx context.Context, id string) error {
+	if ExpectedRole(ctx) == "" {
+		return ErrUserNotFound
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	n, err := r.collection.CountDocuments(ctx, bson.M{"uuid": id, "deletedAt": bson.M{"$exists": false}})
+	if err != nil {
+		return fmt.Errorf("failed to classify a missed user write: %w", err)
+	}
+	if n > 0 {
+		return ErrRoleChanged
+	}
+	return ErrUserNotFound
+}
+
+// missOnPINHash classifies a PIN write whose filter matched nothing:
+// ErrPINChanged when it was bound to a hash and the live row is still
+// there, ErrUserNotFound otherwise.
+func (r *mongoUserRepository) missOnPINHash(ctx context.Context, userUUID, expectedHash string) error {
+	if expectedHash == "" {
+		return ErrUserNotFound
+	}
+	//tenantscope:allow user rows are global per tier, keyed on the user, never tenant-scoped
+	n, err := r.collection.CountDocuments(ctx, bson.M{"uuid": userUUID, "deletedAt": bson.M{"$exists": false}})
+	if err != nil {
+		return fmt.Errorf("classify pin write: %w", err)
+	}
+	if n > 0 {
+		return iface.ErrPINChanged
+	}
+	return ErrUserNotFound
 }
