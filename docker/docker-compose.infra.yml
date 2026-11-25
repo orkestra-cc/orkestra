@@ -222,11 +222,19 @@ services:
     # (internal). The backend IS reachable from here (shared pdf-net), so the
     # deny-list and the IP flags are required — see
     # docker/tests/gotenberg-hardening.test.sh.
-    # 8.40.0 (2026-11 security audit; was 8.37.0): 8.38.0 fixed the
-    # WebSocket allow-list bypass (GHSA-73vq-mh8c-27wg), session cookies
-    # shared across conversions and the late api-body-limit check, and the
-    # newer Chromium closes the CVEs the 8.37 image carried.
-    image: gotenberg/gotenberg:8.40.0@sha256:53073e798c8ef39ea2187e44cb67bab77894ea2509100b94c4fe3b461f7b2996
+    # 9.9.3 (was 8.40.0, the last release of the 8.x line): the advisories
+    # of 2026-11-22 that reach 8.x (DevTools endpoint readable from page
+    # content, response written to the wrong request after the hard
+    # timeout, unbounded template execution on the Markdown routes) are
+    # fixed in 9.9.1-9.9.3 only. None was reachable here (the backend calls
+    # /forms/chromium/convert/html alone, behind the flags below), but an
+    # ended line gets no further fixes. Gotenberg 9 keeps that route, its
+    # form fields and every flag below except --prometheus-disable-collect,
+    # which it removed with the Prometheus module (metrics are off unless
+    # OTEL_METRICS_EXPORTER is set); it exits on an unknown flag.
+    # downloadFrom is off through --api-disable-download-from: the
+    # --api-download-from-max-entries=0 that stood here meant "no limit".
+    image: gotenberg/gotenberg:9.9.3@sha256:9731688d1b6290e4c04d9a47dbd5fb29f92aa0076feb6592c5c777525892cd72
     container_name: ${APP_NAME}-gotenberg-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -242,10 +250,9 @@ services:
       - --chromium-deny-list=^(?!file:///tmp/).*
       - --chromium-deny-private-ips=true
       - --chromium-deny-public-ips=true
-      - --api-download-from-max-entries=0
+      - --api-disable-download-from=true
       - --libreoffice-disable-routes=true
       - --webhook-disable=true
-      - --prometheus-disable-collect=true
       - --api-timeout=30s
       - --api-enable-basic-auth=true
     environment:
