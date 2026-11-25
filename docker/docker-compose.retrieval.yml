@@ -44,7 +44,7 @@
 # and the healthchecks together.
 
 x-tei-common: &tei-common
-  image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+  image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.10.0@sha256:f0a4bb206b9d4877746b5b9f638e138fe683eeb9787c14d541a12c993b562d86
   labels:
     orkestra.stack: ${APP_NAME}-${ENV}
   security_opt:
