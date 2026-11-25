@@ -375,7 +375,7 @@ services:
   client-frontend:
     # Same minor as frontend-admin above — public image, so a different
     # variable; keep the two Node versions in step.
-    image: ${NODE_CLIENT_STAGING_IMAGE:-node:24.16-alpine}
+    image: ${NODE_CLIENT_STAGING_IMAGE:-node:26.13-alpine}
     container_name: ${APP_NAME}-client-frontend-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
