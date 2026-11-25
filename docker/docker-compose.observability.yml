@@ -151,7 +151,7 @@ services:
   # shared/production hosts, front it with tecnativa/docker-socket-proxy
   # restricted to the /containers/* read endpoints.
   alloy:
-    image: grafana/alloy:v1.21.2@sha256:89a5a320168387336b9ac3c850609c3ba7757eadd4ae5f1d819deb35e9854b18
+    image: grafana/alloy:v1.22.0@sha256:9acc2529bc1edb7f5b2bd801dd8334ebc80c158e3a9e5526ecd7c9a273d43189
     container_name: ${APP_NAME}-alloy-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
