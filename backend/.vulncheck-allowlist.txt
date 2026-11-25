@@ -15,3 +15,13 @@
 # is only an untagged pseudo-version (v0.58.1-0.20261009181718-2f1f834330b2):
 # drop this entry once x/crypto tags a release past it and go.mod moves there.
 GO-2026-5932
+
+# gorilla/websocket — weak PRNG for the client mask key (GHSA-w67g-5rqw-f597).
+# Reported at package level only: the module arrives through
+# google.golang.org/genai (its Live API client), and no symbol of the package
+# is called from our code — we never open a WebSocket through it. v1.5.3 is
+# the latest tag; the fix exists only as an untagged pseudo-version
+# (v1.5.4-0.20240701034025-d67f41855da4). Drop this entry once
+# gorilla/websocket tags a release past it and go.mod moves there, or as
+# soon as govulncheck reports a called symbol.
+GO-2026-6278
