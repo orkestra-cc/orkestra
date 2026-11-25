@@ -22,6 +22,8 @@ GO-2026-5932
 # is called from our code — we never open a WebSocket through it. v1.5.3 is
 # the latest tag; the fix exists only as an untagged pseudo-version
 # (v1.5.4-0.20240701034025-d67f41855da4). Drop this entry once
-# gorilla/websocket tags a release past it and go.mod moves there, or as
-# soon as govulncheck reports a called symbol.
+# gorilla/websocket tags a release past it and go.mod moves there. The gate
+# matches by ID at any level, so it will NOT notice if our code starts
+# calling the package: whoever wires genai's Live client must re-evaluate
+# this entry by hand.
 GO-2026-6278

@@ -170,8 +170,10 @@ services:
   rustfs:
     # Pinned off :latest (which drifted — a newer image 403s on the old
     # /minio/health/live path, marking the container unhealthy). This digest
-    # is RustFS 1.0.4 (the multi-arch index) and serves /health → 200. Bump
-    # deliberately. 1.0.4 replaces 1.0.0 (2026-11 security audit): 1.0.2
+    # is RustFS 1.0.6 (the multi-arch index) and serves /health → 200. Bump
+    # deliberately. 1.0.6 follows 1.0.4, which replaced 1.0.0 (2026-11
+    # security audit); 1.0.5 keeps service accounts derived from root inside
+    # their parent's scope and takes credentials out of the logs. 1.0.2
     # fixed the Object Lock COMPLIANCE bypass (GHSA-28w4-rp2p-636w), bucket
     # policies skipped by the WebDAV/FTP/SFTP listeners (GHSA-rhg6-jrf2-29c4)
     # and PutObject ?versionId= overwrites (GHSA-gjph-xcgw-4p7w), among others.
