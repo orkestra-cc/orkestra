@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -257,4 +258,18 @@ func registerHealthProbes(mux *chi.Mux, db *mongo.Database, redisClient *redis.C
 
 		writeJSON(w, http.StatusOK, map[string]any{"ready": ready})
 	})
+}
+
+// mountOperatorMetrics mounts the Prometheus handler on the operator mux in
+// development only. Everywhere else the operator host may be an
+// internet-facing origin and /metrics lists every route template, job and
+// auth counter: there it is served by lanOpsHandler alone, which answers
+// only a Host that is no audience host (a scrape by service name or IP). In
+// development the host mux sends every unmatched host to the operator mux
+// before the ops handler, so a local Prometheus scrape lands here.
+func mountOperatorMetrics(operatorMux *chi.Mux, metricsHandler http.Handler, cfg *config.Config) {
+	if !cfg.IsDevelopment() {
+		return
+	}
+	operatorMux.Handle("/metrics", metricsHandler)
 }

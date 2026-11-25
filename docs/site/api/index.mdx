@@ -43,7 +43,7 @@ On a running instance, the live spec is served at:
 - Operator surface: `https://<your-console-host>/openapi.json`
 - Interactive docs (Scalar UI): `https://<your-console-host>/docs`
 
-Both are served only when `API_DOCS_ENABLED` is true — the default in `development`, off in `staging` and `production`. The document is a complete route inventory and the docs page runs a third-party bundle on the API origin, so a production-like deployment that opts in should also gate the two paths at the edge (Cloudflare Access or an IP allowlist, for example).
+Both are served only when `API_DOCS_ENABLED` is true — the default in `development`, off in `staging` and `production`. The document is a complete route inventory and the docs page runs a third-party bundle on the API origin, so a production-like deployment that opts in should also gate them at the edge (Cloudflare Access or an IP allowlist, for example): `/docs`, every `/openapi*` path (the document is also served as `/openapi.yaml` and in OpenAPI 3.0 form) and `/schemas/*`. With the flag off all of these answer 404.
 
 ## Browse endpoints
 

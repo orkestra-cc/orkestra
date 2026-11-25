@@ -28,7 +28,7 @@ import (
 
 func deviceMW() *DeviceMiddleware {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	return NewDeviceMiddleware(errors.NewManager(logger, true), "")
+	return NewDeviceMiddleware(errors.NewManager(logger, true), "", false)
 }
 
 // runDevice drives the middleware and returns the extracted info plus the
@@ -165,7 +165,7 @@ func TestFingerprint_StaysAStableHeaderSignal(t *testing.T) {
 // name is configurable per environment.
 func TestDeviceCookieNameOverride(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mw := NewDeviceMiddleware(errors.NewManager(logger, true), "owt_x_did")
+	mw := NewDeviceMiddleware(errors.NewManager(logger, true), "owt_x_did", false)
 	run := func(r *http.Request) (*types.DeviceInfo, *httptest.ResponseRecorder) {
 		var captured *types.DeviceInfo
 		rec := httptest.NewRecorder()
@@ -201,5 +201,43 @@ func TestDeviceCookieNameOverride(t *testing.T) {
 	}
 	if cookieValue(rec, "owt_x_did") == "" {
 		t.Error("a fresh id must be minted under the custom name")
+	}
+}
+
+// mintedDeviceCookie returns the device cookie the middleware set on a first
+// visit, driven through a middleware built with the given Secure setting.
+func mintedDeviceCookie(t *testing.T, secure bool, r *http.Request) *http.Cookie {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	mw := NewDeviceMiddleware(errors.NewManager(logger, true), "", secure)
+	rec := httptest.NewRecorder()
+	mw.ExtractDeviceInfo(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, r)
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DeviceIDCookieName {
+			return c
+		}
+	}
+	t.Fatal("no device cookie was minted")
+	return nil
+}
+
+// A deployment terminates TLS at a proxy (a tunnel connector, a load
+// balancer), so the backend receives plain HTTP and r.TLS is nil on every
+// request. The cookie's Secure attribute therefore follows the deployment's
+// cookie setting (COOKIE_SECURE), like the session cookies: deriving it from
+// r.TLS alone left the device cookie without Secure on every HTTPS site.
+func TestDeviceCookie_SecureFollowsTheCookieSettingBehindAProxy(t *testing.T) {
+	c := mintedDeviceCookie(t, true, browserRequest())
+	if !c.Secure {
+		t.Error("with secure cookies configured, the device cookie must carry Secure on a request that reached the backend over plain HTTP")
+	}
+}
+
+// Local development runs over plain HTTP with COOKIE_SECURE=false: a Secure
+// cookie would never come back, and every request would mint a new device.
+func TestDeviceCookie_NotSecureWhenTheDeploymentServesPlainHTTP(t *testing.T) {
+	c := mintedDeviceCookie(t, false, browserRequest())
+	if c.Secure {
+		t.Error("with secure cookies off and no TLS on the request, the device cookie must not carry Secure")
 	}
 }
